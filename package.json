@@ -1,0 +1,9 @@
+{
+  "name": "pi-guardian",
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.70.2"
+  },
+  "pi": {
+    "extensions": ["./permission.ts"]
+  }
+}
