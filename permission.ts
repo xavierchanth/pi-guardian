@@ -335,6 +335,75 @@ function setMode(state: PermissionState, mode: PermissionMode, saveGlobally: boo
 }
 
 // ============================================================================
+// REVIEW CONTEXT
+// ============================================================================
+
+function extractMessageText(content: unknown): string {
+	if (typeof content === "string") {
+		return content;
+	}
+
+	if (!Array.isArray(content)) {
+		return "";
+	}
+
+	return content
+		.filter((block): block is { type?: string; text?: string } => Boolean(block) && typeof block === "object")
+		.filter((block) => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text!.trim())
+		.filter(Boolean)
+		.join("\n");
+}
+
+function singleLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+function truncateForReview(text: string, maxLength: number): string {
+	if (text.length <= maxLength) return text;
+	return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function getCurrentTaskContext(ctx: any): string {
+	const branch = ctx?.sessionManager?.getBranch?.();
+	if (!Array.isArray(branch) || branch.length === 0) {
+		return "Unavailable.";
+	}
+
+	const recentMessages: string[] = [];
+
+	for (let i = branch.length - 1; i >= 0 && recentMessages.length < 4; i--) {
+		const entry = branch[i];
+		if (!entry || entry.type !== "message") {
+			continue;
+		}
+
+		const message = entry.message;
+		if (!message || typeof message !== "object" || !("role" in message)) {
+			continue;
+		}
+
+		if (message.role !== "user" && message.role !== "assistant") {
+			continue;
+		}
+
+		const text = singleLine(extractMessageText(message.content));
+		if (!text) {
+			continue;
+		}
+
+		const label = message.role === "user" ? "User" : "Assistant";
+		recentMessages.push(`${label}: ${truncateForReview(text, 280)}`);
+	}
+
+	if (recentMessages.length === 0) {
+		return "Unavailable.";
+	}
+
+	return truncateForReview(recentMessages.reverse().join("\n"), 1200);
+}
+
+// ============================================================================
 // AUTO-REVIEW
 // ============================================================================
 
@@ -400,16 +469,44 @@ interface AutoReviewResult {
 
 async function runAutoReview(
 	userPrompt: string,
+	taskContext: string,
 	modelRegistry: ModelRegistryLike,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
 	const modelIds = loadAutoReviewModels();
 	if (modelIds.length === 0) return undefined;
 
-	const systemPrompt = `You are a security reviewer for an AI coding assistant. Your job is to review requests and decide whether they should be allowed.
+	const systemPrompt = `You are the auto-review gate for Pi, a coding agent. Review exactly one requested operation and decide whether it should be auto-approved.
+
+Base the decision on two questions:
+1. How dangerous is this action if executed exactly as written?
+2. Does this action clearly help the agent reach its current goal?
+
+Approve only when BOTH are true:
+- the action is low enough risk for automatic approval, and
+- the action is clearly relevant, necessary, and proportional to the stated task.
+
+Deny if any of these apply:
+- the action is dangerous, destructive, privileged, irreversible, persistent, deploy-like, or exfiltration-like,
+- the action touches secrets, credentials, tokens, auth material, private keys, sensitive dotfiles, or sensitive system/user state,
+- the action targets files or directories outside the project scope without a strong task-related reason,
+- the action is ambiguous, overly broad, speculative, or not clearly connected to the goal,
+- a safer or narrower action would obviously achieve the same goal.
+
+Important:
+- Judge the exact request as written. Do not assume missing safeguards or unstated intent.
+- If goal relevance is weak or unclear, deny.
+- If danger is non-trivial and task value is weak, deny.
+- Prefer false negatives over false positives.
+- Return only the decision, not advice.
 
 Respond with ONLY a JSON object in this exact format:
-{"decision": "approve" | "deny", "rationale": "brief explanation"}`;
+{"decision":"approve"|"deny","rationale":"short concrete reason"}`;
+
+	const fullPrompt = `Current task context:
+${taskContext}
+
+${userPrompt}`;
 
 	for (const modelId of modelIds) {
 		const parts = modelId.split("/");
@@ -424,7 +521,7 @@ Respond with ONLY a JSON object in this exact format:
 		if (!auth.apiKey) continue;
 
 		try {
-			const responseText = await callAutoReviewModel(model, auth.apiKey, auth.headers, systemPrompt, userPrompt, signal);
+			const responseText = await callAutoReviewModel(model, auth.apiKey, auth.headers, systemPrompt, fullPrompt, signal);
 
 			const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 			if (!jsonMatch) continue;
@@ -449,20 +546,29 @@ async function tryAutoReview(
 	command: string,
 	cwd: string,
 	classification: Classification,
+	taskContext: string,
 	modelRegistry: ModelRegistryLike,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
-	const userPrompt = `Review this shell command:
+	const userPrompt = `Review this shell command for auto-approval.
 
-Current directory: ${cwd}
-Permission level: auto (routine dev ops are auto-approved; high-risk operations require review)
-Command required level: ${classification.level}
-Dangerous: ${classification.dangerous ? "yes" : "no"}
-Needs review: ${classification.needsReview ? "yes" : "no"}
+Context:
+- current_directory: ${cwd}
+- permission_level: auto
+- command_required_level: ${classification.level}
+- classifier_marked_dangerous: ${classification.dangerous ? "yes" : "no"}
+- classifier_marked_needs_review: ${classification.needsReview ? "yes" : "no"}
 
-Command: ${command}`;
+Policy notes:
+- Approve only if the command is both low enough risk and clearly useful for the agent's goal.
+- Deny commands involving destructive deletion, privilege escalation, secret access, risky permission changes, external side effects, or unclear scope.
+- Deny commands that are not clearly helpful, are only loosely related, or look exploratory beyond what the task needs.
+- Treat commands that operate outside the project or affect user/system state as high risk unless the need is explicit and tightly scoped.
 
-	return runAutoReview(userPrompt, modelRegistry, signal);
+Decide whether this exact command should be auto-approved as written:
+${command}`;
+
+	return runAutoReview(userPrompt, taskContext, modelRegistry, signal);
 }
 
 async function tryAutoReviewFileAccess(
@@ -470,23 +576,29 @@ async function tryAutoReviewFileAccess(
 	cwd: string,
 	targetPath: string,
 	reviewReason: string,
+	taskContext: string,
 	modelRegistry: ModelRegistryLike,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
-	const userPrompt = `Review this file access request:
+	const userPrompt = `Review this file access request for auto-approval.
 
-Current directory: ${cwd}
-Operation: ${action}
-Target file: ${targetPath}
-Reason review is required: ${reviewReason}
+Context:
+- current_directory: ${cwd}
+- operation: ${action}
+- target_path: ${targetPath}
+- review_reason: ${reviewReason}
 
-Policy:
-- Routine file edits inside the current working directory are allowed.
-- Sensitive files and files outside the current working directory require review.
+Policy notes:
+- Approve only if this exact access is both low enough risk and clearly useful for the agent's goal.
+- Ordinary project files inside the current working directory are usually safe when they directly support the task.
+- Sensitive files, auth material, secrets, private keys, environment files, and VCS internals are high risk.
+- Access outside the current working directory should usually be denied unless there is a clear, specific, task-related, low-risk justification.
+- If the task relevance is weak, speculative, or unclear, deny.
+- Judge this exact path and operation, not a hypothetical safer version.
 
-Respond based on whether this specific edit target should be allowed.`;
+Decide whether this specific file access should be auto-approved.`;
 
-	return runAutoReview(userPrompt, modelRegistry, signal);
+	return runAutoReview(userPrompt, taskContext, modelRegistry, signal);
 }
 
 // ============================================================================
@@ -731,7 +843,14 @@ export async function handleBashToolCall(
 
 		// In auto mode, try auto-review first
 		if (state.currentLevel === "auto" && ctx.modelRegistry) {
-			const review = await tryAutoReview(command, ctx.cwd, classification, ctx.modelRegistry, ctx.signal);
+			const review = await tryAutoReview(
+				command,
+				ctx.cwd,
+				classification,
+				getCurrentTaskContext(ctx),
+				ctx.modelRegistry,
+				ctx.signal,
+			);
 			if (review) {
 				if (review.approved) {
 					ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
@@ -807,7 +926,14 @@ export async function handleBashToolCall(
 
 		// Try auto-review
 		if (ctx.modelRegistry) {
-			const review = await tryAutoReview(command, ctx.cwd, classification, ctx.modelRegistry, ctx.signal);
+			const review = await tryAutoReview(
+				command,
+				ctx.cwd,
+				classification,
+				getCurrentTaskContext(ctx),
+				ctx.modelRegistry,
+				ctx.signal,
+			);
 			if (review) {
 				if (review.approved) {
 					ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
@@ -911,7 +1037,15 @@ export async function handleReadToolCall(
 	}
 
 	if (ctx.modelRegistry) {
-		const review = await tryAutoReviewFileAccess(action, target.cwd, target.resolvedPath, target.reviewReason, ctx.modelRegistry, ctx.signal);
+		const review = await tryAutoReviewFileAccess(
+			action,
+			target.cwd,
+			target.resolvedPath,
+			target.reviewReason,
+			getCurrentTaskContext(ctx),
+			ctx.modelRegistry,
+			ctx.signal,
+		);
 		if (review) {
 			if (review.approved) {
 				ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
@@ -1034,7 +1168,15 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 	}
 
 	if (ctx.modelRegistry) {
-		const review = await tryAutoReviewFileAccess(action, target.cwd, target.resolvedPath, target.reviewReason!, ctx.modelRegistry, ctx.signal);
+		const review = await tryAutoReviewFileAccess(
+			action,
+			target.cwd,
+			target.resolvedPath,
+			target.reviewReason!,
+			getCurrentTaskContext(ctx),
+			ctx.modelRegistry,
+			ctx.signal,
+		);
 		if (review) {
 			if (review.approved) {
 				ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
