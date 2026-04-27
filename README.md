@@ -21,6 +21,15 @@ This is absolutely my favorite feature in Codex and I have a really cool story t
 - Do I think this is as good as it could be? no.
 - Do I think it is likely to increase safety over having nothing? yes.
 
+## Installation
+
+```sh
+pi install https://github.com/xavierchanth/pi-guardian
+```
+
+Please open an issue if you'd like me to publish to npm.
+If there are enough upvotes I will do it.
+
 ## Usage
 
 There are two commands:
