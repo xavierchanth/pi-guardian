@@ -46,6 +46,7 @@ import { exec } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { complete, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	type PermissionLevel,
@@ -338,79 +339,57 @@ function setMode(state: PermissionState, mode: PermissionMode, saveGlobally: boo
 // ============================================================================
 
 interface ModelRegistryLike {
-	find(provider: string, modelId: string): { id: string; api: string; provider: string; baseUrl: string; headers?: Record<string, string> } | undefined;
-	getApiKeyAndHeaders(model: any): Promise<{ ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string }>;
+	find(provider: string, modelId: string): Model<Api> | undefined;
+	getApiKeyAndHeaders(
+		model: Model<Api>,
+	): Promise<{ ok: true; apiKey?: string; headers?: Record<string, string> } | { ok: false; error: string }>;
 }
 
-async function callOpenAIChat(
-	model: any,
+function getAssistantText(content: Array<{ type: string; text?: string }>): string {
+	return content
+		.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("\n");
+}
+
+async function callAutoReviewModel(
+	model: Model<Api>,
 	apiKey: string,
 	headers: Record<string, string> | undefined,
 	systemPrompt: string,
 	userPrompt: string,
 	signal?: AbortSignal,
 ): Promise<string> {
-	const response = await fetch(`${model.baseUrl}/chat/completions`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${apiKey}`,
-			...headers,
-		},
-		body: JSON.stringify({
-			model: model.id,
-			messages: [
-				{ role: "system", content: systemPrompt },
-				{ role: "user", content: userPrompt },
-			],
-			max_tokens: 256,
-			temperature: 0,
-		}),
-		signal,
-	});
+	const userMessage: UserMessage = {
+		role: "user",
+		content: [{ type: "text", text: userPrompt }],
+		timestamp: Date.now(),
+	};
 
-	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(`OpenAI API error ${response.status}: ${text}`);
+	const response = await complete(
+		model,
+		{
+			systemPrompt,
+			messages: [userMessage],
+		},
+		{
+			apiKey,
+			headers,
+			maxTokens: 256,
+			temperature: 0,
+			signal,
+		},
+	);
+
+	if (response.stopReason === "error") {
+		throw new Error(response.errorMessage || `Auto-review failed for ${model.provider}/${model.id}`);
 	}
 
-	const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-	return data.choices?.[0]?.message?.content ?? "";
-}
-
-async function callAnthropicMessages(
-	model: any,
-	apiKey: string,
-	headers: Record<string, string> | undefined,
-	systemPrompt: string,
-	userPrompt: string,
-	signal?: AbortSignal,
-): Promise<string> {
-	const response = await fetch(`${model.baseUrl}/messages`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			"x-api-key": apiKey,
-			"anthropic-version": "2023-06-01",
-			...headers,
-		},
-		body: JSON.stringify({
-			model: model.id,
-			max_tokens: 256,
-			temperature: 0,
-			system: systemPrompt,
-			messages: [{ role: "user", content: userPrompt }],
-		}),
-		signal,
-	});
-
-	if (!response.ok) {
-		const text = await response.text();
-		throw new Error(`Anthropic API error ${response.status}: ${text}`);
+	if (response.stopReason === "aborted") {
+		throw new Error("Auto-review aborted");
 	}
 
-	const data = (await response.json()) as { content?: Array<{ text?: string }> };
-	return data.content?.[0]?.text ?? "";
+	return getAssistantText(response.content);
 }
 
 interface AutoReviewResult {
@@ -445,13 +424,7 @@ Respond with ONLY a JSON object in this exact format:
 		if (!auth.apiKey) continue;
 
 		try {
-			let responseText: string;
-
-			if (model.api === "anthropic-messages") {
-				responseText = await callAnthropicMessages(model, auth.apiKey, auth.headers, systemPrompt, userPrompt, signal);
-			} else {
-				responseText = await callOpenAIChat(model, auth.apiKey, auth.headers, systemPrompt, userPrompt, signal);
-			}
+			const responseText = await callAutoReviewModel(model, auth.apiKey, auth.headers, systemPrompt, userPrompt, signal);
 
 			const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 			if (!jsonMatch) continue;
