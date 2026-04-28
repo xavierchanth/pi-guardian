@@ -108,6 +108,7 @@ const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
+const WHITE = "\x1b[37m";
 const DIM = "\x1b[2m";
 
 const LEVEL_COLORS: Record<PermissionLevel, string> = {
@@ -119,7 +120,7 @@ const LEVEL_COLORS: Record<PermissionLevel, string> = {
 function getStatusText(level: PermissionLevel): string {
 	const info = LEVEL_INFO[level];
 	const color = LEVEL_COLORS[level];
-	return `${BOLD}${color}${info.label}${RESET} ${DIM}- ${info.desc}${RESET}`;
+	return `${BOLD}${color}${info.label}${RESET} ${WHITE}|${RESET}`;
 }
 
 // ============================================================================

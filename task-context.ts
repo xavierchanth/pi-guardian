@@ -1,5 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+const RESET = "\x1b[0m";
+const DIM = "\x1b[2m";
+
 type TaskItem = {
 	title: string;
 	completed: boolean;
@@ -85,8 +88,8 @@ function persistState(state: TaskContextState, pi: ExtensionAPI): void {
 	});
 }
 
-function summarizeTask(task: TaskItem, index: number): string {
-	return `${index + 1}.${task.completed ? "x" : " "} ${task.title}`;
+function summarizeTask(task: TaskItem): string {
+	return `- [${task.completed ? "x" : " "}] ${task.title}`;
 }
 
 function truncate(text: string, max = 120): string {
@@ -99,41 +102,46 @@ function buildStatusText(state: TaskContextState): string | undefined {
 
 	const total = state.tasks.length;
 	const completed = state.tasks.filter((task) => task.completed).length;
-	const nextOpen = state.tasks.find((task) => !task.completed);
-	const parts: string[] = [];
-
-	if (state.goal) {
-		parts.push(`Goal: ${truncate(state.goal, 48)}`);
-	}
-
-	parts.push(`Tasks ${completed}/${total}`);
-
-	if (nextOpen) {
-		parts.push(`Next: ${truncate(nextOpen.title, 36)}`);
-	}
-
-	return parts.join(" | ");
+	const goal = state.goal ? truncate(state.goal, 64) : "None";
+	return `Goal: ${DIM}${goal}${RESET} | Tasks: ${DIM}${completed}/${total}${RESET}`;
 }
 
 function refreshStatus(state: TaskContextState, ctx: any): void {
 	ctx.ui?.setStatus?.("tasks", buildStatusText(state));
 }
 
+function triggerImmediateWork(pi: ExtensionAPI, state: TaskContextState, reason: string): void {
+	if (!state.goal && state.tasks.length === 0) return;
+
+	const firstOpenTask = state.tasks.find((task) => !task.completed);
+	const prompt = [
+		`Start working on the current tracker immediately (${reason}).`,
+		`Goal: ${state.goal ?? "None"}`,
+		firstOpenTask ? `Start with: ${firstOpenTask.title}` : "If all tasks are complete, verify completion and report next steps.",
+	].join("\n");
+
+	(pi as any).sendMessage?.(
+		{
+			customType: "task-context",
+			content: prompt,
+			display: false,
+		},
+		{ triggerTurn: true },
+	);
+}
+
 function formatTaskList(state: TaskContextState): string {
 	const lines: string[] = [];
 
 	lines.push(`Goal: ${state.goal ?? "None"}`);
-	lines.push(`UI: ${state.uiVisible ? "shown" : "hidden"}`);
 
 	if (state.tasks.length === 0) {
-		lines.push("Tasks: none");
+		lines.push("- [ ] (no tasks)");
 		return lines.join("\n");
 	}
 
-	lines.push("Tasks:");
-	for (let i = 0; i < state.tasks.length; i++) {
-		const task = state.tasks[i];
-		lines.push(`  ${summarizeTask(task, i)}`);
+	for (const task of state.tasks) {
+		lines.push(summarizeTask(task));
 	}
 
 	return lines.join("\n");
@@ -164,48 +172,82 @@ function extractAssistantText(content: unknown): string {
 
 function parseTaskContextBlock(text: string): TaskContextState | undefined {
 	let match: RegExpExecArray | null = null;
-	let lastJson = "";
+	let lastBlock = "";
 
 	TASK_CONTEXT_BLOCK_RE.lastIndex = 0;
 	while (true) {
 		match = TASK_CONTEXT_BLOCK_RE.exec(text);
 		if (!match) break;
-		lastJson = match[1]?.trim() ?? "";
+		lastBlock = match[1]?.trim() ?? "";
 	}
 
-	if (!lastJson) {
+	if (!lastBlock) {
 		return undefined;
 	}
 
 	try {
-		const parsed = JSON.parse(lastJson) as {
+		const parsed = JSON.parse(lastBlock) as {
 			goal?: unknown;
 			tasks?: unknown;
 			uiVisible?: unknown;
 		};
 		return normalizeState(parsed);
 	} catch {
-		return undefined;
+		// Fallback to multiline format:
+		// Goal: <goal>
+		// - [ ] Task one
+		// - [x] Task two
+		const lines = lastBlock
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
+
+		const goalLine = lines.find((line) => line.toLowerCase().startsWith("goal:"));
+		const goal = goalLine ? goalLine.slice(goalLine.indexOf(":") + 1).trim() : undefined;
+
+		const tasks: TaskItem[] = [];
+		for (const line of lines) {
+			const taskMatch = /^-\s*\[([ xX])]\s*(.+)$/.exec(line);
+			if (!taskMatch) continue;
+			tasks.push({
+				title: taskMatch[2].trim(),
+				completed: taskMatch[1].toLowerCase() === "x",
+			});
+		}
+
+		if (!goal && tasks.length === 0) {
+			return undefined;
+		}
+
+		return normalizeState({
+			goal,
+			tasks,
+			uiVisible: true,
+		});
 	}
 }
 
 function getTaskContextInstructions(state: TaskContextState): string {
-	const snapshot = JSON.stringify(
-		{
-			goal: state.goal,
-			tasks: state.tasks,
-			uiVisible: state.uiVisible,
-		},
-		null,
-		2,
-	);
+	const lines = [`Goal: ${state.goal ?? "None"}`];
+	if (state.tasks.length === 0) {
+		lines.push("- [ ] (no tasks)");
+	} else {
+		for (const task of state.tasks) {
+			lines.push(summarizeTask(task));
+		}
+	}
+	const snapshot = lines.join("\n");
 
 	return `
 Task tracker:
 - Keep one north-star goal and a concise task list for the current work.
-- When the plan changes materially, or when you complete/add/rewrite tasks, append a fenced \`task-context\` JSON block to your assistant message.
+- When the plan changes materially, or when you complete/add/rewrite tasks, append a fenced \`task-context\` block to your assistant message.
 - Emit the block only when you want to update tracker state.
-- The JSON block replaces the full tracker state, so include the full current goal and all tasks.
+- Format the block exactly like:
+  Goal: [GOAL HERE]
+  - [ ] Task one
+  - [x] Task two
+- The block replaces the full tracker state, so include the full current goal and all tasks.
 
 Current tracker state:
 \`\`\`task-context
@@ -234,6 +276,7 @@ async function handleGoalCommand(state: TaskContextState, args: string, ctx: any
 	persistState(state, pi);
 	refreshStatus(state, ctx);
 	ctx.ui.notify(`Goal set: ${value}`, "info");
+	triggerImmediateWork(pi, state, "goal was set");
 }
 
 async function handleTasksCommand(state: TaskContextState, args: string, ctx: any, pi: ExtensionAPI): Promise<void> {
@@ -256,6 +299,7 @@ async function handleTasksCommand(state: TaskContextState, args: string, ctx: an
 		persistState(state, pi);
 		refreshStatus(state, ctx);
 		ctx.ui.notify(`Task added: ${rest}`, "info");
+		triggerImmediateWork(pi, state, "task was added");
 		return;
 	}
 
@@ -358,13 +402,6 @@ async function handleTasksCommand(state: TaskContextState, args: string, ctx: an
 	);
 }
 
-async function handleTasksToggleCommand(state: TaskContextState, ctx: any, pi: ExtensionAPI): Promise<void> {
-	state.uiVisible = !state.uiVisible;
-	persistState(state, pi);
-	refreshStatus(state, ctx);
-	ctx.ui.notify(state.uiVisible ? "Task UI shown" : "Task UI hidden", "info");
-}
-
 export default function (pi: ExtensionAPI) {
 	const state = createInitialState();
 
@@ -376,11 +413,6 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("tasks", {
 		description: "Manage the current task list",
 		handler: (args, ctx) => handleTasksCommand(state, args, ctx, pi),
-	});
-
-	pi.registerCommand("tasks:toggle", {
-		description: "Hide or show the task status UI",
-		handler: (_args, ctx) => handleTasksToggleCommand(state, ctx, pi),
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
