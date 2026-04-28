@@ -46,8 +46,10 @@ import { exec } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { complete, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import {
 	type PermissionLevel,
 	type PermissionMode,
@@ -364,10 +366,60 @@ function truncateForReview(text: string, maxLength: number): string {
 	return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
+function getTrackedTaskContext(ctx: any): string | undefined {
+	const entries = ctx?.sessionManager?.getEntries?.();
+	if (!Array.isArray(entries)) {
+		return undefined;
+	}
+
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (!entry || entry.type !== "custom" || entry.customType !== "task-context-state") {
+			continue;
+		}
+
+		const state = (entry.data as { state?: { goal?: unknown; tasks?: unknown } } | undefined)?.state;
+		if (!state || typeof state !== "object") {
+			continue;
+		}
+
+		const goal = typeof state.goal === "string" && state.goal.trim() ? state.goal.trim() : undefined;
+		const tasks = Array.isArray(state.tasks)
+			? state.tasks
+					.filter((task): task is { title?: unknown; completed?: unknown } => Boolean(task) && typeof task === "object")
+					.map((task, index) => {
+						const title = typeof task.title === "string" ? task.title.trim() : "";
+						if (!title) return undefined;
+						const marker = task.completed === true ? "[x]" : "[ ]";
+						return `${index + 1}. ${marker} ${title}`;
+					})
+					.filter((task): task is string => Boolean(task))
+			: [];
+
+		if (!goal && tasks.length === 0) {
+			return undefined;
+		}
+
+		const lines: string[] = [];
+		if (goal) {
+			lines.push(`Tracked goal: ${truncateForReview(goal, 240)}`);
+		}
+		if (tasks.length > 0) {
+			lines.push("Tracked tasks:");
+			lines.push(...tasks.map((task) => truncateForReview(task, 240)));
+		}
+
+		return lines.join("\n");
+	}
+
+	return undefined;
+}
+
 function getCurrentTaskContext(ctx: any): string {
+	const tracked = getTrackedTaskContext(ctx);
 	const branch = ctx?.sessionManager?.getBranch?.();
 	if (!Array.isArray(branch) || branch.length === 0) {
-		return "Unavailable.";
+		return tracked ?? "Unavailable.";
 	}
 
 	const recentMessages: string[] = [];
@@ -397,10 +449,11 @@ function getCurrentTaskContext(ctx: any): string {
 	}
 
 	if (recentMessages.length === 0) {
-		return "Unavailable.";
+		return tracked ?? "Unavailable.";
 	}
 
-	return truncateForReview(recentMessages.reverse().join("\n"), 1200);
+	const parts = tracked ? [tracked, recentMessages.reverse().join("\n")] : [recentMessages.reverse().join("\n")];
+	return truncateForReview(parts.join("\n"), 1200);
 }
 
 // ============================================================================
@@ -445,8 +498,6 @@ async function callAutoReviewModel(
 			apiKey,
 			headers,
 			maxTokens: 256,
-			temperature: 0,
-			signal,
 		},
 	);
 
@@ -462,46 +513,77 @@ async function callAutoReviewModel(
 }
 
 interface AutoReviewResult {
-	approved: boolean;
+	approved?: boolean;
 	rationale: string;
 	model?: string;
+	riskLevel?: string;
+	userAuthorization?: string;
+	systemPrompt?: string;
+	userPrompt?: string;
+	rawResponse?: string;
+	attempts: AutoReviewAttempt[];
+}
+
+interface AutoReviewAttempt {
+	model: string;
+	status:
+		| "skipped-invalid-model-id"
+		| "model-not-found"
+		| "auth-error"
+		| "missing-api-key"
+		| "request-error"
+		| "no-json"
+		| "invalid-json"
+		| "missing-decision"
+		| "decision";
+	detail: string;
+	rawResponse?: string;
+	decision?: "approve" | "deny";
+	rationale?: string;
+	riskLevel?: string;
+	userAuthorization?: string;
+}
+
+interface GuardianMessageContent {
+	summary: string;
+	model?: string;
+	rationale: string;
+	riskLevel?: string;
+	userAuthorization?: string;
+	systemPrompt?: string;
+	userPrompt?: string;
+	rawResponse?: string;
+	attempts?: AutoReviewAttempt[];
+}
+
+function hasAutoReviewDecision(review: AutoReviewResult): review is AutoReviewResult & { approved: boolean } {
+	return typeof review.approved === "boolean";
+}
+
+function loadGuardianPrompt(): string {
+	const promptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "guardian-prompt.md");
+	return fs.readFileSync(promptPath, "utf-8");
 }
 
 async function runAutoReview(
 	userPrompt: string,
 	taskContext: string,
 	modelRegistry: ModelRegistryLike,
+	fallbackModel: Model<Api> | undefined,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
-	const modelIds = loadAutoReviewModels();
+	const configuredModelIds = loadAutoReviewModels();
+	const modelIds = [...configuredModelIds];
+	if (fallbackModel) {
+		const fallbackId = `${fallbackModel.provider}/${fallbackModel.id}`;
+		if (!modelIds.includes(fallbackId)) {
+			modelIds.push(fallbackId);
+		}
+	}
 	if (modelIds.length === 0) return undefined;
 
-	const systemPrompt = `You are the auto-review gate for Pi, a coding agent. Review exactly one requested operation and decide whether it should be auto-approved.
-
-Base the decision on two questions:
-1. How dangerous is this action if executed exactly as written?
-2. Does this action clearly help the agent reach its current goal?
-
-Approve only when BOTH are true:
-- the action is low enough risk for automatic approval, and
-- the action is clearly relevant, necessary, and proportional to the stated task.
-
-Deny if any of these apply:
-- the action is dangerous, destructive, privileged, irreversible, persistent, deploy-like, or exfiltration-like,
-- the action touches secrets, credentials, tokens, auth material, private keys, sensitive dotfiles, or sensitive system/user state,
-- the action targets files or directories outside the project scope without a strong task-related reason,
-- the action is ambiguous, overly broad, speculative, or not clearly connected to the goal,
-- a safer or narrower action would obviously achieve the same goal.
-
-Important:
-- Judge the exact request as written. Do not assume missing safeguards or unstated intent.
-- If goal relevance is weak or unclear, deny.
-- If danger is non-trivial and task value is weak, deny.
-- Prefer false negatives over false positives.
-- Return only the decision, not advice.
-
-Respond with ONLY a JSON object in this exact format:
-{"decision":"approve"|"deny","rationale":"short concrete reason"}`;
+	const systemPrompt = loadGuardianPrompt();
+	const attempts: AutoReviewAttempt[] = [];
 
 	const fullPrompt = `Current task context:
 ${taskContext}
@@ -510,36 +592,133 @@ ${userPrompt}`;
 
 	for (const modelId of modelIds) {
 		const parts = modelId.split("/");
-		if (parts.length !== 2) continue;
+		if (parts.length !== 2) {
+			attempts.push({
+				model: modelId,
+				status: "skipped-invalid-model-id",
+				detail: "Configured model id is not in provider/model format.",
+			});
+			continue;
+		}
 		const [provider, id] = parts;
 
 		const model = modelRegistry.find(provider, id);
-		if (!model) continue;
+		if (!model) {
+			attempts.push({
+				model: modelId,
+				status: "model-not-found",
+				detail: "Model registry could not resolve this model.",
+			});
+			continue;
+		}
 
 		const auth = await modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok) continue;
-		if (!auth.apiKey) continue;
+		if (!auth.ok) {
+			attempts.push({
+				model: modelId,
+				status: "auth-error",
+				detail: auth.error,
+			});
+			continue;
+		}
+		if (!auth.apiKey) {
+			attempts.push({
+				model: modelId,
+				status: "missing-api-key",
+				detail: "Model resolved but no API key was available.",
+			});
+			continue;
+		}
 
 		try {
-			const responseText = await callAutoReviewModel(model, auth.apiKey, auth.headers, systemPrompt, fullPrompt, signal);
+			// Do not bind review requests to the main agent abort signal directly.
+			// The approval check should survive normal streaming transitions long
+			// enough to return a decision, while still timing out eventually.
+			const responseText = await callAutoReviewModel(model, auth.apiKey, auth.headers, systemPrompt, fullPrompt, undefined);
 
 			const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-			if (!jsonMatch) continue;
+			if (!jsonMatch) {
+				attempts.push({
+					model: modelId,
+					status: "no-json",
+					detail: "Model response did not contain a JSON object.",
+					rawResponse: responseText,
+				});
+				continue;
+			}
 
-			const result = JSON.parse(jsonMatch[0]) as { decision?: string; rationale?: string };
+			let result: {
+				decision?: string;
+				rationale?: string;
+				risk_level?: string;
+				user_authorization?: string;
+			};
+			try {
+				result = JSON.parse(jsonMatch[0]) as {
+					decision?: string;
+					rationale?: string;
+					risk_level?: string;
+					user_authorization?: string;
+				};
+			} catch (error) {
+				attempts.push({
+					model: modelId,
+					status: "invalid-json",
+					detail: error instanceof Error ? error.message : "Failed to parse JSON response.",
+					rawResponse: responseText,
+				});
+				continue;
+			}
+
 			if (result.decision === "approve" || result.decision === "deny") {
+				attempts.push({
+					model: modelId,
+					status: "decision",
+					detail: result.rationale || "Model returned a decision.",
+					rawResponse: responseText,
+					decision: result.decision,
+					rationale: result.rationale,
+					riskLevel: result.risk_level,
+					userAuthorization: result.user_authorization,
+				});
 				return {
 					approved: result.decision === "approve",
 					rationale: result.rationale || "No rationale provided",
 					model: modelId,
+					riskLevel: result.risk_level,
+					userAuthorization: result.user_authorization,
+					systemPrompt,
+					userPrompt: fullPrompt,
+					rawResponse: responseText,
+					attempts,
 				};
 			}
-		} catch {
+
+			attempts.push({
+				model: modelId,
+				status: "missing-decision",
+				detail: "Parsed JSON did not include decision=approve|deny.",
+				rawResponse: responseText,
+				rationale: result.rationale,
+				riskLevel: result.risk_level,
+				userAuthorization: result.user_authorization,
+			});
+		} catch (error) {
+			attempts.push({
+				model: modelId,
+				status: "request-error",
+				detail: error instanceof Error ? error.message : "Auto-review request failed.",
+			});
 			continue;
 		}
 	}
 
-	return undefined;
+	return {
+		rationale: "No auto-review model returned a final decision.",
+		systemPrompt,
+		userPrompt: fullPrompt,
+		attempts,
+	};
 }
 
 async function tryAutoReview(
@@ -548,6 +727,7 @@ async function tryAutoReview(
 	classification: Classification,
 	taskContext: string,
 	modelRegistry: ModelRegistryLike,
+	fallbackModel: Model<Api> | undefined,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
 	const userPrompt = `Review this shell command for auto-approval.
@@ -568,7 +748,7 @@ Policy notes:
 Decide whether this exact command should be auto-approved as written:
 ${command}`;
 
-	return runAutoReview(userPrompt, taskContext, modelRegistry, signal);
+	return runAutoReview(userPrompt, taskContext, modelRegistry, fallbackModel, signal);
 }
 
 async function tryAutoReviewFileAccess(
@@ -578,6 +758,7 @@ async function tryAutoReviewFileAccess(
 	reviewReason: string,
 	taskContext: string,
 	modelRegistry: ModelRegistryLike,
+	fallbackModel: Model<Api> | undefined,
 	signal?: AbortSignal,
 ): Promise<AutoReviewResult | undefined> {
 	const userPrompt = `Review this file access request for auto-approval.
@@ -598,7 +779,58 @@ Policy notes:
 
 Decide whether this specific file access should be auto-approved.`;
 
-	return runAutoReview(userPrompt, taskContext, modelRegistry, signal);
+	return runAutoReview(userPrompt, taskContext, modelRegistry, fallbackModel, signal);
+}
+
+function sendAutoReviewThreadMessage(pi: ExtensionAPI, review: AutoReviewResult): void {
+	const hasDecision = typeof review.approved === "boolean";
+	const icon = hasDecision ? (review.approved ? "🔓" : "🚫") : "🧭";
+	const status = hasDecision ? (review.approved ? "Auto-approved" : "Auto-review denied") : "Auto-review trace";
+	const details = [
+		review.riskLevel && `risk=${review.riskLevel}`,
+		review.userAuthorization && `auth=${review.userAuthorization}`,
+	]
+		.filter(Boolean)
+		.join(" ");
+	const summary = hasDecision
+		? details
+			? `${icon} ${status} by ${review.model}: ${review.rationale} [${details}]`
+			: `${icon} ${status} by ${review.model}: ${review.rationale}`
+		: `${icon} ${status}: ${review.rationale}`;
+	pi.sendMessage(
+		{
+			customType: "guardian",
+			content: summary,
+			details: {
+				summary,
+				model: review.model,
+				rationale: review.rationale,
+				riskLevel: review.riskLevel,
+				userAuthorization: review.userAuthorization,
+				systemPrompt: review.systemPrompt,
+				userPrompt: review.userPrompt,
+				rawResponse: review.rawResponse,
+				attempts: review.attempts,
+			} satisfies GuardianMessageContent,
+			display: true,
+		},
+		{ triggerTurn: false },
+	);
+}
+
+function formatGuardianMessageDetails(content: unknown, details: unknown): string {
+	const message =
+		details && typeof details === "object"
+			? (details as GuardianMessageContent)
+			: content && typeof content === "object"
+				? (content as GuardianMessageContent)
+				: undefined;
+
+	if (!message) {
+		return typeof content === "string" ? content : "";
+	}
+
+	return message.summary || message.rationale || "Guardian review";
 }
 
 // ============================================================================
@@ -822,6 +1054,7 @@ export async function handleBashToolCall(
 	state: PermissionState,
 	command: string,
 	ctx: any,
+	pi: ExtensionAPI,
 ): Promise<{ block: true; reason: string } | undefined> {
 	const classification = classifyCommand(command);
 
@@ -849,14 +1082,23 @@ export async function handleBashToolCall(
 				classification,
 				getCurrentTaskContext(ctx),
 				ctx.modelRegistry,
+				ctx.model,
 				ctx.signal,
 			);
 			if (review) {
-				if (review.approved) {
+				sendAutoReviewThreadMessage(pi, review);
+				if (hasAutoReviewDecision(review) && review.approved) {
 					ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
 					return undefined;
-				} else {
-					return { block: true, reason: `Auto-review denied by ${review.model}: ${review.rationale}` };
+				}
+				if (hasAutoReviewDecision(review)) {
+					playPermissionSound();
+					const choice = await ctx.ui.select(
+						`⚠️ Dangerous command — auto-review recommends denial by ${review.model}: ${review.rationale}`,
+						["Allow once", "Cancel"],
+					);
+					if (choice === "Allow once") return undefined;
+					return { block: true, reason: "Cancelled" };
 				}
 			}
 		}
@@ -932,14 +1174,23 @@ export async function handleBashToolCall(
 				classification,
 				getCurrentTaskContext(ctx),
 				ctx.modelRegistry,
+				ctx.model,
 				ctx.signal,
 			);
 			if (review) {
-				if (review.approved) {
+				sendAutoReviewThreadMessage(pi, review);
+				if (hasAutoReviewDecision(review) && review.approved) {
 					ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
 					return undefined;
-				} else {
-					return { block: true, reason: `Auto-review denied by ${review.model}: ${review.rationale}` };
+				}
+				if (hasAutoReviewDecision(review)) {
+					playPermissionSound();
+					const choice = await ctx.ui.select(
+						`🔍 High-risk command — auto-review recommends denial by ${review.model}: ${review.rationale}`,
+						["Allow once", "Cancel"],
+					);
+					if (choice === "Allow once") return undefined;
+					return { block: true, reason: "Cancelled" };
 				}
 			}
 		}
@@ -963,6 +1214,7 @@ export interface WriteToolCallOptions {
 	toolName: string;
 	filePath: string;
 	ctx: any;
+	pi: ExtensionAPI;
 }
 
 /** Handle read tool_call - scope file reads by cwd and sensitivity */
@@ -970,6 +1222,7 @@ export async function handleReadToolCall(
 	state: PermissionState,
 	filePath: string,
 	ctx: any,
+	pi: ExtensionAPI,
 ): Promise<{ block: true; reason: string } | undefined> {
 	const action = "Read";
 	const target = inspectFileAccessTarget(filePath, ctx);
@@ -1044,14 +1297,24 @@ export async function handleReadToolCall(
 			target.reviewReason,
 			getCurrentTaskContext(ctx),
 			ctx.modelRegistry,
+			ctx.model,
 			ctx.signal,
 		);
 		if (review) {
-			if (review.approved) {
+			sendAutoReviewThreadMessage(pi, review);
+			if (hasAutoReviewDecision(review) && review.approved) {
 				ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
 				return undefined;
 			}
-			return { block: true, reason: `Auto-review denied by ${review.model}: ${review.rationale}` };
+			if (hasAutoReviewDecision(review)) {
+				playPermissionSound();
+				const choice = await ctx.ui.select(
+					`🔍 Auto-review recommends denial for ${action} ${filePath} by ${review.model}: ${review.rationale}`,
+					["Allow once", "Cancel"],
+				);
+				if (choice === "Allow once") return undefined;
+				return { block: true, reason: "Cancelled" };
+			}
 		}
 	}
 
@@ -1078,7 +1341,7 @@ export async function handleReadToolCall(
 
 /** Handle write/edit tool_call - check permission and prompt if needed */
 export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{ block: true; reason: string } | undefined> {
-	const { state, toolName, filePath, ctx } = opts;
+	const { state, toolName, filePath, ctx, pi } = opts;
 
 	const action = toolName === "write" ? "Write" : "Edit";
 	const target = inspectFileAccessTarget(filePath, ctx);
@@ -1175,14 +1438,24 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 			target.reviewReason!,
 			getCurrentTaskContext(ctx),
 			ctx.modelRegistry,
+			ctx.model,
 			ctx.signal,
 		);
 		if (review) {
-			if (review.approved) {
+			sendAutoReviewThreadMessage(pi, review);
+			if (hasAutoReviewDecision(review) && review.approved) {
 				ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
 				return undefined;
 			}
-			return { block: true, reason: `Auto-review denied by ${review.model}: ${review.rationale}` };
+			if (hasAutoReviewDecision(review)) {
+				playPermissionSound();
+				const choice = await ctx.ui.select(
+					`🔍 Auto-review recommends denial for ${action} ${filePath} by ${review.model}: ${review.rationale}`,
+					["Allow once", "Cancel"],
+				);
+				if (choice === "Allow once") return undefined;
+				return { block: true, reason: "Cancelled" };
+			}
 		}
 	}
 
@@ -1214,6 +1487,10 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 export default function (pi: ExtensionAPI) {
 	const state = createInitialState();
 
+	pi.registerMessageRenderer("guardian", (message, _options, theme) => {
+		return new Text(theme.fg("warning", formatGuardianMessageDetails(message.content, message.details)), 0, 0);
+	});
+
 	pi.registerCommand("permission", {
 		description: "View or change permission level",
 		handler: (args, ctx) => handlePermissionCommand(state, args, ctx),
@@ -1230,11 +1507,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "bash") {
-			return handleBashToolCall(state, event.input.command as string, ctx);
+			return handleBashToolCall(state, event.input.command as string, ctx, pi);
 		}
 
 		if (event.toolName === "read") {
-			return handleReadToolCall(state, event.input.path as string, ctx);
+			return handleReadToolCall(state, event.input.path as string, ctx, pi);
 		}
 
 		if (event.toolName === "write" || event.toolName === "edit") {
@@ -1243,6 +1520,7 @@ export default function (pi: ExtensionAPI) {
 				toolName: event.toolName,
 				filePath: event.input.path as string,
 				ctx,
+				pi,
 			});
 		}
 
