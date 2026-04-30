@@ -5,7 +5,7 @@
 ## Installation
 
 ```sh
-pi install https://github.com/xavierchanth/pi-guardian
+pi install https://github.com/xavierchanth/pi-tai
 ```
 
 ## Included plugins
