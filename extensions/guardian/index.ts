@@ -70,7 +70,7 @@ import {
 	loadAutoReviewModels,
 	type PermissionConfig,
 	type Classification,
-} from "./permission-core.js";
+} from "./permission-core";
 
 // Re-export types and constants needed by the hook
 export {

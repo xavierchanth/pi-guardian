@@ -1,25 +1,8 @@
-# pi-guardian
+# pi-tai
 
-This is a plugin for [pi the coding agent](https://pi.dev).  
-It is meant to bring the benefits of OpenAI Codex's auto-approval feature to pi.
+This is a distribution for [pi the coding agent](https://pi.dev).  
 
-## Story time
-
-This is absolutely my favorite feature in Codex and I have a really cool story to share:
-
-- The feature (in Codex) was originally experimental
-- I turned it on immediately and it instantly had me hooked on codex
-- Along the way, Codex app comes out, and I stick with it for a while
-- An update to Codex causes the feature to disappear (turns out I needed to reenable the experimental flag :/)
-- I eventually contacted support about the missing feature
-- The feature goes stable in the next release
-- It's a pretty boring story, but I appreciated being heard by their team
-
-## Vibe-slop meter
-
-- This is absolutely coded with AI. Do with that what you will.
-- Do I think this is as good as it could be? no.
-- Do I think it is likely to increase safety over having nothing? yes.
+## Included extensions
 
 ## Installation
 

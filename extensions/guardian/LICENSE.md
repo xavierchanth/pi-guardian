@@ -1,25 +1,37 @@
-# License
+# Guardian Extension License and Attribution
 
-This project is based on other open-source works, this document articulates where
-everything comes from, and how it's licensed.
+This document describes the provenance and licensing of the files under
+`extensions/guardian/`.
 
 ## Overview
 
-### Main Plugin Code
+This extension includes:
 
-Somehow, I still find a significant portion of open-source projects still screw up their
-licenses. Unfortunately the project which contains the original starting point for this is no exception: an unnamed copyright line in their MIT license...
+- code derived from an upstream permissions plugin
+- local modifications to that code
+- a guardian prompt that was updated using prompt material from Codex
 
-So, once again... I'll just link to the permalink in GitHub where my code diverge from.
+The applicable license texts are reproduced below.
 
-https://github.com/prateekmedia/pi-hooks/commit/e55a50f9c5386504208e32ed059c099cfdc30611
+## Code Provenance
 
-Both the original work and additional modifications are licensed under MIT (albeit under different names).
+### Guardian Extension Code
+
+Parts of this extension are derived from the following upstream work:
+
+- https://github.com/prateekmedia/pi-hooks/commit/e55a50f9c5386504208e32ed059c099cfdc30611
+
+The upstream work is MIT-licensed, and the local modifications in this
+repository are also licensed under MIT.
+
+The original upstream MIT notice is reproduced below as received.
 
 ### Guardian Prompt
 
-The [guardian prompt](./guardian-prompt.md) has been updated using prompts from Codex.
-I don't have the time to invest heavily into evals for this project.
+The [guardian prompt](./guardian-prompt.md) has been updated using prompt
+material from Codex.
+
+The applicable Apache License 2.0 text is reproduced below.
 
 ## Additional Modifications License
 
@@ -45,7 +57,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Original License (original work committed as-is in 48bb7ecf)
+## Original Upstream MIT License
 
 MIT License
 
