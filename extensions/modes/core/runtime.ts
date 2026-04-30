@@ -6,7 +6,6 @@
  * Interactive mode:
  *   Use `/mode` to view or change the active mode.
  *   Use `/review-mode` to switch between ask vs block review behavior.
- *   Legacy aliases `/permission` and `/permission-mode` are preserved.
  *
  * Print mode (pi -p):
  *   Set PI_PERMISSION_LEVEL env var: PI_PERMISSION_LEVEL=auto pi -p "task"
@@ -27,25 +26,20 @@ import { fileURLToPath } from "node:url";
 import { complete, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-import { createModeRegistry } from "./core/mode-framework";
-import type { GuardianModeHandlerFactoryDeps, PermissionState, ToolHandlerResult } from "./core/guardian-types";
-import { createAutoMode } from "./modes/auto";
-import { createPlanMode } from "./modes/plan";
-import { createEditMode } from "./modes/edit";
-import { createReadMode } from "./modes/read";
+import { evaluateBashAccess, evaluateReadAccess, evaluateWriteAccess, inspectFileAccessTarget as inspectSharedFileAccessTarget } from "./evaluate-access";
+import { createModeRegistry, type GuardianModeDefinition, type GuardianModeRegistry } from "./mode-framework";
+import type { PermissionState, ToolHandlerResult } from "./guardian-types";
 import {
 	type PermissionLevel,
 	type PermissionMode,
 	LEVELS,
 	LEVEL_INFO,
-	LEVEL_ALLOWED_DESC,
 	PERMISSION_MODES,
 	PERMISSION_MODE_INFO,
 	loadGlobalPermission,
 	saveGlobalPermission,
 	loadGlobalPermissionMode,
 	saveGlobalPermissionMode,
-	classifyCommand,
 	loadPermissionConfig,
 	savePermissionConfig,
 	invalidateConfigCache,
@@ -62,6 +56,15 @@ export {
 	PERMISSION_MODES,
 	PERMISSION_MODE_INFO,
 };
+
+let modeRegistry: GuardianModeRegistry | undefined;
+
+function getModeRegistry(): GuardianModeRegistry {
+	if (!modeRegistry) {
+		throw new Error("Guardian mode registry has not been initialized.");
+	}
+	return modeRegistry;
+}
 
 // ============================================================================
 // SOUND NOTIFICATION
@@ -915,7 +918,7 @@ export async function handleModeCommand(state: PermissionState, args: string, ct
 		return;
 	}
 
-	const options = modeRegistry.list().map((mode) => {
+	const options = getModeRegistry().list().map((mode) => {
 		const marker = mode.id === state.currentMode ? " ← current" : "";
 		return `${mode.label}: ${mode.description}${marker}`;
 	});
@@ -924,7 +927,7 @@ export async function handleModeCommand(state: PermissionState, args: string, ct
 	if (!choice) return;
 
 	const selectedLabel = choice.split(":")[0].trim();
-	const newMode = modeRegistry.list().find((mode) => mode.label === selectedLabel)?.id;
+	const newMode = getModeRegistry().list().find((mode) => mode.label === selectedLabel)?.id;
 	if (!newMode || newMode === state.currentMode) return;
 
 	const scope = await ctx.ui.select("Save to:", ["Session only", "Global (persists)"]);
@@ -1468,29 +1471,153 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<T
 	return { block: true, reason: "Cancelled" };
 }
 
-// ============================================================================
-// Mode registry
-// ============================================================================
+async function promptForModeUpgrade(
+	state: PermissionState,
+	ctx: any,
+	targetMode: PermissionLevel,
+	message: string,
+): Promise<"allow-once" | "upgraded" | "cancel"> {
+	if (!hasInteractiveUI(ctx)) return "cancel";
+	if (state.reviewMode === "block") return "cancel";
+	playPermissionSound();
+	const label = LEVEL_INFO[targetMode].label;
+	const choice = await ctx.ui.select(message, ["Allow once", `Allow mode (${label})`, "Cancel"]);
+	if (choice === "Allow once") return "allow-once";
+	if (choice === `Allow mode (${label})`) {
+		setCurrentMode(state, targetMode, true, ctx);
+		ctx.ui.notify(`Mode → ${label} (saved globally)`, "info");
+		return "upgraded";
+	}
+	return "cancel";
+}
 
-const modeHandlerFactoryDeps: GuardianModeHandlerFactoryDeps = {
-	onBash: (mode, input, { state, ctx, pi }) => handleBashToolCall(mode, state, input, ctx, pi),
-	onRead: (mode, input, { state, ctx, pi }) => handleReadToolCall(mode, state, input, ctx, pi),
-	onWrite: (mode, toolName, input, { state, ctx, pi }) =>
-		handleWriteToolCall({ activeMode: mode, state, toolName, filePath: input, ctx, pi }),
-};
+async function handleReviewedFileAccess(
+	action: string,
+	target: { cwd: string; resolvedPath: string; reviewReason?: string },
+	ctx: any,
+	pi: ExtensionAPI,
+	state: PermissionState,
+): Promise<ToolHandlerResult> {
+	if (!target.reviewReason) return undefined;
+	if (!hasInteractiveUI(ctx)) {
+		return {
+			block: true,
+			reason:
+				`${action} requires auto-review: ${target.resolvedPath}\n` +
+				`Reason: ${target.reviewReason}\n` +
+				`Configure autoReviewModels in settings.json to enable this in non-interactive mode.`,
+		};
+	}
+	if (ctx.modelRegistry) {
+		const review = await tryAutoReviewFileAccess(
+			action,
+			target.cwd,
+			target.resolvedPath,
+			target.reviewReason,
+			getCurrentTaskContext(ctx),
+			ctx.modelRegistry,
+			ctx.model,
+			ctx.signal,
+		);
+		if (review) {
+			sendAutoReviewThreadMessage(pi, review);
+			if (hasAutoReviewDecision(review) && review.approved) {
+				ctx.ui.notify(`🔓 Auto-approved by ${review.model}: ${review.rationale}`, "info");
+				return undefined;
+			}
+			if (hasAutoReviewDecision(review)) {
+				playPermissionSound();
+				const choice = await ctx.ui.select(
+					`🔍 Auto-review recommends denial for ${action} ${target.resolvedPath} by ${review.model}: ${review.rationale}`,
+					["Allow once", "Cancel"],
+				);
+				if (choice === "Allow once") return undefined;
+				return { block: true, reason: "Cancelled" };
+			}
+		}
+	}
+	if (state.reviewMode === "block") {
+		return {
+			block: true,
+			reason:
+				`Blocked by review mode (block). ${action}: ${target.resolvedPath}\n` +
+				`Reason: ${target.reviewReason}\n` +
+				`Auto-review was required but no review model returned a decision.`,
+		};
+	}
+	playPermissionSound();
+	const choice = await ctx.ui.select(`🔍 Auto-review required: ${action} ${target.resolvedPath}`, ["Allow once", "Cancel"]);
+	if (choice === "Allow once") return undefined;
+	return { block: true, reason: "Cancelled" };
+}
 
-const modeRegistry = createModeRegistry([
-	createAutoMode(modeHandlerFactoryDeps),
-	createPlanMode(modeHandlerFactoryDeps),
-	createEditMode(modeHandlerFactoryDeps),
-	createReadMode(modeHandlerFactoryDeps),
-]);
+async function handlePolicyDrivenToolCall(
+	activeMode: GuardianModeDefinition,
+	state: PermissionState,
+	event: any,
+	ctx: any,
+	pi: ExtensionAPI,
+): Promise<ToolHandlerResult> {
+	if (event.toolName === "bash") {
+		const policy = activeMode.policies.bash;
+		if (!policy || policy.kind !== "bash") return { block: true, reason: `No bash policy for ${activeMode.id} mode.` };
+		const result = evaluateBashAccess(policy, event.input.command as string);
+		if (result.decision === "allow") return undefined;
+		if (result.decision === "review") {
+			return handleBashToolCall(activeMode.id, state, event.input.command as string, ctx, pi);
+		}
+		if (result.decision === "prompt-upgrade" && result.targetMode) {
+			const upgrade = await promptForModeUpgrade(state, ctx, result.targetMode, `Requires ${LEVEL_INFO[result.targetMode].label}`);
+			if (upgrade === "allow-once" || upgrade === "upgraded") return undefined;
+			return { block: true, reason: "Cancelled" };
+		}
+		return { block: true, reason: result.reason ?? `Blocked by ${activeMode.label} mode.` };
+	}
+
+	if (event.toolName === "read") {
+		const policy = activeMode.policies.read;
+		if (!policy || policy.kind !== "read") return { block: true, reason: `No read policy for ${activeMode.id} mode.` };
+		const result = evaluateReadAccess(policy, event.input.path as string, getSessionCwd(ctx));
+		if (result.decision === "allow") return undefined;
+		if (result.decision === "review") return handleReviewedFileAccess("Read", result.target, ctx, pi, state);
+		if (result.decision === "prompt-upgrade" && result.targetMode) {
+			const upgrade = await promptForModeUpgrade(state, ctx, result.targetMode, `Requires ${LEVEL_INFO[result.targetMode].label}: Read ${event.input.path as string}`);
+			if (upgrade === "allow-once") return undefined;
+			if (upgrade === "upgraded") return handleReviewedFileAccess("Read", result.target, ctx, pi, state);
+			return { block: true, reason: "Cancelled" };
+		}
+		return { block: true, reason: result.reason ?? `Blocked by ${activeMode.label} mode.` };
+	}
+
+	if (event.toolName === "write" || event.toolName === "edit") {
+		const policy = activeMode.policies[event.toolName];
+		if (!policy || policy.kind !== "write") return { block: true, reason: `No ${event.toolName} policy for ${activeMode.id} mode.` };
+		const action = event.toolName === "write" ? "Write" : "Edit";
+		const result = evaluateWriteAccess(policy, event.input.path as string, getSessionCwd(ctx));
+		if (result.decision === "allow") return undefined;
+		if (result.decision === "review") return handleReviewedFileAccess(action, result.target, ctx, pi, state);
+		if (result.decision === "prompt-upgrade" && result.targetMode) {
+			const upgrade = await promptForModeUpgrade(state, ctx, result.targetMode, `Requires ${LEVEL_INFO[result.targetMode].label}: ${action} ${event.input.path as string}`);
+			if (upgrade === "allow-once") return undefined;
+			if (upgrade === "upgraded") return handleReviewedFileAccess(action, result.target, ctx, pi, state);
+			return { block: true, reason: "Cancelled" };
+		}
+		const target = inspectSharedFileAccessTarget(event.input.path as string, getSessionCwd(ctx));
+		return {
+			block: true,
+			reason: `${result.reason ?? `Blocked by ${activeMode.label} mode.`}\nResolved path: ${target.resolvedPath}`,
+		};
+	}
+
+	return undefined;
+}
 
 // ============================================================================
 // Extension entry point
 // ============================================================================
 
-export default function (pi: ExtensionAPI) {
+export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: GuardianModeDefinition[]) {
+	modeRegistry = createModeRegistry(registeredModes);
 	const state = createInitialState();
 
 	pi.registerMessageRenderer("guardian", (message, _options, theme) => {
@@ -1501,65 +1628,30 @@ export default function (pi: ExtensionAPI) {
 		description: "View or change guardian mode",
 		handler: (args, ctx) => handleModeCommand(state, args, ctx),
 	});
-
-	pi.registerCommand("permission", {
-		description: "Legacy alias for /mode",
-		handler: (args, ctx) => handlePermissionCommand(state, args, ctx),
-	});
-
+	for (const mode of getModeRegistry().list()) {
+		pi.registerCommand(`mode:${mode.id}`, {
+			description: `Switch directly to ${mode.label} mode`,
+			handler: async (_args, ctx) => handleModeCommand(state, mode.id, ctx),
+		});
+	}
 	pi.registerCommand("review-mode", {
 		description: "Set guardian review mode (ask or block)",
 		handler: (args, ctx) => handleReviewModeCommand(state, args, ctx),
 	});
 
-	pi.registerCommand("permission-mode", {
-		description: "Legacy alias for /review-mode",
-		handler: (args, ctx) => handlePermissionModeCommand(state, args, ctx),
-	});
-
 	pi.on("session_start", async (_event, ctx) => {
 		handleSessionStart(state, ctx);
 	});
-
 	pi.on("before_agent_start", async () => {
-		const activeMode = modeRegistry.get(state.currentMode);
-		if (!activeMode.systemPrompt) {
-			return;
-		}
-		return {
-			systemPrompt: activeMode.systemPrompt,
-		};
+		const activeMode = getModeRegistry().get(state.currentMode);
+		return activeMode.systemPrompt ? { systemPrompt: activeMode.systemPrompt } : undefined;
 	});
-
 	pi.on("tool_call", async (event, ctx) => {
-		const activeMode = modeRegistry.get(state.currentMode);
-		if (!["bash", "read", "write", "edit"].includes(event.toolName)) {
-			return undefined;
+		const activeMode = getModeRegistry().get(state.currentMode);
+		if (!["bash", "read", "write", "edit"].includes(event.toolName)) return undefined;
+		if (!activeMode.registeredTools.includes(event.toolName)) {
+			return { block: true, reason: `${LEVEL_INFO[activeMode.id].label} mode does not register the ${event.toolName} tool.` };
 		}
-
-		if (!activeMode.registeredTools.includes(event.toolName as any)) {
-			return {
-				block: true,
-				reason: `${LEVEL_INFO[activeMode.id].label} mode does not register the ${event.toolName} tool.`,
-			};
-		}
-
-		if (event.toolName === "bash") {
-			return activeMode.handlers.bash?.(event.input.command as string, { state, ctx, pi });
-		}
-
-		if (event.toolName === "read") {
-			return activeMode.handlers.read?.(event.input.path as string, { state, ctx, pi });
-		}
-
-		if (event.toolName === "write") {
-			return activeMode.handlers.write?.(event.input.path as string, { state, ctx, pi });
-		}
-
-		if (event.toolName === "edit") {
-			return activeMode.handlers.edit?.(event.input.path as string, { state, ctx, pi });
-		}
-
-		return undefined;
+		return handlePolicyDrivenToolCall(activeMode, state, event, ctx, pi);
 	});
 }

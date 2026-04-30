@@ -10,7 +10,7 @@
   "pi": {
     "extensions": [
       "./extensions/task-context/index.ts",
-      "./extensions/guardian/index.ts"
+      "./extensions/modes/index.ts"
     ]
   }
 }

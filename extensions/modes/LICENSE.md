@@ -1,7 +1,7 @@
-# Guardian Extension License and Attribution
+# Modes Extension License and Attribution
 
 This document describes the provenance and licensing of the files under
-`extensions/guardian/`.
+`extensions/modes/`.
 
 ## Overview
 
@@ -15,7 +15,7 @@ The applicable license texts are reproduced below.
 
 ## Code Provenance
 
-### Guardian Extension Code
+### Modes Extension Code
 
 Parts of this extension are derived from the following upstream work:
 
@@ -28,7 +28,7 @@ The original upstream MIT notice is reproduced below as received.
 
 ### Guardian Prompt
 
-The [guardian prompt](./guardian-prompt.md) has been updated using prompt
+The [guardian prompt](./core/guardian-prompt.md) has been updated using prompt
 material from Codex.
 
 The applicable Apache License 2.0 text is reproduced below.
