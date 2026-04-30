@@ -1,45 +1,22 @@
 /**
- * Permission Extension for pi-coding-agent
+ * Guardian mode extension for pi-coding-agent
  *
- * Implements layered permission control with auto-review for auto mode.
+ * Implements a registry-backed mode system with auto-review support.
  *
  * Interactive mode:
- *   Use `/permission` command to view or change the level.
- *   Use `/permission-mode` to switch between ask vs block.
- *   When changing via command, you'll be asked: session-only or global?
+ *   Use `/mode` to view or change the active mode.
+ *   Use `/review-mode` to switch between ask vs block review behavior.
+ *   Legacy aliases `/permission` and `/permission-mode` are preserved.
  *
  * Print mode (pi -p):
  *   Set PI_PERMISSION_LEVEL env var: PI_PERMISSION_LEVEL=auto pi -p "task"
- *   Operations beyond level will exit with helpful error message.
+ *   Operations beyond the active mode will exit with a helpful error message.
  *
- * Levels:
- *   read - Read-only mode (default)
- *          ✅ Read files, ls, grep, git status/log/diff
- *          ❌ No file modifications, no commands with side effects
- *
- *   edit - File operations only
- *          ✅ Create/edit files in project directory
- *          ❌ No package installs, no git commits, no builds
- *
+ * Modes:
  *   auto - Development operations with auto-review
- *          ✅ npm/pip install, git commit/pull, make/build (auto-approved)
- *          🔍 High-risk operations (git push, deploy, sudo, rm -rf) sent to
- *            configured auto-review models for approval
- *          ❌ If no auto-review model is available, prompts user
- *
- * Auto-review models:
- *   Configure in ~/.pi/agent/settings.json:
- *   {
- *     "autoReviewModels": [
- *       "anthropic/claude-sonnet-4-5",
- *       "openai/gpt-5.4"
- *     ]
- *   }
- *
- * Usage:
- *   pi --extension ./permission/index.ts
- *
- * Or add to ~/.pi/agent/extensions/ or .pi/extensions/ for automatic loading.
+ *   plan - Planning-focused access with Markdown-only file modifications
+ *   edit - Read and edit files within the workspace
+ *   read - Read-only workspace access
  */
 
 import { exec } from "node:child_process";
@@ -50,11 +27,16 @@ import { fileURLToPath } from "node:url";
 import { complete, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { createModeRegistry } from "./core/mode-framework";
+import type { GuardianModeHandlerFactoryDeps, PermissionState, ToolHandlerResult } from "./core/guardian-types";
+import { createAutoMode } from "./modes/auto";
+import { createPlanMode } from "./modes/plan";
+import { createEditMode } from "./modes/edit";
+import { createReadMode } from "./modes/read";
 import {
 	type PermissionLevel,
 	type PermissionMode,
 	LEVELS,
-	LEVEL_INDEX,
 	LEVEL_INFO,
 	LEVEL_ALLOWED_DESC,
 	PERMISSION_MODES,
@@ -68,7 +50,6 @@ import {
 	savePermissionConfig,
 	invalidateConfigCache,
 	loadAutoReviewModels,
-	type PermissionConfig,
 	type Classification,
 } from "./permission-core";
 
@@ -109,12 +90,12 @@ const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const WHITE = "\x1b[37m";
-const DIM = "\x1b[2m";
 
 const LEVEL_COLORS: Record<PermissionLevel, string> = {
-	read: RED,
-	edit: YELLOW,
 	auto: CYAN,
+	plan: GREEN,
+	edit: YELLOW,
+	read: RED,
 };
 
 function getStatusText(level: PermissionLevel): string {
@@ -177,31 +158,45 @@ function isQuietStartupFromSettings(): boolean {
 // STATE MANAGEMENT
 // ============================================================================
 
-export interface PermissionState {
-	currentLevel: PermissionLevel;
-	isSessionOnly: boolean;
-	permissionMode: PermissionMode;
-	isModeSessionOnly: boolean;
-}
-
 export function createInitialState(): PermissionState {
 	return {
-		currentLevel: "read",
+		currentMode: "read",
 		isSessionOnly: false,
-		permissionMode: "ask",
-		isModeSessionOnly: false,
+		reviewMode: "ask",
+		isReviewModeSessionOnly: false,
 	};
 }
 
-function setLevel(state: PermissionState, level: PermissionLevel, saveGlobally: boolean, ctx: any): void {
-	state.currentLevel = level;
+function setCurrentMode(state: PermissionState, mode: PermissionLevel, saveGlobally: boolean, ctx: any): void {
+	state.currentMode = mode;
 	state.isSessionOnly = !saveGlobally;
 	if (saveGlobally) {
-		saveGlobalPermission(level);
+		saveGlobalPermission(mode);
 	}
 	if (ctx.ui?.setStatus) {
-		ctx.ui.setStatus("authority", getStatusText(level));
+		ctx.ui.setStatus("authority", getStatusText(mode));
 	}
+}
+
+function modeAllowsRequiredLevel(mode: PermissionLevel, requiredLevel: "read" | "edit" | "auto"): boolean {
+	switch (requiredLevel) {
+		case "read":
+			return true;
+		case "edit":
+			return mode === "edit" || mode === "auto";
+		case "auto":
+			return mode === "auto";
+	}
+}
+
+function isMarkdownPath(filePath: string): boolean {
+	return /\.mdx?$/i.test(filePath);
+}
+
+function modeSupportsFileWrites(mode: PermissionLevel, filePath: string): boolean {
+	if (mode === "auto" || mode === "edit") return true;
+	if (mode === "plan") return isMarkdownPath(filePath);
+	return false;
 }
 
 // ============================================================================
@@ -329,9 +324,9 @@ function inspectFileAccessTarget(filePath: string, ctx: any): FileAccessTarget {
 	};
 }
 
-function setMode(state: PermissionState, mode: PermissionMode, saveGlobally: boolean, ctx: any): void {
-	state.permissionMode = mode;
-	state.isModeSessionOnly = !saveGlobally;
+function setReviewMode(state: PermissionState, mode: PermissionMode, saveGlobally: boolean, _ctx: any): void {
+	state.reviewMode = mode;
+	state.isReviewModeSessionOnly = !saveGlobally;
 	if (saveGlobally) {
 		saveGlobalPermissionMode(mode);
 	}
@@ -838,32 +833,28 @@ function formatGuardianMessageDetails(content: unknown, details: unknown): strin
 // HANDLERS
 // ============================================================================
 
-/** Handle /permission config subcommand */
-async function handleConfigSubcommand(state: PermissionState, args: string, ctx: any): Promise<void> {
+/** Handle /mode config subcommand */
+async function handleConfigSubcommand(_state: PermissionState, args: string, ctx: any): Promise<void> {
 	const parts = args.trim().split(/\s+/);
 	const action = parts[0];
 
 	if (action === "show") {
 		const config = loadPermissionConfig();
 		const autoReviewModels = loadAutoReviewModels();
-		const configStr = JSON.stringify(
-			{ ...config, autoReviewModels },
-			null,
-			2,
-		);
-		ctx.ui.notify(`Permission Config:\n${configStr}`, "info");
+		const configStr = JSON.stringify({ ...config, autoReviewModels }, null, 2);
+		ctx.ui.notify(`Mode config:
+${configStr}`, "info");
 		return;
 	}
 
 	if (action === "reset") {
 		savePermissionConfig({});
 		invalidateConfigCache();
-		ctx.ui.notify("Permission config reset to defaults", "info");
+		ctx.ui.notify("Mode config reset to defaults", "info");
 		return;
 	}
 
-	// Show help
-	const help = `Usage: /permission config <action>
+	const help = `Usage: /mode config <action>
 
 Actions:
   show  - Display current configuration
@@ -892,122 +883,117 @@ Edit ~/.pi/agent/settings.json directly for full control:
 	ctx.ui.notify(help, "info");
 }
 
-/** Handle /permission command */
-export async function handlePermissionCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
+/** Handle /mode command */
+export async function handleModeCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
 	const arg = args.trim().toLowerCase();
 
-	// Handle config subcommand
 	if (arg === "config" || arg.startsWith("config ")) {
 		const configArgs = arg.replace(/^config\s*/, "");
 		await handleConfigSubcommand(state, configArgs, ctx);
 		return;
 	}
 
-	// Direct level set: /permission auto
 	if (arg && LEVELS.includes(arg as PermissionLevel)) {
-		const newLevel = arg as PermissionLevel;
+		const newMode = arg as PermissionLevel;
 
 		if (hasInteractiveUI(ctx)) {
-			const scope = await ctx.ui.select("Save permission level to:", ["Session only", "Global (persists)"]);
+			const scope = await ctx.ui.select("Save mode to:", ["Session only", "Global (persists)"]);
 			if (!scope) return;
 
-			setLevel(state, newLevel, scope === "Global (persists)", ctx);
+			setCurrentMode(state, newMode, scope === "Global (persists)", ctx);
 			const saveMsg = scope === "Global (persists)" ? " (saved globally)" : " (session only)";
-			ctx.ui.notify(`Permission: ${LEVEL_INFO[newLevel].label}${saveMsg}`, "info");
+			ctx.ui.notify(`Mode: ${LEVEL_INFO[newMode].label}${saveMsg}`, "info");
 		} else {
-			setLevel(state, newLevel, false, ctx);
-			ctx.ui.notify(`Permission: ${LEVEL_INFO[newLevel].label}`, "info");
+			setCurrentMode(state, newMode, false, ctx);
+			ctx.ui.notify(`Mode: ${LEVEL_INFO[newMode].label}`, "info");
 		}
 		return;
 	}
 
-	// Show current level (no UI)
 	if (!hasInteractiveUI(ctx)) {
-		ctx.ui.notify(
-			`Current permission: ${LEVEL_INFO[state.currentLevel].label} (${LEVEL_INFO[state.currentLevel].desc})`,
-			"info",
-		);
+		ctx.ui.notify(`Current mode: ${LEVEL_INFO[state.currentMode].label} (${LEVEL_INFO[state.currentMode].desc})`, "info");
 		return;
 	}
 
-	// Show selector
-	const options = LEVELS.map((level) => {
-		const info = LEVEL_INFO[level];
-		const marker = level === state.currentLevel ? " ← current" : "";
-		return `${info.label}: ${info.desc}${marker}`;
+	const options = modeRegistry.list().map((mode) => {
+		const marker = mode.id === state.currentMode ? " ← current" : "";
+		return `${mode.label}: ${mode.description}${marker}`;
 	});
 
-	const choice = await ctx.ui.select("Select permission level", options);
+	const choice = await ctx.ui.select("Select mode", options);
 	if (!choice) return;
 
 	const selectedLabel = choice.split(":")[0].trim();
-	const newLevel = LEVELS.find((l) => LEVEL_INFO[l].label === selectedLabel);
-	if (!newLevel || newLevel === state.currentLevel) return;
+	const newMode = modeRegistry.list().find((mode) => mode.label === selectedLabel)?.id;
+	if (!newMode || newMode === state.currentMode) return;
 
 	const scope = await ctx.ui.select("Save to:", ["Session only", "Global (persists)"]);
 	if (!scope) return;
 
-	setLevel(state, newLevel, scope === "Global (persists)", ctx);
+	setCurrentMode(state, newMode, scope === "Global (persists)", ctx);
 	const saveMsg = scope === "Global (persists)" ? " (saved globally)" : " (session only)";
-	ctx.ui.notify(`Permission: ${LEVEL_INFO[newLevel].label}${saveMsg}`, "info");
+	ctx.ui.notify(`Mode: ${LEVEL_INFO[newMode].label}${saveMsg}`, "info");
 }
 
-/** Handle /permission-mode command */
-export async function handlePermissionModeCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
+export async function handlePermissionCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
+	return handleModeCommand(state, args, ctx);
+}
+
+/** Handle /review-mode command */
+export async function handleReviewModeCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
 	const arg = args.trim().toLowerCase();
 
 	if (arg && PERMISSION_MODES.includes(arg as PermissionMode)) {
 		const newMode = arg as PermissionMode;
 
 		if (hasInteractiveUI(ctx)) {
-			const scope = await ctx.ui.select("Save permission mode to:", ["Session only", "Global (persists)"]);
+			const scope = await ctx.ui.select("Save review mode to:", ["Session only", "Global (persists)"]);
 			if (!scope) return;
 
-			setMode(state, newMode, scope === "Global (persists)", ctx);
+			setReviewMode(state, newMode, scope === "Global (persists)", ctx);
 			const saveMsg = scope === "Global (persists)" ? " (saved globally)" : " (session only)";
-			ctx.ui.notify(`Permission mode: ${PERMISSION_MODE_INFO[newMode].label}${saveMsg}`, "info");
+			ctx.ui.notify(`Review mode: ${PERMISSION_MODE_INFO[newMode].label}${saveMsg}`, "info");
 		} else {
-			setMode(state, newMode, false, ctx);
-			ctx.ui.notify(`Permission mode: ${PERMISSION_MODE_INFO[newMode].label}`, "info");
+			setReviewMode(state, newMode, false, ctx);
+			ctx.ui.notify(`Review mode: ${PERMISSION_MODE_INFO[newMode].label}`, "info");
 		}
 		return;
 	}
 
 	if (!hasInteractiveUI(ctx)) {
-		ctx.ui.notify(
-			`Current permission mode: ${PERMISSION_MODE_INFO[state.permissionMode].label} (${PERMISSION_MODE_INFO[state.permissionMode].desc})`,
-			"info",
-		);
+		ctx.ui.notify(`Current review mode: ${PERMISSION_MODE_INFO[state.reviewMode].label} (${PERMISSION_MODE_INFO[state.reviewMode].desc})`, "info");
 		return;
 	}
 
 	const options = PERMISSION_MODES.map((mode) => {
 		const info = PERMISSION_MODE_INFO[mode];
-		const marker = mode === state.permissionMode ? " ← current" : "";
+		const marker = mode === state.reviewMode ? " ← current" : "";
 		return `${info.label}: ${info.desc}${marker}`;
 	});
 
-	const choice = await ctx.ui.select("Select permission mode", options);
+	const choice = await ctx.ui.select("Select review mode", options);
 	if (!choice) return;
 
 	const selectedLabel = choice.split(":")[0].trim();
 	const newMode = PERMISSION_MODES.find((m) => PERMISSION_MODE_INFO[m].label === selectedLabel);
-	if (!newMode || newMode === state.permissionMode) return;
+	if (!newMode || newMode === state.reviewMode) return;
 
 	const scope = await ctx.ui.select("Save to:", ["Session only", "Global (persists)"]);
 	if (!scope) return;
 
-	setMode(state, newMode, scope === "Global (persists)", ctx);
+	setReviewMode(state, newMode, scope === "Global (persists)", ctx);
 	const saveMsg = scope === "Global (persists)" ? " (saved globally)" : " (session only)";
-	ctx.ui.notify(`Permission mode: ${PERMISSION_MODE_INFO[newMode].label}${saveMsg}`, "info");
+	ctx.ui.notify(`Review mode: ${PERMISSION_MODE_INFO[newMode].label}${saveMsg}`, "info");
 }
 
-/** Handle session_start - initialize level and show status */
+export async function handlePermissionModeCommand(state: PermissionState, args: string, ctx: any): Promise<void> {
+	return handleReviewModeCommand(state, args, ctx);
+}
+
+/** Handle session_start - initialize mode and show status */
 export function handleSessionStart(state: PermissionState, ctx: any): void {
-	// Check env var first (for print mode)
 	const envLevel = process.env.PI_PERMISSION_LEVEL?.toLowerCase();
 	if (envLevel) {
-		// Support legacy env values too
 		const legacyMap: Record<string, PermissionLevel> = {
 			minimal: "read",
 			low: "edit",
@@ -1017,34 +1003,32 @@ export function handleSessionStart(state: PermissionState, ctx: any): void {
 		};
 		const mapped = legacyMap[envLevel] || (LEVELS.includes(envLevel as PermissionLevel) ? (envLevel as PermissionLevel) : null);
 		if (mapped) {
-			state.currentLevel = mapped;
+			state.currentMode = mapped;
 		}
 	} else {
 		const globalLevel = loadGlobalPermission();
 		if (globalLevel) {
-			state.currentLevel = globalLevel;
+			state.currentMode = globalLevel;
 		}
 	}
 
 	if (ctx.hasUI) {
 		const globalMode = loadGlobalPermissionMode();
 		if (globalMode) {
-			state.permissionMode = globalMode;
+			state.reviewMode = globalMode;
 		}
 	}
 
 	if (ctx.hasUI) {
-		if (ctx.ui?.setStatus) {
-			ctx.ui.setStatus("authority", getStatusText(state.currentLevel));
-		}
+		ctx.ui?.setStatus?.("authority", getStatusText(state.currentMode));
 		if (!isQuietMode(ctx)) {
-			ctx.ui.notify(`Permission: ${LEVEL_INFO[state.currentLevel].label} (use /permission to change)`, "info");
+			ctx.ui.notify(`Mode: ${LEVEL_INFO[state.currentMode].label} (use /mode to change)`, "info");
 		}
-		if (state.permissionMode === "block") {
-			ctx.ui.notify("Permission mode: Block (use /permission-mode to change)", "info");
+		if (state.reviewMode === "block") {
+			ctx.ui.notify("Review mode: Block (use /review-mode to change)", "info");
 		}
 		const autoReviewModels = loadAutoReviewModels();
-		if (state.currentLevel === "auto" && autoReviewModels.length > 0) {
+		if (state.currentMode === "auto" && autoReviewModels.length > 0) {
 			ctx.ui.notify(`Auto-review models: ${autoReviewModels.join(", ")}`, "info");
 		}
 	}
@@ -1052,31 +1036,32 @@ export function handleSessionStart(state: PermissionState, ctx: any): void {
 
 /** Handle bash tool_call - check permission and prompt if needed */
 export async function handleBashToolCall(
+	activeMode: PermissionLevel,
 	state: PermissionState,
 	command: string,
 	ctx: any,
 	pi: ExtensionAPI,
-): Promise<{ block: true; reason: string } | undefined> {
+): Promise<ToolHandlerResult> {
 	const classification = classifyCommand(command);
 
-	// Dangerous commands - always reviewed
 	if (classification.dangerous) {
 		if (!hasInteractiveUI(ctx)) {
 			return {
 				block: true,
-				reason: `Dangerous command requires confirmation: ${command}\nConfigure autoReviewModels in settings.json to enable auto-review in non-interactive mode.`,
+				reason: `Dangerous command requires confirmation: ${command}
+Configure autoReviewModels in settings.json to enable auto-review in non-interactive mode.`,
 			};
 		}
 
-		if (state.permissionMode === "block") {
+		if (state.reviewMode === "block") {
 			return {
 				block: true,
-				reason: `Blocked by permission mode (block). Dangerous command: ${command}\nUse /permission-mode ask to enable confirmations.`,
+				reason: `Blocked by review mode (block). Dangerous command: ${command}
+Use /review-mode ask to enable confirmations.`,
 			};
 		}
 
-		// In auto mode, try auto-review first
-		if (state.currentLevel === "auto" && ctx.modelRegistry) {
+		if (activeMode === "auto" && ctx.modelRegistry) {
 			const review = await tryAutoReview(
 				command,
 				ctx.cwd,
@@ -1106,68 +1091,61 @@ export async function handleBashToolCall(
 
 		playPermissionSound();
 		const choice = await ctx.ui.select(`⚠️ Dangerous command`, ["Allow once", "Cancel"]);
-
 		if (choice !== "Allow once") {
 			return { block: true, reason: "Cancelled" };
 		}
 		return undefined;
 	}
 
-	// Check level
-	const requiredIndex = LEVEL_INDEX[classification.level];
-	const currentIndex = LEVEL_INDEX[state.currentLevel];
-
-	if (requiredIndex > currentIndex) {
-		const requiredLevel = classification.level;
+	const requiredLevel = classification.level as "read" | "edit" | "auto";
+	if (!modeAllowsRequiredLevel(activeMode, requiredLevel)) {
 		const requiredInfo = LEVEL_INFO[requiredLevel];
 
-		// Print mode: block
 		if (!hasInteractiveUI(ctx)) {
 			return {
 				block: true,
-				reason: `Blocked by permission (${state.currentLevel}). Command: ${command}\nAllowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\nUser can re-run with: PI_PERMISSION_LEVEL=${requiredLevel} pi -p "..."`,
+				reason: `Blocked by mode (${activeMode}). Command: ${command}
+Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+User can re-run with: PI_PERMISSION_LEVEL=${requiredLevel} pi -p "..."`,
 			};
 		}
 
-		if (state.permissionMode === "block") {
+		if (state.reviewMode === "block") {
 			return {
 				block: true,
-				reason: `Blocked by permission (${state.currentLevel}, mode: block). Command: ${command}\nRequires ${requiredInfo.label}. Allowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\nUse /permission ${requiredLevel} or /permission-mode ask to enable prompts.`,
+				reason: `Blocked by mode (${activeMode}, review mode: block). Command: ${command}
+Requires ${requiredInfo.label}. Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+Use /mode ${requiredLevel} or /review-mode ask to enable prompts.`,
 			};
 		}
 
-		// Interactive mode: prompt to escalate level
 		playPermissionSound();
-		const choice = await ctx.ui.select(`Requires ${requiredInfo.label}`, ["Allow once", `Allow all (${requiredInfo.label})`, "Cancel"]);
-
+		const choice = await ctx.ui.select(`Requires ${requiredInfo.label}`, ["Allow once", `Allow mode (${requiredInfo.label})`, "Cancel"]);
 		if (choice === "Allow once") return undefined;
-
-		if (choice === `Allow all (${requiredInfo.label})`) {
-			setLevel(state, requiredLevel, true, ctx);
-			ctx.ui.notify(`Permission → ${requiredInfo.label} (saved globally)`, "info");
+		if (choice === `Allow mode (${requiredInfo.label})`) {
+			setCurrentMode(state, requiredLevel, true, ctx);
+			ctx.ui.notify(`Mode → ${requiredInfo.label} (saved globally)`, "info");
 			return undefined;
 		}
-
 		return { block: true, reason: "Cancelled" };
 	}
 
-	// Level is satisfied, but check if auto-review is needed for high-risk commands
-	if (classification.needsReview && state.currentLevel === "auto") {
+	if (classification.needsReview && activeMode === "auto") {
 		if (!hasInteractiveUI(ctx)) {
 			return {
 				block: true,
-				reason: `High-risk command requires auto-review: ${command}\nConfigure autoReviewModels in settings.json to enable auto-review in non-interactive mode.`,
+				reason: `High-risk command requires auto-review: ${command}
+Configure autoReviewModels in settings.json to enable auto-review in non-interactive mode.`,
 			};
 		}
 
-		if (state.permissionMode === "block") {
+		if (state.reviewMode === "block") {
 			return {
 				block: true,
-				reason: `Blocked by permission mode (block). High-risk command: ${command}`,
+				reason: `Blocked by review mode (block). High-risk command: ${command}`,
 			};
 		}
 
-		// Try auto-review
 		if (ctx.modelRegistry) {
 			const review = await tryAutoReview(
 				command,
@@ -1196,14 +1174,11 @@ export async function handleBashToolCall(
 			}
 		}
 
-		// No auto-review model available - prompt user
 		playPermissionSound();
 		const choice = await ctx.ui.select(`🔍 High-risk command (auto-review unavailable)`, ["Allow once", "Cancel"]);
-
 		if (choice !== "Allow once") {
 			return { block: true, reason: "Cancelled" };
 		}
-		return undefined;
 	}
 
 	return undefined;
@@ -1211,8 +1186,9 @@ export async function handleBashToolCall(
 
 /** Options for handleWriteToolCall */
 export interface WriteToolCallOptions {
+	activeMode: PermissionLevel;
 	state: PermissionState;
-	toolName: string;
+	toolName: "write" | "edit";
 	filePath: string;
 	ctx: any;
 	pi: ExtensionAPI;
@@ -1220,11 +1196,12 @@ export interface WriteToolCallOptions {
 
 /** Handle read tool_call - scope file reads by cwd and sensitivity */
 export async function handleReadToolCall(
+	activeMode: PermissionLevel,
 	state: PermissionState,
 	filePath: string,
 	ctx: any,
 	pi: ExtensionAPI,
-): Promise<{ block: true; reason: string } | undefined> {
+): Promise<ToolHandlerResult> {
 	const action = "Read";
 	const target = inspectFileAccessTarget(filePath, ctx);
 
@@ -1232,60 +1209,62 @@ export async function handleReadToolCall(
 		return undefined;
 	}
 
-	// Non-safe file - need auto level
-	if (state.currentLevel !== "auto") {
-		const requiredInfo = LEVEL_INFO["auto"];
+	if (activeMode !== "auto") {
+		const requiredInfo = LEVEL_INFO.auto;
 
 		if (!hasInteractiveUI(ctx)) {
 			return {
 				block: true,
 				reason:
-					`Blocked by permission (${state.currentLevel}). ${action}: ${filePath}\n` +
-					`Resolved path: ${target.resolvedPath}\n` +
-					`Reason: ${target.reviewReason}\n` +
-					`Allowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\n` +
+					`Blocked by mode (${activeMode}). ${action}: ${filePath}
+` +
+					`Resolved path: ${target.resolvedPath}
+` +
+					`Reason: ${target.reviewReason}
+` +
+					`Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+` +
 					`User can re-run with: PI_PERMISSION_LEVEL=auto pi -p "..."`,
 			};
 		}
 
-		if (state.permissionMode === "block") {
+		if (state.reviewMode === "block") {
 			return {
 				block: true,
 				reason:
-					`Blocked by permission (${state.currentLevel}, mode: block). ${action}: ${filePath}\n` +
-					`Resolved path: ${target.resolvedPath}\n` +
-					`Reason: ${target.reviewReason}\n` +
-					`Requires ${requiredInfo.label}. Allowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\n` +
-					`Use /permission auto or /permission-mode ask to enable prompts.`,
+					`Blocked by mode (${activeMode}, review mode: block). ${action}: ${filePath}
+` +
+					`Resolved path: ${target.resolvedPath}
+` +
+					`Reason: ${target.reviewReason}
+` +
+					`Requires ${requiredInfo.label}. Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+` +
+					`Use /mode auto or /review-mode ask to enable prompts.`,
 			};
 		}
 
 		playPermissionSound();
-		const choice = await ctx.ui.select(
-			`Requires ${requiredInfo.label}: ${action} ${filePath}`,
-			["Allow once", "Approve and auto review", "Cancel"],
-		);
-
-		if (choice === "Allow once") {
-			return undefined; // Human approved — skip auto-review
-		}
+		const choice = await ctx.ui.select(`Requires ${requiredInfo.label}: ${action} ${filePath}`, ["Allow once", "Approve and auto review", "Cancel"]);
+		if (choice === "Allow once") return undefined;
 		if (choice === "Approve and auto review") {
-			setLevel(state, "auto", true, ctx);
-			ctx.ui.notify(`Permission → ${requiredInfo.label} (saved globally)`, "info");
-			// Fall through to auto-review below for this operation
+			setCurrentMode(state, "auto", true, ctx);
+			ctx.ui.notify(`Mode → ${requiredInfo.label} (saved globally)`, "info");
 		} else {
 			return { block: true, reason: "Cancelled" };
 		}
 	}
 
-	// In auto mode — try auto-review for non-safe files
 	if (!hasInteractiveUI(ctx)) {
 		return {
 			block: true,
 			reason:
-				`Sensitive or out-of-scope file read requires auto-review: ${action} ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Reason: ${target.reviewReason}\n` +
+				`Sensitive or out-of-scope file read requires auto-review: ${action} ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`Reason: ${target.reviewReason}
+` +
 				`Configure autoReviewModels in settings.json to enable this in non-interactive mode.`,
 		};
 	}
@@ -1319,87 +1298,89 @@ export async function handleReadToolCall(
 		}
 	}
 
-	if (state.permissionMode === "block") {
+	if (state.reviewMode === "block") {
 		return {
 			block: true,
 			reason:
-				`Blocked by permission mode (block). ${action}: ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Reason: ${target.reviewReason}\n` +
+				`Blocked by review mode (block). ${action}: ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`Reason: ${target.reviewReason}
+` +
 				`Auto-review was required but no review model returned a decision.`,
 		};
 	}
 
 	playPermissionSound();
 	const choice = await ctx.ui.select(`🔍 Auto-review required: ${action} ${filePath}`, ["Allow once", "Cancel"]);
-
-	if (choice === "Allow once") {
-		return undefined;
-	}
-
+	if (choice === "Allow once") return undefined;
 	return { block: true, reason: "Cancelled" };
 }
 
 /** Handle write/edit tool_call - check permission and prompt if needed */
-export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{ block: true; reason: string } | undefined> {
-	const { state, toolName, filePath, ctx, pi } = opts;
+export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<ToolHandlerResult> {
+	const { activeMode, state, toolName, filePath, ctx, pi } = opts;
 
 	const action = toolName === "write" ? "Write" : "Edit";
 	const target = inspectFileAccessTarget(filePath, ctx);
 	const needsReview = Boolean(target.reviewReason);
-	const requiredLevel: PermissionLevel = needsReview ? "auto" : "edit";
-	let effectiveLevel = state.currentLevel;
+	const requiredLevel: "edit" | "auto" = needsReview ? "auto" : "edit";
 
-	if (state.currentLevel === "read") {
+	if (!modeSupportsFileWrites(activeMode, filePath)) {
+		const modeLabel = LEVEL_INFO[activeMode].label;
+		const planHint = activeMode === "plan" ? "Plan mode only permits Markdown (.md/.mdx) file modifications. " : "";
 		return {
 			block: true,
 			reason:
-				`Blocked in Read mode. ${action}: ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Read mode never permits file modifications. Use /permission edit or /permission auto before retrying.`,
+				`Blocked in ${modeLabel} mode. ${action}: ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`${planHint}Use /mode edit or /mode auto before retrying.`,
 		};
 	}
 
-	if (LEVEL_INDEX[effectiveLevel] < LEVEL_INDEX[requiredLevel]) {
+	if (!modeAllowsRequiredLevel(activeMode, requiredLevel)) {
 		const requiredInfo = LEVEL_INFO[requiredLevel];
-
 		if (!hasInteractiveUI(ctx)) {
 			return {
 				block: true,
 				reason:
-					`Blocked by permission (${state.currentLevel}). ${action}: ${filePath}\n` +
-					`Resolved path: ${target.resolvedPath}\n` +
-					(target.reviewReason ? `Reason: ${target.reviewReason}\n` : "") +
-					`Allowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\n` +
+					`Blocked by mode (${activeMode}). ${action}: ${filePath}
+` +
+					`Resolved path: ${target.resolvedPath}
+` +
+					(target.reviewReason ? `Reason: ${target.reviewReason}
+` : "") +
+					`Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+` +
 					`User can re-run with: PI_PERMISSION_LEVEL=${requiredLevel} pi -p "..."`,
 			};
 		}
 
-		if (state.permissionMode === "block") {
+		if (state.reviewMode === "block") {
 			return {
 				block: true,
 				reason:
-					`Blocked by permission (${state.currentLevel}, mode: block). ${action}: ${filePath}\n` +
-					`Resolved path: ${target.resolvedPath}\n` +
-					(target.reviewReason ? `Reason: ${target.reviewReason}\n` : "") +
-					`Requires ${requiredInfo.label}. Allowed at this level: ${LEVEL_ALLOWED_DESC[state.currentLevel]}\n` +
-					`Use /permission ${requiredLevel} or /permission-mode ask to enable prompts.`,
+					`Blocked by mode (${activeMode}, review mode: block). ${action}: ${filePath}
+` +
+					`Resolved path: ${target.resolvedPath}
+` +
+					(target.reviewReason ? `Reason: ${target.reviewReason}
+` : "") +
+					`Requires ${requiredInfo.label}. Allowed at this mode: ${LEVEL_ALLOWED_DESC[activeMode]}
+` +
+					`Use /mode ${requiredLevel} or /review-mode ask to enable prompts.`,
 			};
 		}
 
 		playPermissionSound();
-		const choice = await ctx.ui.select(
-			`Requires ${requiredInfo.label}: ${action} ${filePath}`,
-			["Allow once", "Approve and auto review", "Cancel"],
-		);
-
-		if (choice === "Allow once") {
-			return undefined; // Human approved — skip auto-review
-		}
+		const choice = await ctx.ui.select(`Requires ${requiredInfo.label}: ${action} ${filePath}`, ["Allow once", "Approve and auto review", "Cancel"]);
+		if (choice === "Allow once") return undefined;
 		if (choice === "Approve and auto review") {
-			setLevel(state, requiredLevel, true, ctx);
-			ctx.ui.notify(`Permission → ${requiredInfo.label} (saved globally)`, "info");
-			// Fall through to auto-review below for this operation
+			setCurrentMode(state, requiredLevel, true, ctx);
+			ctx.ui.notify(`Mode → ${requiredInfo.label} (saved globally)`, "info");
 		} else {
 			return { block: true, reason: "Cancelled" };
 		}
@@ -1409,14 +1390,18 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 		return undefined;
 	}
 
-	if (effectiveLevel === "edit") {
+	if (activeMode === "edit" || activeMode === "plan") {
+		const modeLabel = LEVEL_INFO[activeMode].label;
 		return {
 			block: true,
 			reason:
-				`Blocked in Edit mode. ${action}: ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Reason: ${target.reviewReason}\n` +
-				`Edit mode only auto-allows non-sensitive files inside ${target.cwd}. Use /permission auto to enable auto-review for this request.`,
+				`Blocked in ${modeLabel} mode. ${action}: ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`Reason: ${target.reviewReason}
+` +
+				`${modeLabel} mode only auto-allows non-sensitive files inside ${target.cwd}. Use /mode auto to enable auto-review for this request.`,
 		};
 	}
 
@@ -1424,9 +1409,12 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 		return {
 			block: true,
 			reason:
-				`Sensitive or out-of-scope file edit requires auto-review: ${action} ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Reason: ${target.reviewReason}\n` +
+				`Sensitive or out-of-scope file edit requires auto-review: ${action} ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`Reason: ${target.reviewReason}
+` +
 				`Configure autoReviewModels in settings.json to enable this in non-interactive mode.`,
 		};
 	}
@@ -1460,26 +1448,43 @@ export async function handleWriteToolCall(opts: WriteToolCallOptions): Promise<{
 		}
 	}
 
-	if (state.permissionMode === "block") {
+	if (state.reviewMode === "block") {
 		return {
 			block: true,
 			reason:
-				`Blocked by permission mode (block). ${action}: ${filePath}\n` +
-				`Resolved path: ${target.resolvedPath}\n` +
-				`Reason: ${target.reviewReason}\n` +
+				`Blocked by review mode (block). ${action}: ${filePath}
+` +
+				`Resolved path: ${target.resolvedPath}
+` +
+				`Reason: ${target.reviewReason}
+` +
 				`Auto-review was required but no review model returned a decision.`,
 		};
 	}
 
 	playPermissionSound();
 	const choice = await ctx.ui.select(`🔍 Auto-review required: ${action} ${filePath}`, ["Allow once", "Cancel"]);
-
-	if (choice === "Allow once") {
-		return undefined;
-	}
-
+	if (choice === "Allow once") return undefined;
 	return { block: true, reason: "Cancelled" };
 }
+
+// ============================================================================
+// Mode registry
+// ============================================================================
+
+const modeHandlerFactoryDeps: GuardianModeHandlerFactoryDeps = {
+	onBash: (mode, input, { state, ctx, pi }) => handleBashToolCall(mode, state, input, ctx, pi),
+	onRead: (mode, input, { state, ctx, pi }) => handleReadToolCall(mode, state, input, ctx, pi),
+	onWrite: (mode, toolName, input, { state, ctx, pi }) =>
+		handleWriteToolCall({ activeMode: mode, state, toolName, filePath: input, ctx, pi }),
+};
+
+const modeRegistry = createModeRegistry([
+	createAutoMode(modeHandlerFactoryDeps),
+	createPlanMode(modeHandlerFactoryDeps),
+	createEditMode(modeHandlerFactoryDeps),
+	createReadMode(modeHandlerFactoryDeps),
+]);
 
 // ============================================================================
 // Extension entry point
@@ -1492,13 +1497,23 @@ export default function (pi: ExtensionAPI) {
 		return new Text(theme.fg("warning", formatGuardianMessageDetails(message.content, message.details)), 0, 0);
 	});
 
+	pi.registerCommand("mode", {
+		description: "View or change guardian mode",
+		handler: (args, ctx) => handleModeCommand(state, args, ctx),
+	});
+
 	pi.registerCommand("permission", {
-		description: "View or change permission level",
+		description: "Legacy alias for /mode",
 		handler: (args, ctx) => handlePermissionCommand(state, args, ctx),
 	});
 
+	pi.registerCommand("review-mode", {
+		description: "Set guardian review mode (ask or block)",
+		handler: (args, ctx) => handleReviewModeCommand(state, args, ctx),
+	});
+
 	pi.registerCommand("permission-mode", {
-		description: "Set permission prompt mode (ask or block)",
+		description: "Legacy alias for /review-mode",
 		handler: (args, ctx) => handlePermissionModeCommand(state, args, ctx),
 	});
 
@@ -1506,23 +1521,43 @@ export default function (pi: ExtensionAPI) {
 		handleSessionStart(state, ctx);
 	});
 
+	pi.on("before_agent_start", async () => {
+		const activeMode = modeRegistry.get(state.currentMode);
+		if (!activeMode.systemPrompt) {
+			return;
+		}
+		return {
+			systemPrompt: activeMode.systemPrompt,
+		};
+	});
+
 	pi.on("tool_call", async (event, ctx) => {
+		const activeMode = modeRegistry.get(state.currentMode);
+		if (!["bash", "read", "write", "edit"].includes(event.toolName)) {
+			return undefined;
+		}
+
+		if (!activeMode.registeredTools.includes(event.toolName as any)) {
+			return {
+				block: true,
+				reason: `${LEVEL_INFO[activeMode.id].label} mode does not register the ${event.toolName} tool.`,
+			};
+		}
+
 		if (event.toolName === "bash") {
-			return handleBashToolCall(state, event.input.command as string, ctx, pi);
+			return activeMode.handlers.bash?.(event.input.command as string, { state, ctx, pi });
 		}
 
 		if (event.toolName === "read") {
-			return handleReadToolCall(state, event.input.path as string, ctx, pi);
+			return activeMode.handlers.read?.(event.input.path as string, { state, ctx, pi });
 		}
 
-		if (event.toolName === "write" || event.toolName === "edit") {
-			return handleWriteToolCall({
-				state,
-				toolName: event.toolName,
-				filePath: event.input.path as string,
-				ctx,
-				pi,
-			});
+		if (event.toolName === "write") {
+			return activeMode.handlers.write?.(event.input.path as string, { state, ctx, pi });
+		}
+
+		if (event.toolName === "edit") {
+			return activeMode.handlers.edit?.(event.input.path as string, { state, ctx, pi });
 		}
 
 		return undefined;

@@ -10,6 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { MODE_CAPABILITY_RANK, MODE_ORDER, type GuardianModeId, type GuardianReviewMode } from "./core/mode-framework";
 
 // ============================================================================
 // MINIMAL SHELL TOKENIZER (replaces shell-quote for zero-dependency install)
@@ -106,23 +107,22 @@ function tokenizeShell(command: string): ShellToken[] {
 // TYPES
 // ============================================================================
 
-export type PermissionLevel = "read" | "edit" | "auto";
+export type PermissionLevel = GuardianModeId;
 
-export type PermissionMode = "ask" | "block";
+export type PermissionMode = GuardianReviewMode;
 
-export const LEVELS: PermissionLevel[] = ["read", "edit", "auto"];
+export const LEVELS: PermissionLevel[] = [...MODE_ORDER];
 export const PERMISSION_MODES: PermissionMode[] = ["ask", "block"];
 
 export const LEVEL_INDEX: Record<PermissionLevel, number> = {
-	read: 0,
-	edit: 1,
-	auto: 2,
+	...MODE_CAPABILITY_RANK,
 };
 
 export const LEVEL_INFO: Record<PermissionLevel, { label: string; desc: string }> = {
-	read: { label: "Read", desc: "Read only access to the current workspace." },
-	edit: { label: "Edit", desc: "Read and edit files within the current workspace." },
 	auto: { label: "Auto", desc: "Automatically review actions with a guardian agent." },
+	plan: { label: "Plan", desc: "Planning-focused access with Markdown-only file modifications." },
+	edit: { label: "Edit", desc: "Read and edit files within the current workspace." },
+	read: { label: "Read", desc: "Read only access to the current workspace." },
 };
 
 export const PERMISSION_MODE_INFO: Record<PermissionMode, { label: string; desc: string }> = {
@@ -131,9 +131,10 @@ export const PERMISSION_MODE_INFO: Record<PermissionMode, { label: string; desc:
 };
 
 export const LEVEL_ALLOWED_DESC: Record<PermissionLevel, string> = {
-	read: "Read only access to the current workspace.",
-	edit: "Read and edit files within the current workspace.",
 	auto: "Automatically review actions with a guardian agent.",
+	plan: "Planning-focused access with Markdown-only file modifications.",
+	edit: "Read and edit files within the current workspace.",
+	read: "Read only access to the current workspace.",
 };
 
 export interface Classification {
