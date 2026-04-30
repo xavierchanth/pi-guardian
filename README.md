@@ -1,5 +1,7 @@
 # pi-tai
 
+TEMPORARY: this line was added temporarily.
+
 `pi-tai` is a [Pi](https://pi.dev) distribution that bundles a small set of focused extensions.
 
 ## Installation

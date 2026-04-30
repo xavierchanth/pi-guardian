@@ -1617,7 +1617,11 @@ async function handlePolicyDrivenToolCall(
 // Extension entry point
 // ============================================================================
 
-export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: GuardianModeDefinition[]) {
+export function setModeSessionOnly(state: PermissionState, mode: PermissionLevel, ctx: any): void {
+	setCurrentMode(state, mode, false, ctx);
+}
+
+export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: GuardianModeDefinition[]): PermissionState {
 	modeRegistry = createModeRegistry(registeredModes);
 	const state = createInitialState();
 
@@ -1659,4 +1663,6 @@ export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: Gua
 		}
 		return handlePolicyDrivenToolCall(activeMode, state, event, ctx, pi);
 	});
+
+	return state;
 }

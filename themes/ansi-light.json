@@ -32,7 +32,7 @@
 		"toolOutput": 15,
 		"toolPendingBg": "dim",
 		"toolSuccessBg": "dim",
-		"toolErrorBg": 1,
+		"toolErrorBg": "dim",
 
 		"mdHeading": 3,
 		"mdHr": 3,

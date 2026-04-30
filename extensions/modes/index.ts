@@ -4,9 +4,11 @@ import { autoMode } from "./definitions/auto";
 import { planMode } from "./definitions/plan";
 import { editMode } from "./definitions/edit";
 import { readMode } from "./definitions/read";
+import { registerImplementCommand } from "./implement";
 
 const registeredModes = [autoMode, planMode, editMode, readMode];
 
 export default function (pi: ExtensionAPI) {
-	registerGuardianExtension(pi, registeredModes);
+	const state = registerGuardianExtension(pi, registeredModes);
+	registerImplementCommand(pi, state);
 }
