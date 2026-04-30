@@ -79,12 +79,15 @@ Behavior:
 - blocks file modifications
 - blocks sensitive or out-of-scope file access unless you move to `auto`
 
-### 3. Ghostty Theme Sync
-Bundled dependency:
-- `@ogulcancelik/pi-ghostty-theme-sync`
+### 3. ANSI Theme
+Source:
+- `extensions/ansi-theme/index.ts`
 
 What it does:
-- syncs Pi theme colors with the active Ghostty terminal theme
+- queries the terminal's live ANSI color palette at startup via OSC 4/10/11 escape sequences
+- derives a full Pi theme from the results (semantic role mapping + background blends)
+- activates the generated theme automatically via `ctx.ui.setTheme()`
+- falls back silently to Pi's default theme if the terminal does not support OSC queries
 
 ## Extension layout
 
@@ -92,9 +95,11 @@ What it does:
 extensions/
 ├─ task-context/
 │  └─ index.ts
-└─ modes/
-   ├─ core/
-   ├─ definitions/
+├─ modes/
+│  ├─ core/
+│  ├─ definitions/
+│  └─ index.ts
+└─ ansi-theme/
    └─ index.ts
 ```
 
@@ -109,4 +114,3 @@ pi -ne -e . "<your-prompt>"
 ## Attributions
 
 - Modes extension attribution and license notes: `extensions/modes/LICENSE.md`
-- Ghostty theme sync: `@ogulcancelik/pi-ghostty-theme-sync`

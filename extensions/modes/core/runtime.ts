@@ -45,6 +45,7 @@ import {
 	invalidateConfigCache,
 	loadAutoReviewModels,
 	type Classification,
+	classifyCommand,
 } from "./permission-core";
 
 // Re-export types and constants needed by the hook
@@ -1642,9 +1643,13 @@ export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: Gua
 	pi.on("session_start", async (_event, ctx) => {
 		handleSessionStart(state, ctx);
 	});
-	pi.on("before_agent_start", async () => {
+	pi.on("before_agent_start", async (event) => {
 		const activeMode = getModeRegistry().get(state.currentMode);
-		return activeMode.systemPrompt ? { systemPrompt: activeMode.systemPrompt } : undefined;
+		if (!activeMode.systemPrompt) return undefined;
+		const base = event.systemPrompt ?? "";
+		return {
+			systemPrompt: base ? `${base}\n\n${activeMode.systemPrompt}` : activeMode.systemPrompt,
+		};
 	});
 	pi.on("tool_call", async (event, ctx) => {
 		const activeMode = getModeRegistry().get(state.currentMode);

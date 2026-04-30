@@ -1,16 +1,13 @@
 {
   "name": "pi-tai",
   "dependencies": {
-    "@mariozechner/pi-ai": "^0.70.2",
-    "@ogulcancelik/pi-ghostty-theme-sync": "0.1.1"
+    "@mariozechner/pi-ai": "^0.70.2"
   },
-  "bundleDependencies": [
-    "@ogulcancelik/pi-ghostty-theme-sync"
-  ],
   "pi": {
     "extensions": [
       "./extensions/task-context/index.ts",
-      "./extensions/modes/index.ts"
+      "./extensions/modes/index.ts",
+      "./extensions/ansi-theme/index.ts"
     ]
   }
 }

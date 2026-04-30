@@ -423,9 +423,11 @@ export default function (pi: ExtensionAPI) {
 		refreshStatus(state, ctx);
 	});
 
-	pi.on("before_agent_start", async () => {
+	pi.on("before_agent_start", async (event) => {
+		const instructions = getTaskContextInstructions(state);
+		const base = event.systemPrompt ?? "";
 		return {
-			systemPrompt: getTaskContextInstructions(state),
+			systemPrompt: base ? `${base}\n\n${instructions}` : instructions,
 		};
 	});
 

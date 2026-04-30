@@ -6,7 +6,8 @@ export const planMode: GuardianModeDefinition = {
 	description: "Planning-focused access with Markdown-only file modifications.",
 	order: 1,
 	registeredTools: ["bash", "read", "write", "edit"],
-	systemPrompt: "Focus on planning, not implementation. Prefer outlining steps over making code changes.",
+	systemPrompt:
+		"Focus on planning, not implementation. Prefer outlining steps over making code changes. If the user wants a written plan, or it is otherwise clearly appropriate to write one down, write it to plan.md.",
 	policies: {
 		bash: {
 			kind: "bash",
