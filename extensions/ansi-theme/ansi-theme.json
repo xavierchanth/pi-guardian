@@ -2,23 +2,23 @@
   "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
   "name": "ansi-theme",
   "vars": {
-    "bg": "#24283b",
-    "fg": "#c0caf5",
-    "accent": "#cba6f7",
-    "accentAlt": "#89b4fa",
-    "link": "#f38ba8",
-    "error": "#f38ba8",
-    "success": "#9ece6a",
-    "warning": "#f9e2af",
-    "muted": "#727998",
-    "dim": "#5b617c",
-    "borderMuted": "#464c64",
-    "selectedBg": "#383d53",
-    "userMsgBg": "#30354a",
-    "toolPendingBg": "#2c3044",
-    "toolSuccessBg": "#353f42",
-    "toolErrorBg": "#41364a",
-    "customMsgBg": "#2c334a"
+    "bg": "#f8efe7",
+    "fg": "#2c232e",
+    "accent": "#6851a2",
+    "accentAlt": "#d4572b",
+    "link": "#ce4770",
+    "error": "#ce4770",
+    "success": "#218871",
+    "warning": "#b16803",
+    "muted": "#92898b",
+    "dim": "#b1a8a6",
+    "borderMuted": "#cbc2be",
+    "selectedBg": "#ddd4cf",
+    "userMsgBg": "#e8dfd8",
+    "toolPendingBg": "#eee5de",
+    "toolSuccessBg": "#dae1d6",
+    "toolErrorBg": "#f2d7d6",
+    "customMsgBg": "#f5e3d8"
   },
   "colors": {
     "accent": "accent",
@@ -74,8 +74,8 @@
     "bashMode": "success"
   },
   "export": {
-    "pageBg": "#292d41",
-    "cardBg": "#24283b",
-    "infoBg": "#32374c"
+    "pageBg": "#ece3dc",
+    "cardBg": "#f8efe7",
+    "infoBg": "#e0d7d1"
   }
 }
