@@ -1,0 +1,78 @@
+{
+	"$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+	"name": "ansi-light",
+	"vars": {
+		"red": 1,
+		"green": 2,
+		"yellow": 3,
+		"blue": 4,
+		"magenta": 5,
+		"cyan": 6,
+		"white": 7,
+		"gray": 8
+	},
+	"colors": {
+		"accent": "cyan",
+		"border": "blue",
+		"borderAccent": "cyan",
+		"borderMuted": "white",
+		"success": "green",
+		"error": "red",
+		"warning": "yellow",
+		"muted": "gray",
+		"dim": "white",
+		"text": "",
+		"thinkingText": "gray",
+
+		"selectedBg": "",
+		"userMessageBg": "",
+		"userMessageText": "",
+		"customMessageBg": "",
+		"customMessageText": "",
+		"customMessageLabel": "magenta",
+		"toolPendingBg": "",
+		"toolSuccessBg": "",
+		"toolErrorBg": "",
+		"toolTitle": "",
+		"toolOutput": "gray",
+
+		"mdHeading": "yellow",
+		"mdLink": "blue",
+		"mdLinkUrl": "white",
+		"mdCode": "cyan",
+		"mdCodeBlock": "green",
+		"mdCodeBlockBorder": "gray",
+		"mdQuote": "gray",
+		"mdQuoteBorder": "gray",
+		"mdHr": "gray",
+		"mdListBullet": "green",
+
+		"toolDiffAdded": "green",
+		"toolDiffRemoved": "red",
+		"toolDiffContext": "gray",
+
+		"syntaxComment": "gray",
+		"syntaxKeyword": "blue",
+		"syntaxFunction": "yellow",
+		"syntaxVariable": "blue",
+		"syntaxString": "red",
+		"syntaxNumber": "magenta",
+		"syntaxType": "cyan",
+		"syntaxOperator": "",
+		"syntaxPunctuation": "",
+
+		"thinkingOff": "white",
+		"thinkingMinimal": "gray",
+		"thinkingLow": "blue",
+		"thinkingMedium": "cyan",
+		"thinkingHigh": "magenta",
+		"thinkingXhigh": 5,
+
+		"bashMode": "green"
+	},
+	"export": {
+		"pageBg": "#f8f8f8",
+		"cardBg": "#ffffff",
+		"infoBg": "#fffae6"
+	}
+}

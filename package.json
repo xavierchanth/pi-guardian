@@ -4,6 +4,7 @@
     "@mariozechner/pi-ai": "^0.70.2"
   },
   "pi": {
+    "themes": ["./themes"],
     "extensions": [
       "./extensions/task-context/index.ts",
       "./extensions/modes/index.ts",

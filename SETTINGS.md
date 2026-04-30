@@ -106,6 +106,32 @@ If omitted or empty, auto-review is unavailable in non-interactive mode and dang
 
 ---
 
+### `ansiTheme`
+
+**Type:** `object`  
+**Optional**
+
+Configuration for the ANSI Theme Sync extension.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `darkTheme` | `string` | Theme name to activate when terminal has a dark background. |
+| `lightTheme` | `string` | Theme name to activate when terminal has a light background. |
+
+When the terminal background changes (via OS dark/light mode), the extension switches between these themes automatically using OSC 11 queries.
+
+**Example:**
+```json
+{
+  "ansiTheme": {
+    "darkTheme": "ansi-dark",
+    "lightTheme": "ansi-light"
+  }
+}
+```
+
+---
+
 ### `quietStartup`
 
 **Type:** `boolean`  
