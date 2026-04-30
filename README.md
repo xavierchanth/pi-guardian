@@ -1,8 +1,6 @@
 # pi-tai
 
-This is a distribution for [pi the coding agent](https://pi.dev).  
-
-## Included extensions
+`pi-tai` is a [Pi](https://pi.dev) distribution that bundles a small set of focused extensions.
 
 ## Installation
 
@@ -10,23 +8,105 @@ This is a distribution for [pi the coding agent](https://pi.dev).
 pi install https://github.com/xavierchanth/pi-guardian
 ```
 
-Please open an issue if you'd like me to publish to npm.
-If there are enough upvotes I will do it.
+## Included plugins
 
-## Usage
+### 1. Task Context
+Source:
+- `extensions/task-context/index.ts`
 
-There are two commands:
+What it does:
+- tracks a current goal and task list
+- shows lightweight task status in the UI
+- persists task state in the session
+- supports the `task-context` block workflow
 
-- /permissions - allows you to pick between read, edit, auto.
-  - read allows read only access to the workspace, with certain secret files ignored.
-  - edit allows read + edits to the workspace, with those same secret files ignored.
-  - auto has the same permissions as edit, but also reviews all tool calls and secret file read/edits via a custom guardian agent.
+### 2. Modes
+Source:
+- `extensions/modes/index.ts`
 
-- permissions-mode - allows you to pick whether low-confidence auto-reviews are sent to the human (more precise), or immediately blocked (more autonomous).
+What it does:
+- provides mode-based access control for the agent
+- adds direct mode commands
+- supports a review mode for confirmation behavior
 
+Available modes:
+- `auto`
+- `plan`
+- `edit`
+- `read`
+
+Commands:
+- `/mode`
+- `/mode:auto`
+- `/mode:plan`
+- `/mode:edit`
+- `/mode:read`
+- `/review-mode`
+
+#### Auto mode
+Auto mode is the most capable mode in the distribution.
+
+Behavior:
+- allows read and write tools
+- allows the broadest bash access
+- uses guardian auto-review for higher-risk actions
+- is the mode required for sensitive or out-of-scope file access
+
+#### Plan mode
+Plan mode is meant for planning rather than implementation.
+
+Behavior:
+- adds a brief planning-oriented system prompt
+- allows read access and read-level bash usage
+- allows Markdown-only file changes: `.md`, `.mdx`
+- blocks non-Markdown implementation edits unless you switch modes
+
+#### Edit mode
+Edit mode is for normal in-workspace file editing without full auto mode.
+
+Behavior:
+- allows read access
+- allows file edits in ordinary project files
+- blocks sensitive or out-of-scope file changes unless you move to `auto`
+- allows more than `read`, but less than `auto`
+
+#### Read mode
+Read mode is the most restrictive mode.
+
+Behavior:
+- allows read access to ordinary workspace files
+- allows read-level bash usage
+- blocks file modifications
+- blocks sensitive or out-of-scope file access unless you move to `auto`
+
+### 3. Ghostty Theme Sync
+Bundled dependency:
+- `@ogulcancelik/pi-ghostty-theme-sync`
+
+What it does:
+- syncs Pi theme colors with the active Ghostty terminal theme
+
+## Extension layout
+
+```text
+extensions/
+├─ task-context/
+│  └─ index.ts
+└─ modes/
+   ├─ core/
+   ├─ definitions/
+   └─ index.ts
+```
+
+## Testing
+
+Per `AGENTS.md`, test with only this distribution loaded using:
+
+```sh
+pi -ne -e . "<your-prompt>"
+```
 
 ## Attributions
 
-This plugin is based off of another [permissions plugin by prateekmedia](https://github.com/prateekmedia/pi-hooks/tree/e55a50f9c5386504208e32ed059c099cfdc30611/permission).
-
-See [LICENSE.md](./LICENSE.md) for more information.
+- Modes extension attribution and license notes: `extensions/modes/LICENSE.md`
+- Ghostty theme sync: `@ogulcancelik/pi-ghostty-theme-sync`
