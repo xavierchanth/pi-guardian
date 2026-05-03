@@ -126,10 +126,10 @@ function getPiModeFromArgv(argv: string[] = process.argv): string | undefined {
 function hasInteractiveUI(ctx: any): boolean {
 	if (!ctx?.hasUI) return false;
 
-	// In non-interactive modes (rpc/json/print), UI prompts are not desired.
-	// We still allow notifications, but block instead of asking.
+	// RPC mode supports extension UI dialogs over the extension_ui_request /
+	// extension_ui_response sub-protocol. Only JSON/print should suppress prompts.
 	const mode = getPiModeFromArgv()?.toLowerCase();
-	if (mode && mode !== "interactive") return false;
+	if (mode === "json" || mode === "print") return false;
 
 	return true;
 }
