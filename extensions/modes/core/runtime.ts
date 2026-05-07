@@ -812,7 +812,7 @@ function sendAutoReviewThreadMessage(pi: ExtensionAPI, review: AutoReviewResult)
 				rawResponse: review.rawResponse,
 				attempts: review.attempts,
 			} satisfies GuardianMessageContent,
-			display: true,
+			display: false,
 		},
 		{ triggerTurn: false },
 	);
