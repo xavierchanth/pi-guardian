@@ -45,7 +45,9 @@ test("legacy task blocks and permission modes are absent", () => {
 test("package pins Guardian and ships required notices", () => {
   assert.equal(manifest.dependencies?.["pi-approval-guardian"], "0.7.3");
   assert.ok(manifest.files?.includes("THIRD_PARTY_NOTICES.md"));
+  assert.ok(manifest.files?.includes("justfile"));
   assert.ok(existsSync(join(root, "THIRD_PARTY_NOTICES.md")));
+  assert.ok(existsSync(join(root, "justfile")));
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
 });
 

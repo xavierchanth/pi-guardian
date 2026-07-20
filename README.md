@@ -16,6 +16,22 @@ For local development or one-off testing:
 pi -ne -e . "<your-prompt>"
 ```
 
+## Run Pi-Tai from this checkout
+
+The repository includes a `justfile` that starts an isolated Pi process with this package as its only extension distribution:
+
+```sh
+# Open the interactive Pi TUI
+just pitai
+
+# Run one prompt non-interactively
+just pitai "Explain the current project"
+```
+
+`just pi` and `just pi-tai` are aliases for the same recipe. Run `just` to list development commands such as `check`, `smoke`, and `package-check`.
+
+The recipe executes `pi -ne -e <repository-root>`, so unrelated globally installed extensions are disabled while Pi-Tai is loaded from the current checkout.
+
 Upgrade by selecting a new explicit tag:
 
 ```sh
@@ -97,6 +113,7 @@ pi -ne -e . "Reply with exactly: pi-tai-loaded"
 ## Repository layout
 
 ```text
+justfile                            local Pi-Tai terminal launcher
 packages/pi-tai/extension.ts        Pi extension composition root
 packages/pi-tai/src/config/         trusted Pi-Tai configuration
 packages/pi-tai/src/work-context/   update_plan domain and persistence

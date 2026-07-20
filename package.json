@@ -54,6 +54,7 @@
   "files": [
     "packages/pi-tai",
     "docs",
+    "justfile",
     "README.md",
     "SETTINGS.md",
     "THIRD_PARTY_NOTICES.md",
