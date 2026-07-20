@@ -42,6 +42,13 @@ test("legacy task blocks and permission modes are absent", () => {
   assert.doesNotMatch(source, /registerCommand\(["'](?:mode|review-mode|implement)/);
 });
 
+test("portable Host protocol crates remain independent of Tauri", () => {
+  const cargo = readFileSync(join(root, "crates/host-protocol/Cargo.toml"), "utf8");
+  assert.doesNotMatch(cargo, /tauri/i);
+  assert.ok(existsSync(join(root, "packages/host-protocol/src/index.ts")));
+  assert.ok(existsSync(join(root, "fixtures/host-protocol/command-prompt.json")));
+});
+
 test("package pins Guardian and ships required notices", () => {
   assert.equal(manifest.dependencies?.["pi-approval-guardian"], "0.7.3");
   assert.ok(manifest.files?.includes("THIRD_PARTY_NOTICES.md"));

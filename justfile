@@ -24,9 +24,13 @@ alias pi := pi-tai
 setup:
     npm ci
 
-# Run type checking and all automated tests.
+# Run TypeScript, Node, and Rust checks.
 check:
     npm run check
+
+# Run the portable Rust workspace tests.
+rust-check:
+    cargo test --workspace
 
 # Verify package contents without publishing.
 package-check:

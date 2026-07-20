@@ -1,0 +1,11 @@
+{
+  "protocol": {
+    "minVersion": 1,
+    "maxVersion": 1
+  },
+  "implementation": {
+    "name": "pi-tai-acp",
+    "version": "0.1.0"
+  },
+  "clientKind": "acp"
+}

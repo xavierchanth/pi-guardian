@@ -1,0 +1,20 @@
+[
+  {
+    "name": "exact current version",
+    "client": { "minVersion": 1, "maxVersion": 1 },
+    "host": { "minVersion": 1, "maxVersion": 1 },
+    "selected": 1
+  },
+  {
+    "name": "highest overlapping version",
+    "client": { "minVersion": 1, "maxVersion": 3 },
+    "host": { "minVersion": 1, "maxVersion": 2 },
+    "selected": 2
+  },
+  {
+    "name": "client is too new",
+    "client": { "minVersion": 2, "maxVersion": 3 },
+    "host": { "minVersion": 1, "maxVersion": 1 },
+    "selected": null
+  }
+]

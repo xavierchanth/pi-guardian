@@ -134,7 +134,11 @@ packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       stock Guardian composition adapter
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes
-tests/                              unit, integration, repository, and smoke tests
+packages/host-protocol/              TypeScript Host protocol contract
+crates/host-protocol/                portable Rust Host protocol contract
+fixtures/host-protocol/              shared cross-language protocol fixtures
+docs/adr/                            accepted architecture decisions
+tests/                               unit, integration, repository, and smoke tests
 ```
 
 Architecture and future Host work are documented under [`docs/`](docs/PRD.md).

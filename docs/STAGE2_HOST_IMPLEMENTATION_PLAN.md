@@ -2,9 +2,16 @@
 
 ## Status
 
-Design pass approved. Terminal Pi-Tai is accepted for progression to Stage 2; session-title tuning may continue independently if needed.
+Design pass approved. H0 workspace and protocol contracts are implemented; H1 Tauri Host Agent lifecycle proof is next. Terminal Pi-Tai session-title tuning may continue independently if needed.
 
-Stage 2 begins with disposable architecture proofs. Production Host and ACP implementation starts only after those proofs are reviewed.
+Stage 2 proceeds through disposable architecture proofs. Production Host and ACP implementation starts only after those proofs are reviewed.
+
+Accepted architecture decisions:
+
+- [ADR 0001: Host Agent owns durable sessions](adr/0001-host-process-ownership.md)
+- [ADR 0002: Valid mutations transfer active-client control immediately](adr/0002-immediate-client-control.md)
+- [ADR 0003: Unload idle runtimes and recover interrupted turns explicitly](adr/0003-runtime-idle-and-recovery.md)
+- [ADR 0004: macOS-first shell with a portable core](adr/0004-macos-first-portable-core.md)
 
 ## Product decisions from the design pass
 

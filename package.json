@@ -19,13 +19,19 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "bins/*"
+  ],
   "scripts": {
     "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts tests/repository/*.test.ts",
     "test:unit": "node --test tests/unit/*.test.ts",
     "test:integration": "node --test tests/integration/*.test.ts",
     "test:repository": "node --test tests/repository/*.test.ts",
+    "test:rust": "cargo test --workspace",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs"
   },
