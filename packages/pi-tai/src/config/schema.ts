@@ -1,0 +1,43 @@
+export const TITLE_EFFORTS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type TitleEffort = (typeof TITLE_EFFORTS)[number];
+
+export interface SessionTitleConfig {
+  provider?: string;
+  model?: string;
+  effort: TitleEffort;
+  maxWords: number;
+  fallback: "heuristic";
+}
+
+export interface AnsiThemeConfig {
+  darkTheme: string;
+  lightTheme: string;
+  pollIntervalMs: number;
+}
+
+export interface PiTaiConfig {
+  sessionTitle: SessionTitleConfig;
+  ansiTheme: AnsiThemeConfig;
+}
+
+export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
+  sessionTitle: Object.freeze({
+    effort: "minimal",
+    maxWords: 6,
+    fallback: "heuristic",
+  }),
+  ansiTheme: Object.freeze({
+    darkTheme: "ansi-dark",
+    lightTheme: "ansi-light",
+    pollIntervalMs: 2000,
+  }),
+});
