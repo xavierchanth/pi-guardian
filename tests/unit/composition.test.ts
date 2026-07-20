@@ -29,6 +29,7 @@ test("composition root registers every feature once in order", async () => {
       config: createPiTaiConfigService(),
       workContext: createPiSessionWorkContextStore(),
       titleGenerator: async () => "test title",
+      queryTerminalBackground: async () => undefined,
     }),
   );
 

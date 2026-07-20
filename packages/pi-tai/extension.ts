@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import registerAnsiTheme from "./src/ansi-theme/index.ts";
+import { queryTerminalBackground, type QueryTerminalBackground } from "./src/ansi-theme/query.ts";
+import { registerAnsiTheme } from "./src/ansi-theme/register.ts";
 import {
   createPiTaiConfigService,
   registerPiTaiConfig,
@@ -18,6 +19,7 @@ export interface PiTaiRuntime {
   config: PiTaiConfigService;
   workContext: WorkContextStore;
   titleGenerator: TitleGenerator;
+  queryTerminalBackground: QueryTerminalBackground;
 }
 
 export type PiTaiRegistrar = (
@@ -42,7 +44,9 @@ const productionRegistrars: PiTaiRegistrars = {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
   },
   guardian: (pi) => registerApprovalGuardian(pi),
-  ansiTheme: (pi) => registerAnsiTheme(pi),
+  ansiTheme: (pi, runtime) => {
+    registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
+  },
 };
 
 function createProductionRuntime(): PiTaiRuntime {
@@ -50,6 +54,7 @@ function createProductionRuntime(): PiTaiRuntime {
     config: createPiTaiConfigService(),
     workContext: createPiSessionWorkContextStore(),
     titleGenerator: generateModelTitle,
+    queryTerminalBackground,
   };
 }
 
