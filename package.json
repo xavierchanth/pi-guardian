@@ -8,6 +8,14 @@
     "pi-extension"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xavierchanth/pi-tai.git"
+  },
+  "homepage": "https://github.com/xavierchanth/pi-tai#readme",
+  "bugs": {
+    "url": "https://github.com/xavierchanth/pi-tai/issues"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
@@ -45,8 +53,10 @@
   },
   "files": [
     "packages/pi-tai",
+    "docs",
     "README.md",
     "SETTINGS.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "dependencies": {

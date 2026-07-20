@@ -1,223 +1,85 @@
-# Settings Reference
+# Pi-Tai settings
 
-This document lists every configuration value that the `pi-tai` distribution reads from or writes to `~/.pi/agent/settings.json`.
+## Pi-Tai configuration
 
----
+Pi-Tai reads:
 
-## Settings written by this distribution
+- global: `~/.pi/agent/pi-tai.json`
+- project: `<project>/.pi/pi-tai.json`
 
-### `permissionLevel`
+Project configuration is read only after Pi trusts the project. Valid project fields override global fields; invalid values are ignored with a warning.
 
-**Type:** `string`  
-**Values:** `"auto"` | `"plan"` | `"edit"` | `"read"`
+### `sessionTitle`
 
-The active guardian mode. Persisted when you run `/mode` and choose **"Save globally"**.
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `provider` | non-empty string | unset | Provider used only for title generation. |
+| `model` | non-empty string | unset | Model used only for title generation. |
+| `effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` | `minimal` | Independent title-model reasoning effort. |
+| `maxWords` | integer 1–20 | `6` | Maximum normalized title length. |
+| `fallback` | `heuristic` | `heuristic` | Local fallback when provider/model is absent or fails. |
 
-- `auto` — Full access with auto-review for dangerous/high-risk actions
-- `plan` — Planning-only; Markdown-only file edits; read-level bash
-- `edit` — Read and edit files; no dangerous bash
-- `read` — Read-only access
-
-**Example:**
-```json
-{
-  "permissionLevel": "auto"
-}
-```
-
----
-
-### `permissionMode`
-
-**Type:** `string`  
-**Values:** `"ask"` | `"block"`
-
-The review behavior when an action exceeds the current mode's permissions.
-
-- `ask` — Prompt to upgrade to a higher mode (default)
-- `block` — Reject the action outright
-
-Persisted when you run `/review-mode`.
-
-**Example:**
-```json
-{
-  "permissionMode": "ask"
-}
-```
-
----
-
-### `permissionConfig`
-
-**Type:** `object`  
-**Optional**
-
-Fine-grained command classification overrides and prefix normalisation.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `overrides` | `Record<string, string[]>` | Force specific permission levels for command patterns. Keys: `read`, `edit`, `auto`, `dangerous`. |
-| `prefixMappings` | `{ from: string, to: string }[]` | Strip/replace command prefixes before classification. |
-
-**Example:**
-```json
-{
-  "permissionConfig": {
-    "overrides": {
-      "read": ["tmux list-*", "tmux show-*"],
-      "auto": ["tmux *", "screen *"],
-      "dangerous": ["rm -rf *", "dd if=* of=/dev/*"]
-    },
-    "prefixMappings": [
-      { "from": "fvm flutter", "to": "flutter" },
-      { "from": "nvm exec", "to": "" }
-    ]
-  }
-}
-```
-
-Access via `/mode config show` and `/mode config reset`.
-
----
-
-## Settings read by this distribution
-
-### `autoReviewModels`
-
-**Type:** `string[]`  
-**Optional**
-
-List of `"provider/model"` identifiers that trigger the guardian auto-review agent when running in non-interactive mode (`pi -p`, `pi -ne`, etc.).
-
-Each entry must contain a `/` separator.
-
-**Example:**
-```json
-{
-  "autoReviewModels": [
-    "openai-codex/gpt-5.4-mini",
-    "opencode-go/qwen3.5-plus"
-  ]
-}
-```
-
-If omitted or empty, auto-review is unavailable in non-interactive mode and dangerous actions are denied outright.
-
----
+Both `provider` and `model` must be present before Pi-Tai makes a title-model request. Pi-Tai never substitutes the active work model.
 
 ### `ansiTheme`
 
-**Type:** `object`  
-**Optional**
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `darkTheme` | non-empty string | `ansi-dark` | Theme selected for a dark terminal background. |
+| `lightTheme` | non-empty string | `ansi-light` | Theme selected for a light terminal background. |
+| `pollIntervalMs` | integer 250–60000 | `2000` | Delay between completed OSC 11 queries. |
 
-Configuration for the ANSI Theme Sync extension.
+ANSI querying runs only in interactive TUI mode.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `darkTheme` | `string` | Theme name to activate when terminal has a dark background. |
-| `lightTheme` | `string` | Theme name to activate when terminal has a light background. |
+### Example
 
-When the terminal background changes (via OS dark/light mode), the extension switches between these themes automatically using OSC 11 queries.
-
-**Example:**
 ```json
 {
+  "sessionTitle": {
+    "provider": "provider-id",
+    "model": "luna-model-id",
+    "effort": "minimal",
+    "maxWords": 6,
+    "fallback": "heuristic"
+  },
   "ansiTheme": {
     "darkTheme": "ansi-dark",
-    "lightTheme": "ansi-light"
+    "lightTheme": "ansi-light",
+    "pollIntervalMs": 2000
   }
 }
 ```
 
----
+## Approval Guardian configuration
 
-### `quietStartup`
+Approval Guardian retains its own configuration contract:
 
-**Type:** `boolean`  
-**Optional**
+- global: `~/.pi/agent/approval-guardian.json`
+- project: `<project>/.pi/approval-guardian.json`
 
-If `true`, the modes extension suppresses the startup permission banner and sound notification.
+The project file is honored only for trusted projects and cannot weaken the effective global review floor. Guardian also supports its documented environment variables.
 
-**Example:**
-```json
-{
-  "quietStartup": true
-}
-```
-
-> **Note:** This setting is not owned by `pi-tai`; it is a native Pi setting that this distribution respects.
-
----
-
-## Settings **not** touched by this distribution
-
-The following Pi-native settings are **unaffected** by `pi-tai`. They are listed here only to clarify scope.
-
-| Setting | Description |
-|---------|-------------|
-| `theme` | Managed dynamically by the ANSI Theme extension (no manual setting required). |
-| `defaultProvider` | Native Pi setting for the default LLM provider. |
-| `defaultModel` | Native Pi setting for the default model. |
-| `defaultThinkingLevel` | Native Pi setting for the default thinking level. |
-| `hideThinkingBlock` | Native Pi setting to hide the thinking block. |
-| `enabledModels` | Native Pi setting for the model picker whitelist. |
-| `packages` | Native Pi setting for installed distributions; should include this repo's URL. |
-
----
-
-## Package-level configuration
-
-These values live in this repo's `package.json`, not in `~/.pi/agent/settings.json`.
-
-### `pi.extensions`
-
-**Type:** `string[]`
-
-Paths to the TypeScript entry points for each bundled extension.
+Representative configuration:
 
 ```json
 {
-  "pi": {
-    "extensions": [
-      "./extensions/task-context/index.ts",
-      "./extensions/modes/index.ts",
-      "./extensions/ansi-theme/index.ts"
-    ]
+  "model": "provider/reviewer-model",
+  "fallbackModel": "provider/fallback-reviewer-model",
+  "timeoutMs": 120000,
+  "policy": "Additional local review guidance.",
+  "review": {
+    "bash.command": "always",
+    "read.path": "private-only",
+    "write.path": "outside-or-private",
+    "edit.path": "outside-or-private"
   }
 }
 ```
 
----
+Review levels are `always`, `outside-or-private`, `private-only`, and `off`. Consult the installed `pi-approval-guardian` README and reference documentation for authoritative semantics, environment variables, and security guarantees.
 
-## Full example `settings.json`
+The Guardian reviewer is independent from both the active work model and Pi-Tai's session-title model.
 
-```json
-{
-  "lastChangelogVersion": "0.70.6",
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-6",
-  "defaultThinkingLevel": "medium",
-  "hideThinkingBlock": false,
-  "enabledModels": [
-    "gpt-5.4",
-    "claude-sonnet-4-6",
-    "kimi-k2.6"
-  ],
-  "permissionLevel": "auto",
-  "permissionMode": "ask",
-  "permissionConfig": {
-    "overrides": {
-      "read": ["tmux list-*"]
-    }
-  },
-  "autoReviewModels": [
-    "openai-codex/gpt-5.4-mini",
-    "opencode-go/qwen3.5-plus"
-  ],
-  "quietStartup": true,
-  "packages": [
-    "https://github.com/xavierchanth/pi-guardian"
-  ]
-}
-```
+## Native Pi settings
+
+Pi-Tai does not own native settings such as `defaultProvider`, `defaultModel`, `defaultThinkingLevel`, `enabledModels`, `theme`, or `packages`. Configure those through Pi normally.

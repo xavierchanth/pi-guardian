@@ -29,6 +29,8 @@ docs: add refresh PRD and phased implementation plan
 
 ## Stage 1: refresh terminal Pi-Tai
 
+**Implementation status:** automated implementation and package checks complete; manual terminal acceptance pending.
+
 The implementation-ready repository layout, plugin composition design, test boundaries, and checkpoint sequence are specified in [TERMINAL_PLUGIN_PLAN.md](TERMINAL_PLUGIN_PLAN.md). The phases below remain the product-level acceptance summary; where filenames or tactical sequencing differ, the terminal plan controls.
 
 ### Phase 1: establish the modern baseline

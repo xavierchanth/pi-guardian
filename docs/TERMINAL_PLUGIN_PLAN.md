@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Ready for implementation after this planning checkpoint is reviewed.
+Implemented through the automated release-candidate checks. Manual terminal acceptance remains pending, including real Luna title-model and configured Guardian reviewer checks.
 
 This plan covers only the first product stage:
 
