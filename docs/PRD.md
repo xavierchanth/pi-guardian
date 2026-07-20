@@ -124,7 +124,7 @@ Pi-Tai must register a structured planning tool with a complete-state update sha
 
 ```ts
 {
-  goal?: string;
+  goal: string;
   explanation?: string;
   plan: Array<{
     content: string;
@@ -147,6 +147,8 @@ Requirements:
 - State must survive resume and compaction.
 - The tool result must contain a readable complete snapshot, not only opaque details.
 - Terminal-specific rendering may enhance the tool but cannot be required for correctness.
+- Interactive TUI sessions show a responsive two-line widget with the goal on the first line and plan progress/current step on the second.
+- Compact tool results expand to the complete checklist, and `/plan-status` provides a read-only full-plan view.
 
 ### FR-3: Guardian task context
 

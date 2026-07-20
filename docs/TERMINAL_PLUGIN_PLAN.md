@@ -368,7 +368,9 @@ Add unit and integration tests for:
 - Store every accepted complete snapshot in tool-result details.
 - Reconstruct from `ctx.sessionManager.getBranch()` on session start and tree changes.
 - Add original, concise prompt guidelines explaining when planning is and is not needed.
-- Add compact TUI call/result rendering as optional presentation.
+- Add a responsive two-line TUI widget below the editor with full-width goal and progress/current-step lines.
+- Keep tool results compact by default and show the complete checklist when expanded.
+- Add the read-only `/plan-status` full-plan view.
 - Expose the current immutable work context to the Guardian adapter.
 
 #### Refactor

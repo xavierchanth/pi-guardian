@@ -49,6 +49,15 @@ The `update_plan` tool stores a complete goal and replacement plan in Pi tool-re
 - An item must be accepted as `in_progress` before it becomes `completed`.
 - Every update contains the complete replacement plan.
 
+In interactive TUI sessions, active work context appears below the editor as a responsive two-line widget:
+
+```text
+Goal: Ship terminal refresh
+Plan: 2/5 | Now: Integrate Guardian
+```
+
+Long goal and active-step text is truncated to the available terminal width. Run `/plan-status` for a read-only full-plan view. `update_plan` results show a compact progress summary by default and the full checklist when tool output is expanded.
+
 ### Independent session naming
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.

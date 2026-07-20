@@ -7,6 +7,11 @@ import {
   workContextDetails,
 } from "../../packages/pi-tai/src/work-context/domain.ts";
 import { latestWorkContext } from "../../packages/pi-tai/src/work-context/persistence.ts";
+import {
+  collapsedWorkContextText,
+  fullWorkContextText,
+  workContextStatusLines,
+} from "../../packages/pi-tai/src/work-context/presentation.ts";
 
 test("accepts an empty plan for simple work", () => {
   const snapshot = validateWorkContextUpdate({ goal: "Answer the question", plan: [] });
@@ -94,6 +99,54 @@ test("details and readable text contain the full snapshot", () => {
   assert.deepEqual(parseWorkContextDetails(details), snapshot);
   assert.match(formatWorkContext(snapshot), /Goal: Ship/);
   assert.match(formatWorkContext(snapshot), /Implement \(in_progress; priority: medium\)/);
+});
+
+test("builds the approved two-line status presentation", () => {
+  const snapshot = validateWorkContextUpdate({
+    goal: "Ship terminal refresh",
+    plan: [
+      { content: "Establish baseline", status: "completed" },
+      { content: "Integrate Guardian", status: "in_progress", priority: "high" },
+      { content: "Run acceptance", status: "pending" },
+    ],
+  }, {
+    goal: "Ship terminal refresh",
+    plan: [
+      { content: "Establish baseline", status: "in_progress" },
+      { content: "Integrate Guardian", status: "pending" },
+      { content: "Run acceptance", status: "pending" },
+    ],
+  });
+
+  assert.deepEqual(workContextStatusLines(snapshot), [
+    "Goal: Ship terminal refresh",
+    "Plan: 1/3 | Now: Integrate Guardian",
+  ]);
+  assert.equal(
+    collapsedWorkContextText(snapshot),
+    "✓ Plan 1/3 · Now: Integrate Guardian",
+  );
+  assert.match(fullWorkContextText(snapshot), /\[x] Establish baseline/);
+  assert.match(fullWorkContextText(snapshot), /\[>] Integrate Guardian \[high]/);
+});
+
+test("presents empty and completed plans clearly", () => {
+  const empty = validateWorkContextUpdate({ goal: "Answer", plan: [] });
+  assert.deepEqual(workContextStatusLines(empty), [
+    "Goal: Answer",
+    "Plan: No active steps",
+  ]);
+
+  const active = validateWorkContextUpdate({
+    goal: "Finish",
+    plan: [{ content: "Only step", status: "in_progress" }],
+  });
+  const complete = validateWorkContextUpdate({
+    goal: "Finish",
+    plan: [{ content: "Only step", status: "completed" }],
+  }, active);
+  assert.equal(collapsedWorkContextText(complete), "✓ Plan 1/1 · Complete");
+  assert.equal(workContextStatusLines(complete)[1], "Plan: 1/1 | Complete");
 });
 
 test("reconstructs the latest valid snapshot on the active branch", () => {
