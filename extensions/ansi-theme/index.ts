@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -131,44 +131,44 @@ function queryBgColor(): Promise<string | null> {
 
 // ─── Extension Entry Point ────────────────────────────────────────────────────
 
-export default async function (pi: ExtensionAPI) {
-	const config = (pi.getSettings?.() ?? {})["ansiTheme"] as
-		| AnsiThemeConfig
-		| undefined;
-	const darkTheme = config?.darkTheme ?? "ansi-dark";
-	const lightTheme = config?.lightTheme ?? "ansi-light";
-
-	// Initial query
-	const bg = await queryBgColor();
-	if (!bg) return;
-
-	let currentMode: ThemeMode = detectMode(bg);
+export default function (pi: ExtensionAPI) {
+	const config: AnsiThemeConfig = {};
+	const darkTheme = config.darkTheme ?? "ansi-dark";
+	const lightTheme = config.lightTheme ?? "ansi-light";
+	let currentMode: ThemeMode | undefined;
+	let pollTimer: NodeJS.Timeout | undefined;
+	let stopped = true;
 
 	function getThemeName(mode: ThemeMode): string {
 		return mode === "dark" ? darkTheme : lightTheme;
 	}
 
-	pi.on("session_start", (_event, ctx) => {
-		ctx.ui.setTheme(getThemeName(currentMode));
-	});
-
-	// Poll for background color changes in a child process
-	let pollTimer: NodeJS.Timeout | null = null;
-
-	async function poll() {
-		const bg = await queryBgColor();
-		if (bg) {
-			const mode = detectMode(bg);
-			if (mode !== currentMode) {
-				currentMode = mode;
-			}
-		}
-		pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+	function stopPolling(): void {
+		stopped = true;
+		if (pollTimer) clearTimeout(pollTimer);
+		pollTimer = undefined;
 	}
 
-	pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+	pi.on("session_start", async (_event, ctx) => {
+		stopPolling();
+		if (ctx.mode !== "tui") return;
 
-	pi.on("session_shutdown", () => {
-		if (pollTimer) clearTimeout(pollTimer);
+		stopped = false;
+		const poll = async (): Promise<void> => {
+			const bg = await queryBgColor();
+			if (stopped) return;
+			if (bg) {
+				const mode = detectMode(bg);
+				if (mode !== currentMode) {
+					currentMode = mode;
+					ctx.ui.setTheme(getThemeName(mode));
+				}
+			}
+			pollTimer = setTimeout(poll, POLL_INTERVAL_MS);
+		};
+
+		await poll();
 	});
+
+	pi.on("session_shutdown", stopPolling);
 }

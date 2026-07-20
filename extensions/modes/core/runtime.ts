@@ -23,9 +23,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { complete, type Api, type Model, type UserMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { evaluateBashAccess, evaluateReadAccess, evaluateWriteAccess, inspectFileAccessTarget as inspectSharedFileAccessTarget } from "./evaluate-access";
 import { createModeRegistry, type GuardianModeDefinition, type GuardianModeRegistry } from "./mode-framework";
 import type { PermissionState, ToolHandlerResult } from "./guardian-types";
@@ -34,6 +35,7 @@ import {
 	type PermissionMode,
 	LEVELS,
 	LEVEL_INFO,
+	LEVEL_ALLOWED_DESC,
 	PERMISSION_MODES,
 	PERMISSION_MODE_INFO,
 	loadGlobalPermission,
@@ -1591,7 +1593,8 @@ async function handlePolicyDrivenToolCall(
 	}
 
 	if (event.toolName === "write" || event.toolName === "edit") {
-		const policy = activeMode.policies[event.toolName];
+		const toolName = event.toolName as "write" | "edit";
+		const policy = activeMode.policies[toolName];
 		if (!policy || policy.kind !== "write") return { block: true, reason: `No ${event.toolName} policy for ${activeMode.id} mode.` };
 		const action = event.toolName === "write" ? "Write" : "Edit";
 		const result = evaluateWriteAccess(policy, event.input.path as string, getSessionCwd(ctx));
@@ -1658,7 +1661,7 @@ export function registerGuardianExtension(pi: ExtensionAPI, registeredModes: Gua
 	pi.on("tool_call", async (event, ctx) => {
 		const activeMode = getModeRegistry().get(state.currentMode);
 		if (!["bash", "read", "write", "edit"].includes(event.toolName)) return undefined;
-		if (!activeMode.registeredTools.includes(event.toolName)) {
+		if (!activeMode.registeredTools.some((name) => name === event.toolName)) {
 			return { block: true, reason: `${LEVEL_INFO[activeMode.id].label} mode does not register the ${event.toolName} tool.` };
 		}
 		return handlePolicyDrivenToolCall(activeMode, state, event, ctx, pi);

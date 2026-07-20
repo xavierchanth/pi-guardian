@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerGuardianExtension } from "./core/runtime";
 import { autoMode } from "./definitions/auto";
 import { planMode } from "./definitions/plan";
