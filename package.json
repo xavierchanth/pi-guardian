@@ -48,5 +48,8 @@
     "README.md",
     "SETTINGS.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "pi-approval-guardian": "0.7.3"
+  }
 }

@@ -23,7 +23,18 @@ const timeout = setTimeout(() => {
 }, 10_000);
 
 const lines = createInterface({ input: child.stdout });
+let stateComplete = false;
+let commandsComplete = false;
 let complete = false;
+
+function finishIfComplete() {
+  if (!stateComplete || !commandsComplete) return;
+  clearTimeout(timeout);
+  complete = true;
+  console.log("isolated Pi RPC load succeeded");
+  child.kill("SIGTERM");
+}
+
 lines.on("line", (line) => {
   let event;
   try {
@@ -31,16 +42,28 @@ lines.on("line", (line) => {
   } catch {
     return;
   }
-  if (event.type !== "response" || event.command !== "get_state") return;
-  clearTimeout(timeout);
-  complete = event.success === true;
-  if (!complete) {
-    console.error(`Pi get_state failed: ${line}\n${stderr}`);
-    process.exitCode = 1;
-  } else {
-    console.log("isolated Pi RPC load succeeded");
+  if (event.type !== "response") return;
+  if (event.command === "get_state") {
+    if (event.success !== true) {
+      console.error(`Pi get_state failed: ${line}\n${stderr}`);
+      process.exitCode = 1;
+      child.kill("SIGTERM");
+      return;
+    }
+    stateComplete = true;
   }
-  child.kill("SIGTERM");
+  if (event.command === "get_commands") {
+    const names = new Set(event.data?.commands?.map((command) => command.name) ?? []);
+    const legacy = ["mode", "mode:auto", "mode:plan", "mode:edit", "mode:read", "review-mode", "implement"];
+    if (event.success !== true || !names.has("approval-guardian") || legacy.some((name) => names.has(name))) {
+      console.error(`Unexpected extension commands: ${line}\n${stderr}`);
+      process.exitCode = 1;
+      child.kill("SIGTERM");
+      return;
+    }
+    commandsComplete = true;
+  }
+  finishIfComplete();
 });
 
 child.on("error", (error) => {
@@ -58,3 +81,4 @@ child.on("exit", () => {
 });
 
 child.stdin.write(`${JSON.stringify({ type: "get_state" })}\n`);
+child.stdin.write(`${JSON.stringify({ type: "get_commands" })}\n`);
