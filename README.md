@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, independent session naming, Approval Guardian, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, hidden work continuation, independent session naming, Approval Guardian, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -57,6 +57,10 @@ Plan: 2/5 | Now: Integrate Guardian
 ```
 
 Long goal and active-step text is truncated to the available terminal width. Run `/plan-status` for a read-only full-plan view. `update_plan` results show a compact progress summary by default and the full checklist when tool output is expanded.
+
+### Hidden work continuation
+
+Use `/continue` after interrupting the agent to send `Continue what you were doing.` and start another turn. The continuation is hidden from the chat transcript but persists as model context. The command refuses arguments, empty conversations, and invocations while the agent is still working.
 
 ### Independent session naming
 

@@ -55,7 +55,12 @@ lines.on("line", (line) => {
   if (event.command === "get_commands") {
     const names = new Set(event.data?.commands?.map((command) => command.name) ?? []);
     const legacy = ["mode", "mode:auto", "mode:plan", "mode:edit", "mode:read", "review-mode", "implement"];
-    if (event.success !== true || !names.has("approval-guardian") || legacy.some((name) => names.has(name))) {
+    if (
+      event.success !== true ||
+      !names.has("approval-guardian") ||
+      !names.has("continue") ||
+      legacy.some((name) => names.has(name))
+    ) {
       console.error(`Unexpected extension commands: ${line}\n${stderr}`);
       process.exitCode = 1;
       child.kill("SIGTERM");

@@ -6,6 +6,7 @@ import {
   registerPiTaiConfig,
   type PiTaiConfigService,
 } from "./src/config/register.ts";
+import { registerContinueCommand } from "./src/continue/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
@@ -31,6 +32,7 @@ export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
+  continueCommand: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
   ansiTheme: PiTaiRegistrar;
 }
@@ -42,6 +44,9 @@ const productionRegistrars: PiTaiRegistrars = {
   },
   sessionTitle: (pi, runtime) => {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
+  },
+  continueCommand: (pi) => {
+    registerContinueCommand(pi);
   },
   guardian: (pi) => registerApprovalGuardian(pi),
   ansiTheme: (pi, runtime) => {
@@ -67,6 +72,7 @@ export function createPiTaiExtension(
     await registrars.config(pi, runtime);
     await registrars.workContext(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
+    await registrars.continueCommand(pi, runtime);
     await registrars.guardian(pi, runtime);
     await registrars.ansiTheme(pi, runtime);
   };

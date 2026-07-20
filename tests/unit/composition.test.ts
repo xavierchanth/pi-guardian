@@ -18,6 +18,9 @@ test("composition root registers every feature once in order", async () => {
       sessionTitle: () => {
         calls.push("session-title");
       },
+      continueCommand: () => {
+        calls.push("continue-command");
+      },
       guardian: async () => {
         calls.push("guardian");
       },
@@ -35,5 +38,12 @@ test("composition root registers every feature once in order", async () => {
 
   await extension({} as ExtensionAPI);
 
-  assert.deepEqual(calls, ["config", "work-context", "session-title", "guardian", "ansi-theme"]);
+  assert.deepEqual(calls, [
+    "config",
+    "work-context",
+    "session-title",
+    "continue-command",
+    "guardian",
+    "ansi-theme",
+  ]);
 });
