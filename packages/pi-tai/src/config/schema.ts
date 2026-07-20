@@ -1,5 +1,4 @@
 export const TITLE_EFFORTS = [
-  "off",
   "minimal",
   "low",
   "medium",

@@ -6,6 +6,8 @@ import {
   type PiTaiConfigService,
 } from "./src/config/register.ts";
 import registerModes from "./src/modes/index.ts";
+import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
+import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
 import {
   createPiSessionWorkContextStore,
@@ -15,6 +17,7 @@ import {
 export interface PiTaiRuntime {
   config: PiTaiConfigService;
   workContext: WorkContextStore;
+  titleGenerator: TitleGenerator;
 }
 
 export type PiTaiRegistrar = (
@@ -25,6 +28,7 @@ export type PiTaiRegistrar = (
 export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
+  sessionTitle: PiTaiRegistrar;
   modes: PiTaiRegistrar;
   ansiTheme: PiTaiRegistrar;
 }
@@ -34,6 +38,9 @@ const productionRegistrars: PiTaiRegistrars = {
   workContext: (pi, runtime) => {
     registerWorkContext(pi, runtime.workContext);
   },
+  sessionTitle: (pi, runtime) => {
+    registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
+  },
   modes: (pi) => registerModes(pi),
   ansiTheme: (pi) => registerAnsiTheme(pi),
 };
@@ -42,6 +49,7 @@ function createProductionRuntime(): PiTaiRuntime {
   return {
     config: createPiTaiConfigService(),
     workContext: createPiSessionWorkContextStore(),
+    titleGenerator: generateModelTitle,
   };
 }
 
@@ -53,6 +61,7 @@ export function createPiTaiExtension(
     const runtime = createRuntime();
     await registrars.config(pi, runtime);
     await registrars.workContext(pi, runtime);
+    await registrars.sessionTitle(pi, runtime);
     await registrars.modes(pi, runtime);
     await registrars.ansiTheme(pi, runtime);
   };
