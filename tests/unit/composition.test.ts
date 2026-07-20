@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPiTaiExtension } from "../../packages/pi-tai/extension.ts";
 import { createPiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
+import { createPiSessionWorkContextStore } from "../../packages/pi-tai/src/work-context/persistence.ts";
 
 test("composition root registers every feature once in order", async () => {
   const calls: string[] = [];
@@ -11,8 +12,8 @@ test("composition root registers every feature once in order", async () => {
       config: () => {
         calls.push("config");
       },
-      taskContext: () => {
-        calls.push("task-context");
+      workContext: () => {
+        calls.push("work-context");
       },
       modes: async () => {
         calls.push("modes");
@@ -21,10 +22,13 @@ test("composition root registers every feature once in order", async () => {
         calls.push("ansi-theme");
       },
     },
-    () => ({ config: createPiTaiConfigService() }),
+    () => ({
+      config: createPiTaiConfigService(),
+      workContext: createPiSessionWorkContextStore(),
+    }),
   );
 
   await extension({} as ExtensionAPI);
 
-  assert.deepEqual(calls, ["config", "task-context", "modes", "ansi-theme"]);
+  assert.deepEqual(calls, ["config", "work-context", "modes", "ansi-theme"]);
 });

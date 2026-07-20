@@ -6,10 +6,15 @@ import {
   type PiTaiConfigService,
 } from "./src/config/register.ts";
 import registerModes from "./src/modes/index.ts";
-import registerTaskContext from "./src/task-context/index.ts";
+import { registerWorkContext } from "./src/work-context/register.ts";
+import {
+  createPiSessionWorkContextStore,
+  type WorkContextStore,
+} from "./src/work-context/persistence.ts";
 
 export interface PiTaiRuntime {
   config: PiTaiConfigService;
+  workContext: WorkContextStore;
 }
 
 export type PiTaiRegistrar = (
@@ -19,20 +24,25 @@ export type PiTaiRegistrar = (
 
 export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
-  taskContext: PiTaiRegistrar;
+  workContext: PiTaiRegistrar;
   modes: PiTaiRegistrar;
   ansiTheme: PiTaiRegistrar;
 }
 
 const productionRegistrars: PiTaiRegistrars = {
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
-  taskContext: (pi) => registerTaskContext(pi),
+  workContext: (pi, runtime) => {
+    registerWorkContext(pi, runtime.workContext);
+  },
   modes: (pi) => registerModes(pi),
   ansiTheme: (pi) => registerAnsiTheme(pi),
 };
 
 function createProductionRuntime(): PiTaiRuntime {
-  return { config: createPiTaiConfigService() };
+  return {
+    config: createPiTaiConfigService(),
+    workContext: createPiSessionWorkContextStore(),
+  };
 }
 
 export function createPiTaiExtension(
@@ -42,7 +52,7 @@ export function createPiTaiExtension(
   return async (pi) => {
     const runtime = createRuntime();
     await registrars.config(pi, runtime);
-    await registrars.taskContext(pi, runtime);
+    await registrars.workContext(pi, runtime);
     await registrars.modes(pi, runtime);
     await registrars.ansiTheme(pi, runtime);
   };
