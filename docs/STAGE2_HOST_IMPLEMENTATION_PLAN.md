@@ -2,7 +2,7 @@
 
 ## Status
 
-Design pass approved. H0 workspace and protocol contracts are implemented; H1 Tauri Host Agent lifecycle proof is next. Terminal Pi-Tai session-title tuning may continue independently if needed.
+Design pass approved. H0 workspace/protocol contracts and the H1 Tauri Host Agent lifecycle proof are implemented; H2 Pi SDK runtime-worker proof is next. Terminal Pi-Tai session-title tuning may continue independently if needed.
 
 Stage 2 proceeds through disposable architecture proofs. Production Host and ACP implementation starts only after those proofs are reviewed.
 
@@ -337,6 +337,8 @@ build(host): establish workspace and protocol contracts
 
 - Closing every WebView leaves the tray process and proof IPC endpoint alive.
 - The portable crates compile independently of the application shell.
+
+Proof procedure and manual tray checks: [H1_HOST_LIFECYCLE.md](proofs/H1_HOST_LIFECYCLE.md).
 
 #### Checkpoint
 

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "No frontend commands are exposed by the H1 lifecycle proof.",
+  "windows": ["diagnostics"],
+  "permissions": ["core:default"]
+}

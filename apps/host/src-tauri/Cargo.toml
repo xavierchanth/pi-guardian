@@ -1,0 +1,16 @@
+[package]
+name = "pi-tai-host-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+pi-tai-host-lifecycle = { path = "../../../crates/host-lifecycle" }
+pi-tai-host-platform = { path = "../../../crates/host-platform" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"

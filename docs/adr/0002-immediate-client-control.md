@@ -1,7 +1,7 @@
 # ADR 0002: Valid mutations transfer active-client control immediately
 
 - Status: Accepted
-- Date: 2026-01-15
+- Date: 2026-07-20
 
 ## Context
 

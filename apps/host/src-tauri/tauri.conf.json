@@ -1,0 +1,27 @@
+{
+  "productName": "Pi-Tai Host Agent",
+  "version": "0.1.0",
+  "identifier": "dev.pitai.host-agent",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "diagnostics",
+        "title": "Pi-Tai Host Agent Diagnostics",
+        "width": 720,
+        "height": 480,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png"]
+  }
+}

@@ -1,7 +1,7 @@
 # ADR 0004: macOS-first shell with a portable core
 
 - Status: Accepted
-- Date: 2026-01-15
+- Date: 2026-07-20
 
 ## Context
 

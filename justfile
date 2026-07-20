@@ -39,3 +39,7 @@ package-check:
 # Load only Pi-Tai in offline RPC mode and verify its extension commands.
 smoke:
     npm run smoke:isolated
+
+# Run the macOS Tauri Host Agent lifecycle proof.
+host-lifecycle-smoke:
+    bash tests/smoke/host-lifecycle-macos.sh

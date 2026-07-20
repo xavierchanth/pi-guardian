@@ -134,7 +134,10 @@ packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       stock Guardian composition adapter
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes
+apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract
+crates/host-lifecycle/               portable Host lifecycle policy
+crates/host-platform/                OS readiness adapter contracts
 crates/host-protocol/                portable Rust Host protocol contract
 fixtures/host-protocol/              shared cross-language protocol fixtures
 docs/adr/                            accepted architecture decisions

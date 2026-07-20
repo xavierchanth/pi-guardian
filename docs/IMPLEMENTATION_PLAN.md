@@ -237,7 +237,7 @@ Stop implementation and provide a manual review checklist:
 
 ## Stage 2: host-owned Pi sessions and Zed continuity
 
-**Implementation status:** design approved and H0 workspace/protocol contracts complete; the H1 Tauri Host Agent lifecycle proof is next.
+**Implementation status:** H0 workspace/protocol contracts and H1 Tauri Host Agent lifecycle proof complete; the H2 Pi SDK runtime-worker proof is next.
 
 The decision-complete, proof-first execution plan is [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). The target architecture is defined in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 

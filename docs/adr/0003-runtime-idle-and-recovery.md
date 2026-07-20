@@ -1,7 +1,7 @@
 # ADR 0003: Unload idle runtimes and recover interrupted turns explicitly
 
 - Status: Accepted
-- Date: 2026-01-15
+- Date: 2026-07-20
 
 ## Context
 

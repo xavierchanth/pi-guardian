@@ -42,9 +42,13 @@ test("legacy task blocks and permission modes are absent", () => {
   assert.doesNotMatch(source, /registerCommand\(["'](?:mode|review-mode|implement)/);
 });
 
-test("portable Host protocol crates remain independent of Tauri", () => {
-  const cargo = readFileSync(join(root, "crates/host-protocol/Cargo.toml"), "utf8");
-  assert.doesNotMatch(cargo, /tauri/i);
+test("portable Host crates remain independent of Tauri", () => {
+  for (const crate of ["host-protocol", "host-lifecycle", "host-platform"]) {
+    const cargo = readFileSync(join(root, `crates/${crate}/Cargo.toml`), "utf8");
+    assert.doesNotMatch(cargo, /tauri/i, crate);
+  }
+  const shellCargo = readFileSync(join(root, "apps/host/src-tauri/Cargo.toml"), "utf8");
+  assert.match(shellCargo, /tauri/);
   assert.ok(existsSync(join(root, "packages/host-protocol/src/index.ts")));
   assert.ok(existsSync(join(root, "fixtures/host-protocol/command-prompt.json")));
 });

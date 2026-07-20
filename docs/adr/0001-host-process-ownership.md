@@ -1,7 +1,7 @@
 # ADR 0001: Host Agent owns durable sessions
 
 - Status: Accepted
-- Date: 2026-01-15
+- Date: 2026-07-20
 
 ## Context
 
