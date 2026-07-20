@@ -18,6 +18,7 @@ Do not combine terminal refresh work and ACP frontend work in one checkpoint. Wo
 - Formal product requirements.
 - Terminal and ACP scope boundaries.
 - Prioritized ACP feature matrix.
+- Host, broker, desktop, and mobile architecture baseline.
 - Red-green implementation sequence.
 
 ### Checkpoint
@@ -27,6 +28,8 @@ docs: add refresh PRD and phased implementation plan
 ```
 
 ## Stage 1: refresh terminal Pi-Tai
+
+The implementation-ready repository layout, plugin composition design, test boundaries, and checkpoint sequence are specified in [TERMINAL_PLUGIN_PLAN.md](TERMINAL_PLUGIN_PLAN.md). The phases below remain the product-level acceptance summary; where filenames or tactical sequencing differ, the terminal plan controls.
 
 ### Phase 1: establish the modern baseline
 
@@ -230,50 +233,111 @@ Stop implementation and provide a manual review checklist:
 
 **Do not begin ACP implementation without explicit user approval after this review.**
 
-## Stage 2: first-party ACP frontend
+## Stage 2: host-owned Pi sessions and Zed continuity
 
-### Phase 8: investigate ACP client behavior and Codex plan presentation
+This stage begins only after explicit approval at the terminal acceptance gate. The target architecture is defined in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 
-This is research, not implementation.
+### Phase 8: architecture and protocol proof
 
-#### Questions
-
-- Which ACP plan variant does Zed's Codex integration currently emit and render?
-- Does Zed prefer stable `plan` updates or capability-gated `plan_update` operations?
-- How are plan IDs, priorities, and full replacement represented?
-- Which tool kinds and content variants produce the clearest Zed presentation?
-- How does Zed display terminal content, structured diffs, locations, thoughts, usage, and permission requests?
-- Which current ACP capabilities are advertised by Zed?
-
-#### Method
-
-- Read the current ACP specification and SDK schemas.
-- Inspect the open-source Codex ACP adapter and relevant tests at a pinned revision.
-- Build protocol fixtures from documented messages rather than copying implementation code.
-- Record conclusions and compatibility behavior in an ACP translation design document.
-
-#### Acceptance
-
-- A fixture suite describes the exact plan and tool updates Pi-Tai ACP will emit.
-- Stable and experimental behavior is capability-gated.
-
-### Phase 9: ACP protocol foundation
+This phase closes high-risk boundaries before product implementation.
 
 #### Red
 
-- Initialization negotiation tests.
-- New-session lifecycle tests.
-- Prompt streaming and cancellation tests.
+Create executable proof tests for:
+
+- a Tauri tray process remaining alive after its React/Vite window closes;
+- the desktop manager starting and reconnecting to the tray Host;
+- a bundled TypeScript helper loading Pi through the SDK in-process;
+- ordered local IPC across Rust and TypeScript boundaries;
+- a client disconnect not intentionally cancelling an active Pi turn;
+- process interruption producing an explicit interrupted state;
+- replaying a completed session after Host restart;
+- Zed launching a minimal ACP shim;
+- Zed rendering independently authored native-plan fixtures.
+
+#### Research questions
+
+- Can a crashed desktop WebView be recreated without terminating the tray process on supported platforms?
+- How should the TypeScript Pi helper be packaged without requiring a user-managed Node installation?
+- Which ACP plan variant does Zed's Codex integration currently emit and render?
+- How are plan IDs, priorities, and complete replacement represented?
+- Which tool kinds and content variants produce the clearest Zed presentation?
+- Which current ACP capabilities are advertised by Zed?
+
+#### Green
+
+- Build disposable Host, runtime-helper, IPC, and ACP-shim spikes.
+- Read the current ACP specification and SDK schemas.
+- Inspect the open-source Codex ACP adapter and relevant tests at a pinned revision.
+- Record fixture-based conclusions without copying implementation code.
+- Write ADRs for process lifecycle, helper packaging, IPC framing, event ordering, and recovery.
+
+#### Acceptance
+
+- One prompt traverses a test client through the Host into an in-process Pi SDK session and streams back.
+- Disconnecting the client leaves the Host and runtime healthy.
+- Restarting after a forced Host failure recovers history and reports an interrupted turn honestly.
+- A fixture suite describes the exact plan and tool updates Pi-Tai ACP will emit.
+- No generic downstream ACP-agent layer is required.
+
+### Phase 9: durable single-session Host
+
+#### Red
+
+Add tests for:
+
+- serialized session commands;
+- monotonic event sequences and revisions;
+- durable command acknowledgement;
+- operation-ID deduplication;
+- one active prompt turn;
+- reconnect from an event cursor;
+- helper crash and restart state transitions;
+- Host restart with load/resume or non-resumable recovery;
+- tray quit warnings while a turn is active.
+
+#### Green
+
+- Add the Pi-Tai Host tray application.
+- Add one per-session broker actor.
+- Add the bundled TypeScript Pi runtime helper.
+- Add SQLite events, projections, and snapshots.
+- Add authenticated local IPC.
+- Add a diagnostic CLI for create, observe, prompt, cancel, and replay.
+
+#### Acceptance
+
+- Start a Pi session, detach the diagnostic client, reconnect, and replay its ordered timeline.
+- Retrying an acknowledged operation does not duplicate its Pi-side effect.
+- Closing the client does not stop a healthy turn.
+- Host or helper failure produces a capability-accurate recovered, interrupted, or non-resumable state.
+
+### Phase 10: thin ACP shim and stock Zed continuity
+
+#### Red
+
+- Initialization and capability-negotiation tests.
+- Host-unavailable and version-mismatch tests.
+- New, list, load, resume, close, prompt, and cancellation tests.
+- Zed attachment/disconnection tests.
+- Replay-without-duplicate-message tests.
 - Authentication-required tests.
 - Graceful shutdown and malformed-message tests.
 
 #### Green
 
 - Add `pi-tai-acp` using the official ACP SDK.
-- Create Pi sessions in-process through Pi's runtime SDK.
-- Load standard Pi and Pi-Tai resources.
+- Connect it to Host local IPC rather than creating Pi sessions itself.
+- Virtualize supported session capabilities from the broker event store.
+- Keep durable state and Pi process ownership out of the shim.
 
-### Phase 10: rich messages and tools
+#### Acceptance
+
+- Start in Zed, disconnect Zed while a turn runs, and restore the same Host-owned session.
+- A shim crash does not intentionally terminate Pi.
+- A session created outside Zed can be discovered and loaded through the supported Zed flow.
+
+### Phase 11: rich messages and tools
 
 #### Red
 
@@ -290,44 +354,129 @@ Add translation tests for:
 
 #### Green
 
-Implement a registry-based translation layer rather than one large event switch.
+Implement a registry-based Host-event-to-ACP translation layer rather than one large event switch.
 
-### Phase 11: native plans and live titles
+### Phase 12: native plans and live titles
 
 #### Red
 
-- Plan replacement and progress tests using Codex-compatible/Zed-tested fixtures.
+- Plan replacement and progress tests using Zed-tested fixtures.
 - Capability fallback tests.
 - Session title update tests.
 - Session history title tests.
+- broker-originated plan-update revision and controller tests.
+- model-visible notification tests for externally changed plans.
 
 #### Green
 
-- Translate Pi-Tai work context into native ACP plans.
-- Forward Pi session-name changes as `session_info_update`.
+- Project Pi-Tai work context into Host events and native ACP plans.
+- Forward Pi session-name changes as ACP session metadata updates.
+- Add the broker work-context storage adapter.
+- Define controller-authoritative external plan replacement without silently hiding the change from Pi.
 
-### Phase 12: model controls, commands, sessions, and Guardian presentation
+### Phase 13: model controls, commands, sessions, and Guardian presentation
 
 #### Red
 
 - Main model and thought-level selector tests.
 - Dynamic config update tests.
 - command/skill advertisement tests.
-- list/load/resume/close/delete session tests.
+- paginated list/load/resume/close tests.
 - usage/cost update tests.
 - ACP permission request and Guardian association tests.
+- controller epoch and stale-revision rejection tests.
 
 #### Green
 
 Implement only the P0/P1 items accepted from [ACP_SCOPE.md](ACP_SCOPE.md).
 
+### Gate B: Host and Zed manual acceptance
+
+Stop and verify:
+
+- the tray Host starts directly and from the desktop manager spike;
+- closing Zed or the desktop window leaves a healthy turn running;
+- session history recovers after a controlled Host restart;
+- Zed can discover and restore Host-owned sessions;
+- plans, titles, tools, diffs, locations, terminal output, models, and Guardian are useful in Zed.
+
+## Stage 3: desktop and remote companion clients
+
+### Phase 14: minimal desktop manager
+
+Use Tauri with React and Vite.
+
+#### Red
+
+- Host launch/reconnect/version-handshake tests.
+- Configuration validation tests.
+- Host, Pi auth, title model, and Guardian readiness projection tests.
+- Active-session status tests.
+- UI-window closure tests proving the separate Host continues.
+
+#### Green
+
+- Add configuration and readiness views.
+- Add Host startup and launch-at-login management.
+- Add Zed setup assistance.
+- Add basic session title, workspace, state, clients, controller, and last-activity status.
+- Add redacted diagnostics.
+
+Prompting, plan editing, transcript review, and archiving remain out of this phase.
+
+### Phase 15: paired mobile observer
+
+Use Tauri Mobile with React and Vite.
+
+#### Red
+
+- Tailscale/local-only binding tests.
+- Pairing, device authentication, and revocation tests.
+- Snapshot and cursor replay tests.
+- Offline cache tests.
+- Version negotiation tests.
+
+#### Green
+
+- Add a versioned product API; do not expose raw ACP to mobile.
+- Add a shared API client and generated/mapped types.
+- Add host list, session inbox, timeline, status, plan, and tool views.
+- Add durable reconnect and local cache behavior.
+
+### Phase 16: mobile control
+
+#### Red
+
+- One-controller lease and epoch tests.
+- Competing takeover tests.
+- stale revision and duplicate operation tests.
+- prompt, cancellation, plan-edit, question, and permission-resolution tests.
+- local-only draft tests while disconnected or observing.
+
+#### Green
+
+- Add explicit control handoff.
+- Add prompt and cancellation.
+- Add controller-authoritative plan editing.
+- Add questions and Guardian-compatible permission presentation.
+
+### Phase 17: remote creation, workspaces, and review
+
+- Add allowed repository configuration.
+- Default mobile-created Git sessions to managed worktrees.
+- Add attached-workspace writer exclusion.
+- Add changed-file and paginated diff projections.
+- Add Zed discovery of mobile-created sessions.
+- Add notifications only after durable observer/control behavior is accepted.
+
 ## Deferred features
 
-The following do not block the initial ACP release:
+The following do not block the initial Host/Zed release:
 
+- generic downstream ACP agents;
 - Pi tree navigation;
 - audio prompts;
-- duplicate completion/attention notifications;
+- duplicate Zed completion/attention notifications;
 - client filesystem delegation;
 - client terminal delegation;
 - session fork;
@@ -336,4 +485,6 @@ The following do not block the initial ACP release:
 - elicitation;
 - document synchronization;
 - Next Edit Suggestions;
-- T3-specific ACP extension methods.
+- T3-specific ACP extension methods;
+- transparent in-flight continuation after complete Host-process failure;
+- remote visibility for every standalone terminal Pi session.

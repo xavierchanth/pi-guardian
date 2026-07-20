@@ -4,12 +4,13 @@
 
 Draft for review.
 
-This document defines the intended shape of the Pi-Tai refresh. Implementation is split into two product stages:
+This document defines the intended shape of the Pi-Tai refresh. Implementation is split into three product stages:
 
-1. refresh the Pi-Tai terminal distribution;
-2. after manual terminal acceptance, build a separate Pi-Tai ACP frontend.
+1. refresh the standalone Pi-Tai terminal distribution;
+2. after manual terminal acceptance, build Pi-Tai Host and its Zed ACP adapter;
+3. add desktop management and remote companion clients around host-owned sessions.
 
-The ACP stage must not begin until the refreshed terminal experience has been manually reviewed and accepted.
+Host, ACP, and companion implementation must not begin until the refreshed terminal experience has been manually reviewed and accepted. The planned multi-client architecture is detailed in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 
 ## Product summary
 
@@ -19,13 +20,17 @@ Pi-Tai is a focused Pi distribution that adds:
 - a persistent goal and Codex-style execution plan;
 - inexpensive automatic session naming with an independently configured model;
 - ANSI-derived themes for Pi's terminal interface;
-- later, a first-party ACP frontend optimized for Zed and reusable by other ACP clients.
+- later, a tray-resident Pi-Tai Host that owns durable multi-client Pi sessions;
+- a thin first-party ACP adapter optimized for Zed;
+- desktop and mobile Tauri clients using React and Vite.
 
-Pi-Tai should extend Pi without introducing its own read, edit, plan, or permission modes.
+Pi-Tai should extend Pi without introducing its own read, edit, plan, or permission modes. Pi is the only initial hosted runtime; generic downstream ACP-agent brokering is not required.
 
 ## Goals
 
 ### Terminal refresh
+
+The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PLUGIN_PLAN.md](TERMINAL_PLUGIN_PLAN.md).
 
 - Replace the current mode hierarchy with one guarded automatic workflow.
 - Replace the fenced `task-context` protocol with a structured planning tool.
@@ -37,13 +42,18 @@ Pi-Tai should extend Pi without introducing its own read, edit, plan, or permiss
 - Remove obsolete permission-plugin and copied Codex Guardian code and notices once no derived code remains.
 - Install reproducible releases directly from Git tags.
 
-### ACP frontend
+### Host and ACP frontend
 
-- Build a new ACP frontend from the official ACP SDK and Pi SDK rather than deriving it from `pi-acp`.
+- Make one broker-owned Pi session authoritative across Zed and future companion clients.
+- Package Pi-Tai Host as a tray-resident Tauri application rather than an installed daemon initially.
+- Keep the configuration/status desktop manager independent from the session-owning Host process.
+- Run Pi through its SDK in a bundled TypeScript runtime helper supervised by the Host.
+- Build a thin ACP shim from the official ACP SDK rather than deriving it from `pi-acp`.
+- Let Zed disconnect without intentionally terminating a healthy host-owned Pi turn.
 - Optimize semantic rendering for Zed while remaining protocol-correct for other ACP clients.
-- Reuse the same Pi-Tai extensions and session behavior as terminal Pi.
+- Reuse the same Pi-Tai work-context, naming, Guardian, and session behavior as terminal Pi.
 - Surface native ACP plans, rich tool calls, diffs, locations, model controls, titles, and usage.
-- Keep the architecture suitable for a possible future T3 Code client.
+- Keep the product API suitable for mobile, web, terminal, chat, and possible future T3 clients.
 
 ## Non-goals
 
@@ -56,6 +66,11 @@ Pi-Tai should extend Pi without introducing its own read, edit, plan, or permiss
 - Forking or copying the current `pi-acp` implementation.
 - Publishing to the npm registry as a requirement.
 - Implementing MCP, client filesystem delegation, client terminal delegation, NES, or document synchronization in the first ACP release.
+- Supporting arbitrary downstream ACP agents in the initial Host.
+- Sharing or writing Zed's private thread database.
+- Guaranteeing survival of an in-flight tool operation after the complete Host process crashes.
+- Making every standalone terminal Pi session remotely observable.
+- Using React Native for the planned Tauri mobile application.
 
 ## Users and primary workflows
 
@@ -71,11 +86,26 @@ Pi-Tai should extend Pi without introducing its own read, edit, plan, or permiss
 
 ### Zed user
 
-1. Installs the same tagged repository as a Pi package and as an ACP executable.
+1. Starts the Pi-Tai Host tray application directly or through Pi-Tai Desktop.
 2. Selects `pi-tai-acp` as an external agent in Zed.
-3. Selects the main working model and effort independently from the title-naming model.
-4. Sees native plans, useful tool titles, structured diffs, terminal output, and file locations.
-5. Resumes named Pi sessions from Zed.
+3. Creates or attaches to a host-owned Pi session.
+4. Selects the main working model and effort independently from the title-naming model.
+5. Sees native plans, useful tool titles, structured diffs, terminal output, and file locations.
+6. Leaves Zed without intentionally terminating the hosted turn, then loads the same named session later.
+
+### Desktop manager user
+
+1. Opens a Tauri desktop application using React and Vite.
+2. Configures Pi-Tai, Guardian, title naming, Zed integration, and Host startup.
+3. Sees Host health and basic active-session status.
+4. Closes the manager while the separately running Host tray process continues.
+
+### Future mobile user
+
+1. Pairs a Tauri Mobile application with the Host over Tailscale.
+2. Observes the same broker-owned sessions visible in Zed.
+3. Later takes control, prompts, cancels, edits plans, and resolves interactions under a controller lease.
+4. Starts a host-owned session remotely and later discovers it from Zed.
 
 ## Functional requirements
 
@@ -132,14 +162,12 @@ The title namer must have an independent configuration:
 
 ```json
 {
-  "piTai": {
-    "sessionTitle": {
-      "provider": "provider-id",
-      "model": "luna-model-id",
-      "effort": "minimal",
-      "maxWords": 6,
-      "fallback": "heuristic"
-    }
+  "sessionTitle": {
+    "provider": "provider-id",
+    "model": "luna-model-id",
+    "effort": "minimal",
+    "maxWords": 6,
+    "fallback": "heuristic"
   }
 }
 ```
@@ -189,25 +217,52 @@ Requirements:
 - npm registry publication is optional.
 - The future ACP executable may be installed from the same Git tag using a Git-backed global package install.
 
-### FR-7: first-party ACP frontend
+### FR-7: Pi-Tai Host
 
-The ACP frontend must:
+The Host must:
+
+- run as a separately launchable Tauri tray application in the initial product;
+- continue when Zed and Pi-Tai Desktop disconnect;
+- own broker session identity, command ordering, event history, revisions, and client attachments;
+- serialize each session through one actor;
+- permit many observers but only one controller for state-changing commands;
+- deduplicate commands by operation ID and reject stale controller epochs or revisions;
+- supervise a bundled TypeScript helper that uses Pi's SDK in-process;
+- persist enough history to reload or resume sessions after a Host restart;
+- report interrupted in-flight turns honestly rather than claiming transparent crash survival;
+- expose authenticated local IPC to the ACP shim and desktop manager.
+
+### FR-8: first-party ACP adapter
+
+The ACP adapter must:
 
 - use `@agentclientprotocol/sdk` for protocol transport and types;
-- use Pi's SDK in-process;
+- remain a thin, disposable shim over Host IPC;
+- never own durable session state or terminate a session merely because Zed disconnects;
 - negotiate capabilities instead of assuming a specific client;
-- load normal Pi settings, authentication, models, context, skills, prompts, and Pi-Tai extensions;
-- preserve Pi session compatibility between terminal and ACP use;
+- expose Host-backed new, list, load, resume, close, prompt, and cancellation behavior;
 - emit semantically rich ACP updates rather than flattening events to chat text;
 - use Zed Codex ACP behavior as research material for native plan support, without copying its implementation;
 - omit Pi tree navigation and audio prompting;
 - rely on Zed's existing thread completion and attention notifications.
 
-Detailed ACP scope is maintained in [ACP_SCOPE.md](ACP_SCOPE.md).
+### FR-9: desktop and mobile applications
+
+- Pi-Tai Desktop uses Tauri with React and Vite.
+- Its first release is limited to configuration, readiness, diagnostics, Host startup, and session status.
+- Pi-Tai Mobile uses Tauri Mobile with React and Vite rather than React Native.
+- Desktop and mobile share API types, state logic, design tokens, and appropriate responsive components.
+- Mobile uses a versioned product API rather than raw ACP.
+- Remote access is Tailscale-only initially and still requires product-level device authentication.
+- Interactive desktop/mobile controls remain deferred until controller-lease and idempotency behavior exists.
+
+Detailed architecture and ACP scope are maintained in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md) and [ACP_SCOPE.md](ACP_SCOPE.md).
 
 ## Configuration principles
 
-- Pi-Tai-specific settings live under one `piTai` namespace where Pi settings permit it.
+- Pi-Tai reads `~/.pi/agent/pi-tai.json` and trusted project `.pi/pi-tai.json` files because Pi's extension API does not expose arbitrary namespaced settings as a stable typed API.
+- Project values override global values through an explicit schema-aware merge.
+- Guardian retains its own documented `approval-guardian.json` configuration.
 - Model references use separate `provider` and `model` fields.
 - No feature silently falls back to the expensive active work model.
 - Invalid optional configuration warns and degrades safely.
@@ -250,15 +305,25 @@ Before ACP implementation begins:
 
 Work stops at this gate until explicit approval.
 
-### Gate B: ACP alpha acceptance
+### Gate B: Host and Zed continuity acceptance
 
-- Pi-Tai ACP starts from Zed.
-- new and existing sessions work.
+- Pi-Tai Host runs as a tray application and owns the Pi runtime independently of Zed.
+- Pi-Tai ACP connects Zed to the running Host.
+- new and existing broker sessions work.
+- closing Zed does not intentionally stop a healthy active turn.
+- reconnect and history replay are ordered and duplicate-free.
 - model and effort selectors work.
 - plans render through Zed's native plan support.
 - titles update live.
 - tool calls, diffs, locations, and terminal output are readable.
 - Guardian decisions remain safe and understandable.
+
+### Gate C: companion observer acceptance
+
+- Pi-Tai Desktop can configure and report the status of the Host.
+- a paired Tauri mobile client can list sessions and observe a live timeline through Tailscale.
+- routine disconnection and reconnection lose no durable events.
+- the mobile observer cannot mutate sessions before controller authorization is implemented.
 
 ## Open decisions
 
@@ -266,5 +331,7 @@ Work stops at this gate until explicit approval.
 - Exact Luna provider/model IDs for the user's configuration.
 - Whether priorities should be required by the planning tool or default to `medium`.
 - Whether Guardian accepts an upstream context-provider contribution.
-- Whether the repository remains a single package through the terminal refresh or becomes a workspace before ACP development.
+- Whether the Host and Desktop ship as two visible application bundles or one signed bundle containing the Host helper application.
+- Exact packaging for the self-contained TypeScript Pi runtime helper.
+- Exact controller-authoritative semantics for external plan edits during an active turn.
 - Whether the ACP executable is installed globally from Git or through a future ACP Registry entry.

@@ -4,7 +4,9 @@
 
 Deferred until the refreshed terminal Pi-Tai passes manual acceptance.
 
-Pi-Tai ACP will be a new implementation built with the official ACP SDK and Pi SDK. It will not derive from or copy `pi-acp`.
+Pi-Tai ACP will be a new thin implementation built with the official ACP SDK. It will not derive from or copy `pi-acp`.
+
+The ACP process does not own Pi sessions. It connects Zed to the separately running Pi-Tai Host tray application over authenticated local IPC. The Host supervises a bundled TypeScript helper that loads Pi through its SDK in-process. See [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 
 ## Priority legend
 
@@ -26,7 +28,7 @@ All experimental protocol features must be guarded by negotiated client capabili
 | Protocol | Custom `_meta` data | P1 | Limited | High | Use only as optional enhancement. |
 | Session | New session | P0 | Essential | Essential | Required ACP method. |
 | Session | Prompt and cancel | P0 | Essential | Essential | Required ACP methods. |
-| Session | Close active session | P0 | Useful | Essential | Free in-process Pi resources. |
+| Session | Close active session | P0 | Useful | Essential | Ask the Host to release broker and Pi runtime resources. |
 | Session | List sessions | P0 | High | High | Include cwd, title, and update time. |
 | Session | Load with history replay | P0 | High | High | Preserve Pi session compatibility. |
 | Session | Resume without replay | P1 | Medium | High | Useful for clients retaining history. |
@@ -58,7 +60,8 @@ All experimental protocol features must be guarded by negotiated client capabili
 | Tools | Translation/renderer registry | P1 | Medium | High | Allow Pi-Tai custom tools to add semantics. |
 | Plans | Stable complete plan update | P0 | High | High | Investigate Codex ACP fixtures first. |
 | Plans | Pending/in-progress/completed | P0 | High | High | Mirror work-context state. |
-| Plans | Goal metadata | P0 | Medium | High | Keep goal in Pi state even if client ignores metadata. |
+| Plans | Goal metadata | P0 | Medium | High | Keep goal in Pi and Host state even if a client ignores metadata. |
+| Plans | External plan replacement | P1 | Low | High | Product API command guarded by controller epoch and revision; not assumed to be standard ACP. |
 | Plans | Priorities | P1 | Medium | Medium | Default may be medium. |
 | Plans | Multi-plan operations | P2 | Unknown | Medium | Experimental and capability-gated. |
 | Plans | File/Markdown plan variants | P2 | Low | Medium | Not needed for initial work context. |
@@ -99,8 +102,9 @@ All experimental protocol features must be guarded by negotiated client capabili
 
 The first ACP alpha should include:
 
-- protocol negotiation and in-process Pi startup;
-- new, close, list, and load session flows;
+- protocol negotiation and authenticated Host IPC;
+- actionable Host-not-running and version-mismatch errors;
+- new, close, list, and load broker-session flows;
 - text, resource-link, image, and cancellation support;
 - main model and effort selectors;
 - streaming assistant output;
@@ -122,6 +126,18 @@ Before implementing plan translation:
 6. Implement capability fallback to readable tool output.
 
 The goal is behavioral compatibility with the ACP protocol and Zed, not source compatibility with Codex.
+
+## Host boundary
+
+The ACP shim:
+
+- owns no database or Pi process;
+- may be terminated by Zed without cancelling the broker session;
+- advertises only capabilities implemented by the complete Zed → shim → Host → Pi pipeline;
+- replays normalized Host events rather than reconstructing history from Zed storage;
+- leaves non-ACP mobile controls, including external plan editing, on the versioned product API.
+
+Supporting arbitrary downstream ACP agents is out of scope. Pi is the initial and only Host runtime.
 
 ## Deferred T3 considerations
 
