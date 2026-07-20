@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PermissionState } from "./core/guardian-types";
-import { setModeSessionOnly } from "./core/runtime";
+import type { PermissionState } from "./core/guardian-types.ts";
+import { setModeSessionOnly } from "./core/runtime.ts";
 
 export function registerImplementCommand(pi: ExtensionAPI, state: PermissionState): void {
 	pi.registerCommand("implement", {

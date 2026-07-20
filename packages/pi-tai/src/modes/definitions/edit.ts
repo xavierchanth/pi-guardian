@@ -1,4 +1,4 @@
-import type { GuardianModeDefinition } from "../core/mode-framework";
+import type { GuardianModeDefinition } from "../core/mode-framework.ts";
 
 export const editMode: GuardianModeDefinition = {
 	id: "edit",

@@ -1,7 +1,7 @@
 import path from "node:path";
-import { classifyCommand, LEVEL_INDEX, type Classification, type PermissionLevel } from "./permission-core";
-import type { BashToolPolicy, ReadToolPolicy, ToolAccessDecision, WriteToolPolicy } from "./access-policy";
-import type { GuardianModeId } from "./mode-framework";
+import { classifyCommand, LEVEL_INDEX, type Classification, type PermissionLevel } from "./permission-core.ts";
+import type { BashToolPolicy, ReadToolPolicy, ToolAccessDecision, WriteToolPolicy } from "./access-policy.ts";
+import type { GuardianModeId } from "./mode-framework.ts";
 
 const SENSITIVE_PATH_SEGMENTS = new Set([
 	".aws",

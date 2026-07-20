@@ -11,8 +11,8 @@ const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as
 
 test("root manifest is a discoverable Pi package", () => {
   assert.ok(manifest.keywords?.includes("pi-package"));
-  assert.ok(manifest.pi?.extensions?.length);
-  assert.ok(manifest.pi?.themes?.length);
+  assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/extension.ts"]);
+  assert.deepEqual(manifest.pi?.themes, ["./packages/pi-tai/themes"]);
 
   for (const resource of [
     ...(manifest.pi?.extensions ?? []),
@@ -23,7 +23,7 @@ test("root manifest is a discoverable Pi package", () => {
 });
 
 test("source uses the current Pi distribution imports", () => {
-  const files = walkSource(join(root, "extensions"));
+  const files = walkSource(join(root, "packages"));
   const legacy = files.filter((file) =>
     readFileSync(file, "utf8").includes("@mariozechner/"),
   );

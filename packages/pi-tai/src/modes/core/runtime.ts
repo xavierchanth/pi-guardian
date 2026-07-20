@@ -27,9 +27,9 @@ import type { Api, Model, UserMessage } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { evaluateBashAccess, evaluateReadAccess, evaluateWriteAccess, inspectFileAccessTarget as inspectSharedFileAccessTarget } from "./evaluate-access";
-import { createModeRegistry, type GuardianModeDefinition, type GuardianModeRegistry } from "./mode-framework";
-import type { PermissionState, ToolHandlerResult } from "./guardian-types";
+import { evaluateBashAccess, evaluateReadAccess, evaluateWriteAccess, inspectFileAccessTarget as inspectSharedFileAccessTarget } from "./evaluate-access.ts";
+import { createModeRegistry, type GuardianModeDefinition, type GuardianModeRegistry } from "./mode-framework.ts";
+import type { PermissionState, ToolHandlerResult } from "./guardian-types.ts";
 import {
 	type PermissionLevel,
 	type PermissionMode,
@@ -48,7 +48,7 @@ import {
 	loadAutoReviewModels,
 	type Classification,
 	classifyCommand,
-} from "./permission-core";
+} from "./permission-core.ts";
 
 // Re-export types and constants needed by the hook
 export {

@@ -1,4 +1,4 @@
-import type { ToolPolicies } from "./access-policy";
+import type { ToolPolicies } from "./access-policy.ts";
 
 export type GuardianModeId = "auto" | "plan" | "edit" | "read";
 export type GuardianReviewMode = "ask" | "block";

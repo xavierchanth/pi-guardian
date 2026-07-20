@@ -10,7 +10,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { MODE_CAPABILITY_RANK, MODE_ORDER, type GuardianModeId, type GuardianReviewMode } from "./mode-framework";
+import { MODE_CAPABILITY_RANK, MODE_ORDER, type GuardianModeId, type GuardianReviewMode } from "./mode-framework.ts";
 
 // ============================================================================
 // MINIMAL SHELL TOKENIZER (replaces shell-quote for zero-dependency install)

@@ -37,17 +37,14 @@
   },
   "pi": {
     "themes": [
-      "./themes"
+      "./packages/pi-tai/themes"
     ],
     "extensions": [
-      "./extensions/task-context/index.ts",
-      "./extensions/modes/index.ts",
-      "./extensions/ansi-theme/index.ts"
+      "./packages/pi-tai/extension.ts"
     ]
   },
   "files": [
-    "extensions",
-    "themes",
+    "packages/pi-tai",
     "README.md",
     "SETTINGS.md",
     "LICENSE"
