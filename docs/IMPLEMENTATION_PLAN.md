@@ -29,7 +29,7 @@ docs: add refresh PRD and phased implementation plan
 
 ## Stage 1: refresh terminal Pi-Tai
 
-**Implementation status:** automated implementation and package checks complete; manual terminal acceptance pending.
+**Implementation status:** complete and manually accepted for progression to Stage 2; session-title tuning remains an independent follow-up if needed.
 
 The implementation-ready repository layout, plugin composition design, test boundaries, and checkpoint sequence are specified in [TERMINAL_PLUGIN_PLAN.md](TERMINAL_PLUGIN_PLAN.md). The phases below remain the product-level acceptance summary; where filenames or tactical sequencing differ, the terminal plan controls.
 
@@ -237,7 +237,9 @@ Stop implementation and provide a manual review checklist:
 
 ## Stage 2: host-owned Pi sessions and Zed continuity
 
-This stage begins only after explicit approval at the terminal acceptance gate. The target architecture is defined in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
+**Implementation status:** design approved; architecture proofs are next.
+
+The decision-complete, proof-first execution plan is [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). The target architecture is defined in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 
 ### Phase 8: architecture and protocol proof
 
@@ -366,7 +368,7 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 - Capability fallback tests.
 - Session title update tests.
 - Session history title tests.
-- broker-originated plan-update revision and controller tests.
+- broker-originated plan-update revision and active-client attribution tests.
 - model-visible notification tests for externally changed plans.
 
 #### Green
@@ -374,7 +376,7 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 - Project Pi-Tai work context into Host events and native ACP plans.
 - Forward Pi session-name changes as ACP session metadata updates.
 - Add the broker work-context storage adapter.
-- Define controller-authoritative external plan replacement without silently hiding the change from Pi.
+- Define Host-authoritative external plan replacement with active-client attribution without silently hiding the change from Pi.
 
 ### Phase 13: model controls, commands, sessions, and Guardian presentation
 
@@ -386,7 +388,7 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 - paginated list/load/resume/close tests.
 - usage/cost update tests.
 - ACP permission request and Guardian association tests.
-- controller epoch and stale-revision rejection tests.
+- immediate active-client transfer, conflict, and stale-revision rejection tests.
 
 #### Green
 
@@ -421,7 +423,7 @@ Use Tauri with React and Vite.
 - Add configuration and readiness views.
 - Add Host startup and launch-at-login management.
 - Add Zed setup assistance.
-- Add basic session title, workspace, state, clients, controller, and last-activity status.
+- Add basic session title, workspace, state, clients, active-client attribution, and last-activity status.
 - Add redacted diagnostics.
 
 Prompting, plan editing, transcript review, and archiving remain out of this phase.
@@ -449,17 +451,17 @@ Use Tauri Mobile with React and Vite.
 
 #### Red
 
-- One-controller lease and epoch tests.
-- Competing takeover tests.
+- Immediate cross-client control-transfer and epoch tests.
+- Competing same-revision command tests.
 - stale revision and duplicate operation tests.
 - prompt, cancellation, plan-edit, question, and permission-resolution tests.
 - local-only draft tests while disconnected or observing.
 
 #### Green
 
-- Add explicit control handoff.
+- Add immediate Host-arbitrated control transfer with no takeover confirmation policy.
 - Add prompt and cancellation.
-- Add controller-authoritative plan editing.
+- Add active-client-attributed plan editing.
 - Add questions and Guardian-compatible permission presentation.
 
 ### Phase 17: remote creation, workspaces, and review

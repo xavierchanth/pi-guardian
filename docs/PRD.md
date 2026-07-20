@@ -104,7 +104,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 
 1. Pairs a Tauri Mobile application with the Host over Tailscale.
 2. Observes the same broker-owned sessions visible in Zed.
-3. Later takes control, prompts, cancels, edits plans, and resolves interactions under a controller lease.
+3. Later prompts, cancels, edits plans, and resolves interactions through immediate Host-arbitrated control transfer.
 4. Starts a host-owned session remotely and later discovers it from Zed.
 
 ## Functional requirements
@@ -227,8 +227,9 @@ The Host must:
 - continue when Zed and Pi-Tai Desktop disconnect;
 - own broker session identity, command ordering, event history, revisions, and client attachments;
 - serialize each session through one actor;
-- permit many observers but only one controller for state-changing commands;
-- deduplicate commands by operation ID and reject stale controller epochs or revisions;
+- permit every authenticated client to observe and submit supported state-changing commands;
+- immediately attribute active control to the client whose valid mutation is durably accepted, without a takeover confirmation policy;
+- deduplicate commands by operation ID and reject stale revisions or already-resolved interaction IDs;
 - supervise a bundled TypeScript helper that uses Pi's SDK in-process;
 - persist enough history to reload or resume sessions after a Host restart;
 - report interrupted in-flight turns honestly rather than claiming transparent crash survival;
@@ -256,7 +257,7 @@ The ACP adapter must:
 - Desktop and mobile share API types, state logic, design tokens, and appropriate responsive components.
 - Mobile uses a versioned product API rather than raw ACP.
 - Remote access is Tailscale-only initially and still requires product-level device authentication.
-- Interactive desktop/mobile controls remain deferred until controller-lease and idempotency behavior exists.
+- Interactive desktop/mobile controls remain deferred until immediate control-transfer, revision-conflict, and idempotency behavior exists.
 
 Detailed architecture and ACP scope are maintained in [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md) and [ACP_SCOPE.md](ACP_SCOPE.md).
 
@@ -325,7 +326,7 @@ Work stops at this gate until explicit approval.
 - Pi-Tai Desktop can configure and report the status of the Host.
 - a paired Tauri mobile client can list sessions and observe a live timeline through Tailscale.
 - routine disconnection and reconnection lose no durable events.
-- the mobile observer cannot mutate sessions before controller authorization is implemented.
+- the mobile observer cannot mutate sessions before the remote-control command surface and Host arbitration are implemented.
 
 ## Open decisions
 
@@ -335,5 +336,5 @@ Work stops at this gate until explicit approval.
 - Whether Guardian accepts an upstream context-provider contribution.
 - Whether the Host and Desktop ship as two visible application bundles or one signed bundle containing the Host helper application.
 - Exact packaging for the self-contained TypeScript Pi runtime helper.
-- Exact controller-authoritative semantics for external plan edits during an active turn.
+- Exact model-visible steering semantics for an externally replaced plan during an active turn.
 - Whether the ACP executable is installed globally from Git or through a future ACP Registry entry.

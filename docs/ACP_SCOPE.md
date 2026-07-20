@@ -2,7 +2,7 @@
 
 ## Status
 
-Deferred until the refreshed terminal Pi-Tai passes manual acceptance.
+Stage 2 design approved. ACP implementation begins as a thin proof after Host lifecycle, runtime-worker, IPC, and durable broker proofs in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md).
 
 Pi-Tai ACP will be a new thin implementation built with the official ACP SDK. It will not derive from or copy `pi-acp`.
 
@@ -61,7 +61,7 @@ All experimental protocol features must be guarded by negotiated client capabili
 | Plans | Stable complete plan update | P0 | High | High | Investigate Codex ACP fixtures first. |
 | Plans | Pending/in-progress/completed | P0 | High | High | Mirror work-context state. |
 | Plans | Goal metadata | P0 | Medium | High | Keep goal in Pi and Host state even if a client ignores metadata. |
-| Plans | External plan replacement | P1 | Low | High | Product API command guarded by controller epoch and revision; not assumed to be standard ACP. |
+| Plans | External plan replacement | P1 | Low | High | Product API command serialized by the Host and guarded by operation ID and expected revision; not assumed to be standard ACP. |
 | Plans | Priorities | P1 | Medium | Medium | Default may be medium. |
 | Plans | Multi-plan operations | P2 | Unknown | Medium | Experimental and capability-gated. |
 | Plans | File/Markdown plan variants | P2 | Low | Medium | Not needed for initial work context. |

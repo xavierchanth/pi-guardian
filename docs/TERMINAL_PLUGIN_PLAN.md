@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Implemented through the automated release-candidate checks. Manual terminal acceptance remains pending, including real Luna title-model and configured Guardian reviewer checks.
+Implemented and manually accepted for progression to Stage 2. Session-title tuning may continue independently if real-model behavior needs adjustment.
 
 This plan covers only the first product stage:
 

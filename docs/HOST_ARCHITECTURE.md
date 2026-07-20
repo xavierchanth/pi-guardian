@@ -2,7 +2,7 @@
 
 ## Status
 
-Planning baseline. Implementation remains blocked by the terminal acceptance gate in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+Stage 2 design approved. The proof-first execution plan is defined in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). Production Host and ACP hardening remains gated on review of the architecture proofs.
 
 This document adapts the ACP Companion concept into a Pi-specific ecosystem. Pi is the only initial agent runtime. Zed, desktop, and mobile are clients of one broker-owned Pi session rather than independent owners of copied sessions.
 
@@ -38,9 +38,9 @@ There is no generic downstream ACP connection in the initial design. ACP is the 
 
 ## Deployable components
 
-### Pi-Tai Host
+### Pi-Tai Host Agent
 
-Pi-Tai Host is a separately running Tauri tray application, not an operating-system daemon. It is the authority for remotely attachable sessions.
+Pi-Tai Host Agent is a separately running Tauri tray application, not an operating-system daemon. It is the authority for remotely attachable sessions.
 
 Responsibilities:
 
@@ -117,7 +117,7 @@ Initial session status surface:
 - model;
 - working, waiting, completed, interrupted, or failed state;
 - connected client kinds;
-- current controller;
+- current active client;
 - last activity.
 
 Prompting, plan editing, transcript review, archiving, and arbitrary session control are deferred until their broker commands and concurrency semantics exist. The manager may expose diagnostics and safe restart controls early.
@@ -139,12 +139,14 @@ The actor owns:
 - current session and turn state;
 - ordered event sequence and revision;
 - connected client attachments;
-- controller lease and epoch;
+- active-client attribution and control epoch;
 - pending questions or permissions;
 - command idempotency records;
 - current goal and plan projection.
 
-Many authorized clients may observe a session, but only one attachment controls state-changing actions. Commands include an operation ID, expected session revision, and controller epoch. Stale or duplicate commands do not reach Pi.
+Every authorized client may observe and submit supported interactions. An accepted state-changing command immediately makes its client the active client; there is no confirmation-based takeover policy. The Host serializes commands, deduplicates operation IDs, and rejects stale expected revisions. A control epoch remains useful for attribution and invalidating delayed work, but is not a permission lease.
+
+Concurrent commands based on the same revision do not both win: the first durable command advances the revision and the other receives a conflict with current state. Cancellation and interaction answers target durable IDs and are idempotent.
 
 Only one prompt turn may run per session. Follow-up text may be retained as a local draft, but the host does not silently enqueue a second turn.
 
@@ -159,7 +161,7 @@ A plan-changing command contains:
   operationId: string;
   sessionId: string;
   expectedRevision: number;
-  controllerEpoch: number;
+  clientId: string;
   goal?: string;
   explanation?: string;
   plan: Array<{
@@ -234,7 +236,7 @@ Desktop and mobile should share API and product semantics, but neither serialize
 4. **Zed continuity:** thin ACP shim, session discovery/load, rich output, plans, titles, models, Guardian, and cancellation.
 5. **Desktop manager:** configuration, health, Zed setup, and session status.
 6. **Remote observer:** Tailscale, device pairing, snapshots, event stream, and Tauri mobile inbox/timeline.
-7. **Remote control:** controller leases, prompts, cancellation, plan edits, questions, and permissions.
+7. **Remote control:** immediate cross-client handoff, prompts, cancellation, plan edits, questions, and permissions.
 8. **Remote creation and review:** repository registry, managed worktrees, diffs, durable history, and notifications.
 
 No implementation in slices 2–8 starts before terminal manual acceptance.
@@ -247,7 +249,6 @@ No implementation in slices 2–8 starts before terminal manual acceptance.
 - A full desktop or mobile code editor.
 - React Native.
 - Public-internet exposure without Tailscale.
-- Multiple simultaneous controllers.
 - Automatic merges or pull requests.
 - Making every standalone terminal Pi session remotely visible.
 
@@ -255,7 +256,7 @@ No implementation in slices 2–8 starts before terminal manual acceptance.
 
 - Pi is the only initial runtime.
 - Host-owned sessions are authoritative for multi-client use.
-- Pi-Tai Host is a tray application rather than an installed daemon for the initial product.
+- Pi-Tai Host Agent is a macOS-first Tauri tray application rather than an installed daemon, with portable core crates and platform adapters for later Windows and Linux support.
 - Pi-Tai Desktop manages configuration and may start the Host automatically.
 - A thin ACP shim connects Zed to the Host.
 - The Host uses Pi's SDK through a bundled TypeScript runtime helper.
@@ -263,12 +264,15 @@ No implementation in slices 2–8 starts before terminal manual acceptance.
 - Mobile uses a product API rather than raw ACP.
 - Tailscale remains the intended first remote network boundary.
 - Host crash recovery prioritizes durable history and honest interrupted-state reporting over transparent in-flight continuation.
+- Every authorized client may mutate supported session state; the Host serializes commands and transfers active-client attribution immediately without a takeover policy.
+- Runtime sessions unload after 30 eligible idle minutes and reload from durable state on demand.
+- The initial product is local-only, authenticated, and has no telemetry or public listener.
 
 ## Open decisions
 
-- Whether the Host and Desktop ship as two visible application bundles or one signed bundle containing the Host helper application.
+- Whether the future Desktop manager and Host Agent ship as two visible application bundles or one user-facing bundle containing separate executables; one user-facing installation is currently assumed.
 - Exact packaging technology for the self-contained TypeScript Pi runtime helper.
 - Exact user-visible application names.
-- Whether external plan edits replace authoritative state immediately or first require an agent acknowledgement; immediate controller-authoritative replacement is currently recommended.
+- Exact model-visible steering behavior when an authorized client immediately replaces plan state during an active turn; Host-authoritative replacement with explicit model notification is currently recommended.
 - First mobile control milestone after observer mode.
 - Exact Luna provider/model IDs.
