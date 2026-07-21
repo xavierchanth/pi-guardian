@@ -50,35 +50,9 @@ ANSI querying runs only in interactive TUI mode.
 }
 ```
 
-## Approval Guardian configuration
+## Action Guardian
 
-Approval Guardian retains its own configuration contract:
-
-- global: `~/.pi/agent/approval-guardian.json`
-- project: `<project>/.pi/approval-guardian.json`
-
-The project file is honored only for trusted projects and cannot weaken the effective global review floor. Guardian also supports its documented environment variables.
-
-Representative configuration:
-
-```json
-{
-  "model": "provider/reviewer-model",
-  "fallbackModel": "provider/fallback-reviewer-model",
-  "timeoutMs": 120000,
-  "policy": "Additional local review guidance.",
-  "review": {
-    "bash.command": "always",
-    "read.path": "private-only",
-    "write.path": "outside-or-private",
-    "edit.path": "outside-or-private"
-  }
-}
-```
-
-Review levels are `always`, `outside-or-private`, `private-only`, and `off`. Consult the installed `pi-approval-guardian` README and reference documentation for authoritative semantics, environment variables, and security guarantees.
-
-The Guardian reviewer is independent from both the active work model and Pi-Tai's session-title model.
+The action guardian has no settings. It reviews every agent-generated `bash` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second review deadline. Built-in file tools are restricted to canonical workspace and OS temporary roots. Interactive approval after a denied or failed review applies once to the exact current invocation; noninteractive modes fail closed.
 
 ## Native Pi settings
 

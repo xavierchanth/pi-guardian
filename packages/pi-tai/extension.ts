@@ -48,7 +48,9 @@ const productionRegistrars: PiTaiRegistrars = {
   continueCommand: (pi) => {
     registerContinueCommand(pi);
   },
-  guardian: (pi) => registerApprovalGuardian(pi),
+  guardian: (pi, runtime) => registerApprovalGuardian(pi, {
+    workContext: () => runtime.workContext.current(),
+  }),
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
   },

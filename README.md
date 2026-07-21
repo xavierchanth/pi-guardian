@@ -40,6 +40,10 @@ pi install git:github.com/xavierchanth/pi-tai@v0.1.1
 
 ## Included plugins
 
+### Open-ended design prompt
+
+Use `/design [focus]` to start an investigative design phase before implementation. The agent consults you where key decisions or clarification need your input, then produces an implementation plan once the design is sufficiently resolved.
+
 ### Structured work context
 
 The `update_plan` tool stores a complete goal and replacement plan in Pi tool-result details. State follows Pi's active session branch and survives resume, tree navigation, and compaction.
@@ -68,7 +72,7 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 ### Approval Guardian
 
-Pi-Tai composes the stock [`pi-approval-guardian`](https://github.com/mics8128/pi-approval-guardian) package. Guardian owns its policy, reviewer lifecycle, fail-closed behavior, private-data rules, configuration, and `/approval-guardian` command.
+Pi-Tai includes a small standalone action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. Each review includes the latest structured work context (goal, explanation, and complete plan) as explicit task evidence, separate from user authorization. Built-in file tools stay local to canonical workspace and OS temporary roots; traversal and symlink escapes are blocked. A denied or failed review may be approved only for that exact invocation in the interactive TUI.
 
 Pi-Tai does not provide legacy permission modes. `/mode`, `/review-mode`, and `/implement` are intentionally absent.
 
@@ -104,7 +108,7 @@ Project configuration is loaded only for a trusted project and overrides global 
 }
 ```
 
-Guardian uses its own `approval-guardian.json` files and environment variables. See [SETTINGS.md](SETTINGS.md) for both configuration surfaces.
+Guardian has no permission modes, command allowlists, persistent bypasses, or separate configuration surface.
 
 ## Development
 
@@ -131,9 +135,10 @@ packages/pi-tai/extension.ts        Pi extension composition root
 packages/pi-tai/src/config/         trusted Pi-Tai configuration
 packages/pi-tai/src/work-context/   update_plan domain and persistence
 packages/pi-tai/src/session-title/  independent title generation
-packages/pi-tai/src/guardian/       stock Guardian composition adapter
+packages/pi-tai/src/guardian/       standalone action review and path boundaries
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes
+packages/pi-tai/prompts/design.md   /design prompt template
 apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract
 crates/host-lifecycle/               portable Host lifecycle policy
@@ -146,6 +151,6 @@ tests/                               unit, integration, repository, and smoke te
 
 Architecture and future Host work are documented under [`docs/`](docs/PRD.md).
 
-## License and notices
+## License
 
-Pi-Tai is MIT licensed. Runtime dependency and upstream attribution information is recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Pi-Tai is MIT licensed.

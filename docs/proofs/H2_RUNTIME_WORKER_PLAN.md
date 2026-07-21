@@ -367,7 +367,7 @@ pi -ne -e . "<terminal regression prompt>"
 
 | Risk | H2 probe or containment |
 |---|---|
-| Bun or SEA misses dynamic Guardian/native assets | Run Pi-Tai/Guardian load from copied packaged artifacts |
+| Bun or SEA misses dynamic reviewer/provider assets | Run Pi-Tai load from an isolated packaged artifact set |
 | Session replacement retains the old listener | Tag subscriptions and assert no event after replacement comes from the old session |
 | Prompt handling blocks cancellation | Respond at Pi preflight and keep the command reader independent of the prompt task |
 | Pi/extension logging corrupts stdout | Install output guards before importing runtime modules; parse every output line |

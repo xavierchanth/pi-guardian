@@ -105,11 +105,9 @@ The storage boundary is named `WorkContextStore`, but Stage 1 implements only `P
 
 The title generator receives an explicitly resolved provider/model and thinking effort. It never receives the active work model as a fallback. Tests inject a fake generator and model registry; unit tests make no paid requests.
 
-### Compose, do not copy, Guardian
+### Keep Guardian local and minimal
 
-Pi-Tai invokes the `pi-approval-guardian` extension factory once and does not copy its gate, reviewer, policy, path, or prompt code.
-
-The compatible Guardian release is a runtime dependency. The first integration relies on readable `update_plan` tool results already present in Guardian's collected branch messages. A context-provider enhancement is pursued only if an integration test proves that transcript evidence is insufficient.
+Pi-Tai reviews every agent-generated `bash` call with an isolated `openai-codex/codex-auto-review` session. The prompt evaluates exact authorization and semantic fidelity only. Built-in file tools use deterministic canonical workspace/temp boundaries; direct user shell and custom tools remain outside this policy.
 
 ### Use a dedicated Pi-Tai configuration file
 
@@ -120,7 +118,7 @@ Pi's documented extension API does not expose arbitrary namespaced settings as a
 <project>/.pi/pi-tai.json
 ```
 
-Project configuration is read only when `ctx.isProjectTrusted()` is true. Project values override global values through an explicit schema-aware merge. Guardian continues using its own documented `approval-guardian.json` configuration.
+Project configuration is read only when `ctx.isProjectTrusted()` is true. Project values override global values through an explicit schema-aware merge. Guardian has no separate configuration surface.
 
 Initial Pi-Tai configuration:
 
@@ -152,7 +150,6 @@ pi-tai/
 ├── tsconfig.json
 ├── AGENTS.md
 ├── LICENSE
-├── THIRD_PARTY_NOTICES.md
 ├── README.md
 ├── docs/
 │   ├── PRD.md
@@ -212,8 +209,7 @@ Do not create empty `apps`, `bins`, `crates`, or `services` directories in Stage
 - Type checking: TypeScript with `noEmit`.
 - Formatting/linting: add only one formatter/linter already suitable for the repository; do not block behavior work on a large style migration.
 - Pi core imports are peer dependencies with the package-documented `"*"` range and compatible pinned dev dependencies for tests.
-- `pi-approval-guardian` is a runtime dependency pinned within its tested Pi compatibility range.
-- Guardian reviewer configuration remains independent from both the active work model and the session-title model. Pi-Tai must not silently select the title model as a security reviewer.
+- Guardian uses Pi's built-in Codex provider and existing OAuth credentials, never the active work model or title model.
 
 Required scripts:
 
@@ -434,28 +430,26 @@ feat(session-title): name sessions with an independent model
 
 Add integration tests for:
 
-- Guardian being registered exactly once;
+- every agent-generated `bash` action receiving a fresh review;
 - no Pi-Tai mode commands or prompts;
-- covered operations following stock Guardian rules;
-- unavailable reviewers failing closed;
-- private-data access preserving explicit-authorization requirements;
-- current `update_plan` readable snapshots appearing in reviewer branch evidence;
-- a broad goal not being treated as authorization;
-- TUI, print, JSON, and RPC operation not depending on Pi-Tai confirmation UI;
-- Guardian reset and cleanup on replacement/reload.
+- canonical path containment and symlink escapes;
+- strict allow/deny parsing and reviewer failure modes;
+- role-preserved exact authorization evidence;
+- broad goals and failures not expanding authorization;
+- exact-action TUI allow-once and noninteractive fail-closed behavior;
+- reviewer isolation from project resources and tools.
 
 #### Green
 
-- Add the compatible `pi-approval-guardian` release as a runtime dependency.
-- Invoke its extension factory from the composition root.
-- Initially use its existing branch-message collection so readable plan tool results supply context.
-- Remove the old modes, classifiers, policy code, commands, and copied Guardian prompt.
-- If and only if the context assertion fails, add or request a minimal upstream `contextProvider` option rather than copying policy code.
+- Add local policy, reviewer, canonical paths, and registration modules.
+- Resolve the internal auto-review model from Codex model metadata and Pi's main runtime.
+- Remove the external Guardian dependency, settings, command, and stale documentation.
+- Remove the old modes, classifiers, commands, and legacy Guardian prompt.
 
 #### Refactor
 
-- Keep the local adapter limited to composition and work-context evidence.
-- Keep Guardian configuration in its documented file and environment variables.
+- Keep the prompt free of examples, command taxonomy, and automatic exceptions.
+- Keep one-shot TUI approval inside the current tool handler with no reusable state.
 
 #### Acceptance
 
@@ -512,16 +506,14 @@ Add repository/package assertions for:
 
 - no `extensions/modes` or fenced task-context implementation;
 - no legacy `@mariozechner` imports;
-- no copied Guardian prompt;
+- no legacy Guardian policy or prompt remnants;
 - no obsolete permission settings documentation;
 - no unintended files in the package manifest/tarball;
-- all required third-party license and notice material;
 - root Git installation paths resolving after a clean dependency install.
 
 #### Green
 
-- Delete legacy code and obsolete attribution only after derived code is gone.
-- Add `THIRD_PARTY_NOTICES.md` where redistribution requires it.
+- Delete legacy code and stale references to retired implementations.
 - Rewrite README and configuration documentation.
 - Document Git-tag install and explicit upgrade commands.
 - Remove or incorporate stale `TODO.md` and `SETTINGS.md` content.

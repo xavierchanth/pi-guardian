@@ -57,7 +57,6 @@ lines.on("line", (line) => {
     const legacy = ["mode", "mode:auto", "mode:plan", "mode:edit", "mode:read", "review-mode", "implement"];
     if (
       event.success !== true ||
-      !names.has("approval-guardian") ||
       !names.has("continue") ||
       legacy.some((name) => names.has(name))
     ) {

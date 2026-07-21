@@ -4,7 +4,7 @@
 
 Stage 2 design approved. ACP implementation begins as a thin proof after Host lifecycle, runtime-worker, IPC, and durable broker proofs in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md).
 
-Pi-Tai ACP will be a new thin implementation built with the official ACP SDK. It will not derive from or copy `pi-acp`.
+Pi-Tai ACP will be a new, product-owned thin implementation built against the official ACP SDK contracts.
 
 The ACP process does not own Pi sessions. It connects Zed to the separately running Pi-Tai Host tray application over authenticated local IPC. The Host supervises a bundled TypeScript helper that loads Pi through its SDK in-process. See [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
 

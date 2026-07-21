@@ -135,27 +135,26 @@ Add unit tests for:
 
 Add integration tests for:
 
-- loading Guardian exactly once;
-- ordinary in-project actions following Guardian's configured review rules;
-- covered actions failing closed when the reviewer is unavailable;
-- private-data actions requiring explicit user authorization;
-- the reviewer transcript containing the current goal and full plan;
-- plan context being framed as evidence rather than authorization;
-- non-interactive and RPC behavior requiring no TUI prompt;
+- every agent-generated `bash` call reaching model review;
+- built-in file tools staying inside canonical workspace/temp roots;
+- traversal and symlink escapes being blocked;
+- exact user authorization remaining role-preserved reviewer evidence;
+- changed and expanded follow-up actions receiving new reviews;
+- invalid, timed-out, cancelled, and failed reviews failing closed;
+- TUI-only exact-action approval after denial or reviewer failure;
 - no old mode commands or mode prompt fragments remaining.
 
 #### Green
 
-- Add `pi-approval-guardian` as the Guardian implementation.
-- Initially rely on readable plan tool calls/results in active branch context.
-- If tests show context is insufficient, add a thin wrapper around a stable/upstream context-provider hook.
-- Submit the public export/context-provider enhancement upstream if necessary.
+- Add the local minimal policy, isolated Codex reviewer, path boundary, and tool hook.
+- Route `openai-codex/codex-auto-review` through Pi's existing Codex OAuth runtime.
+- Keep direct user shell and unknown custom tools outside the extension's scope.
 - Remove the old mode registry, access policies, classifiers, prompts, commands, and runtime.
 
 #### Refactor
 
-- Keep Pi-Tai's Guardian integration limited to configuration and task-context adaptation.
-- Do not duplicate Guardian's security implementation.
+- Keep the reviewer prompt minimal and authorization-centered.
+- Do not add command classifiers, allowlists, persistent bypasses, or permission modes.
 
 #### Acceptance
 
@@ -200,16 +199,14 @@ Add repository assertions for:
 
 - no imports or package references to old Mario packages;
 - no files under `extensions/modes`;
-- no copied Guardian prompt;
+- no legacy Guardian policy or prompt remnants;
 - no obsolete mode settings in documentation;
-- required third-party license/notice files being present for redistributed dependencies;
 - package tarball/Git package containing only intended resources.
 
 #### Green
 
 - Delete old mode and task-context implementation remnants.
-- Remove obsolete mode attribution after its derived code is gone.
-- Add/update third-party notices for retained dependencies.
+- Remove stale references to retired implementations and dependencies.
 - Rewrite README and settings documentation around the refreshed product.
 - Document tagged Git installation and explicit upgrades.
 
@@ -272,8 +269,8 @@ Create executable proof tests for:
 
 - Build disposable Host, runtime-helper, IPC, and ACP-shim spikes.
 - Read the current ACP specification and SDK schemas.
-- Inspect the open-source Codex ACP adapter and relevant tests at a pinned revision.
-- Record fixture-based conclusions without copying implementation code.
+- Exercise public ACP protocol behavior against pinned specifications and fixtures.
+- Record fixture-based conclusions as product-owned behavioral contracts.
 - Write ADRs for process lifecycle, helper packaging, IPC framing, event ordering, and recovery.
 
 #### Acceptance

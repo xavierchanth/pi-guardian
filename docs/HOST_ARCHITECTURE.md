@@ -4,7 +4,7 @@
 
 Stage 2 design approved. The proof-first execution plan is defined in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). Production Host and ACP hardening remains gated on review of the architecture proofs.
 
-This document adapts the ACP Companion concept into a Pi-specific ecosystem. Pi is the only initial agent runtime. Zed, desktop, and mobile are clients of one broker-owned Pi session rather than independent owners of copied sessions.
+This document defines Pi-Tai's Pi-specific companion architecture. Pi is the only initial agent runtime. Zed, desktop, and mobile are clients of one broker-owned Pi session rather than independent session owners.
 
 ## Product direction
 

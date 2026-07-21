@@ -35,11 +35,11 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Replace the current mode hierarchy with one guarded automatic workflow.
 - Replace the fenced `task-context` protocol with a structured planning tool.
 - Preserve a concise goal and optional task plan across session resume and branch changes.
-- Integrate `pi-approval-guardian` without copying its policy implementation.
-- Supply the current goal and plan to Guardian as review evidence.
+- Review every agent-generated `bash` action with an isolated Codex auto-review session.
+- Restrict built-in file tools to canonical workspace and OS temporary roots.
 - Automatically name new sessions using a separately configured provider, model, and effort.
 - Keep the ANSI terminal themes and dynamic terminal palette detection.
-- Remove obsolete permission-plugin and copied Codex Guardian code and notices once no derived code remains.
+- Remove obsolete permission-plugin and external Guardian integration artifacts.
 - Install reproducible releases directly from Git tags.
 
 ### Host and ACP frontend
@@ -48,7 +48,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Package Pi-Tai Host as a tray-resident Tauri application rather than an installed daemon initially.
 - Keep the configuration/status desktop manager independent from the session-owning Host process.
 - Run Pi through its SDK in a bundled TypeScript runtime helper supervised by the Host.
-- Build a thin ACP shim from the official ACP SDK rather than deriving it from `pi-acp`.
+- Build a thin, product-owned ACP shim against the official ACP SDK contracts.
 - Let Zed disconnect without intentionally terminating a healthy host-owned Pi turn.
 - Optimize semantic rendering for Zed while remaining protocol-correct for other ACP clients.
 - Reuse the same Pi-Tai work-context, naming, Guardian, and session behavior as terminal Pi.
@@ -62,8 +62,8 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Replacing Zed's existing completion and attention notifications.
 - Restoring plan, read, edit, or permission modes.
 - Maintaining Pi-Tai's current permission classifier after Guardian integration.
-- Copying or independently maintaining Approval Guardian's policy, path rules, reviewer lifecycle, or Codex-derived prompt.
-- Forking or copying the current `pi-acp` implementation.
+- Maintaining a large risk-taxonomy policy or compatibility layer outside Pi-Tai's authorization-centered design.
+- Adopting an existing ACP frontend architecture instead of the Host-owned session design.
 - Publishing to the npm registry as a requirement.
 - Implementing MCP, client filesystem delegation, client terminal delegation, NES, or document synchronization in the first ACP release.
 - Supporting arbitrary downstream ACP agents in the initial Host.
@@ -113,10 +113,10 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 
 - Pi-Tai must expose no custom access-mode hierarchy.
 - Pi's normal tools remain available.
-- `pi-approval-guardian` decides whether covered operations may execute.
-- Covered actions fail closed when Guardian cannot produce a valid decision.
-- ACP and non-interactive operation must not depend on a TUI-only bypass or prompt.
-- Private-data access must continue to require explicit user authorization according to Guardian policy.
+- `openai-codex/codex-auto-review` decides whether each agent-generated `bash` action may execute.
+- Invalid, timed-out, cancelled, and failed reviews fail closed.
+- Interactive TUI users may allow the exact denied or failed invocation once; noninteractive operation remains blocked.
+- Built-in file tools outside canonical workspace/temp roots are blocked; reviewed `bash` is the escalation path.
 
 ### FR-2: goal and execution plan
 
@@ -150,13 +150,12 @@ Requirements:
 - Interactive TUI sessions show a responsive two-line widget with the goal on the first line and plan progress/current step on the second.
 - Compact tool results expand to the complete checklist, and `/plan-status` provides a read-only full-plan view.
 
-### FR-3: Guardian task context
+### FR-3: Guardian review context
 
-- Guardian must receive the current goal and plan as untrusted review evidence.
-- The planned operation and explicit user authorization remain authoritative; a broad goal does not authorize an unrelated risky action.
-- The first implementation must test whether the plan tool call and readable result already provide sufficient reviewer context.
-- Preferred integration is an upstream `contextProvider` option and stable programmatic export from `pi-approval-guardian`.
-- If an upstream extension point is unavailable, Pi-Tai may carry a minimal adapter patch, but must not duplicate Guardian policy code.
+- Guardian receives an exact structured action and a bounded, role-preserving transcript.
+- Only user-role content supplies authorization; assistant text, tool output, and repository contents remain evidence.
+- A broad goal does not authorize broader means, and a failed action does not authorize an expanded follow-up.
+- The isolated reviewer loads no extensions, skills, templates, themes, context files, or tools.
 
 ### FR-4: automatic session naming
 
@@ -245,7 +244,7 @@ The ACP adapter must:
 - negotiate capabilities instead of assuming a specific client;
 - expose Host-backed new, list, load, resume, close, prompt, and cancellation behavior;
 - emit semantically rich ACP updates rather than flattening events to chat text;
-- use Zed Codex ACP behavior as research material for native plan support, without copying its implementation;
+- validate native plan support against public ACP behavior and negotiated protocol capabilities;
 - omit Pi tree navigation and audio prompting;
 - rely on Zed's existing thread completion and attention notifications.
 
@@ -265,7 +264,7 @@ Detailed architecture and ACP scope are maintained in [HOST_ARCHITECTURE.md](HOS
 
 - Pi-Tai reads `~/.pi/agent/pi-tai.json` and trusted project `.pi/pi-tai.json` files because Pi's extension API does not expose arbitrary namespaced settings as a stable typed API.
 - Project values override global values through an explicit schema-aware merge.
-- Guardian retains its own documented `approval-guardian.json` configuration.
+- Guardian has no separate configuration or persistent approval state.
 - Model references use separate `provider` and `model` fields.
 - No feature silently falls back to the expensive active work model.
 - Invalid optional configuration warns and degrades safely.
@@ -275,12 +274,8 @@ Detailed architecture and ACP scope are maintained in [HOST_ARCHITECTURE.md](HOS
 ## Licensing requirements
 
 - Pi-Tai's original code remains MIT-licensed.
-- Remove `extensions/modes/LICENSE.md` only after all code derived from the old permissions plugin and copied Codex Guardian prompt has been removed.
-- Preserve `pi-approval-guardian` license and notice files when it is bundled or redistributed.
-- A wrapper around Guardian does not copy its Apache-licensed policy into Pi-Tai source.
-- The new ACP frontend must not copy source from `pi-acp`; therefore it does not inherit `pi-acp` attribution.
-- Preserve the Apache-2.0 license supplied with the official ACP SDK dependency.
-- Maintain a concise third-party notices file for redistributed dependencies where required.
+- Keep implementation and design artifacts product-owned and original.
+- Honor dependency licenses through their normal package distributions when dependencies are added.
 
 ## Quality requirements
 

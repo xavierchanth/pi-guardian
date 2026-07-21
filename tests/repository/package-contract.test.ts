@@ -6,7 +6,7 @@ import test from "node:test";
 const root = resolve(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   keywords?: string[];
-  pi?: { extensions?: string[]; themes?: string[] };
+  pi?: { extensions?: string[]; prompts?: string[]; themes?: string[] };
   dependencies?: Record<string, string>;
   files?: string[];
 };
@@ -15,10 +15,12 @@ test("root manifest is a discoverable Pi package", () => {
   assert.ok(manifest.keywords?.includes("pi-package"));
   assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/extension.ts"]);
   assert.deepEqual(manifest.pi?.themes, ["./packages/pi-tai/themes"]);
+  assert.deepEqual(manifest.pi?.prompts, ["./packages/pi-tai/prompts"]);
 
   for (const resource of [
     ...(manifest.pi?.extensions ?? []),
     ...(manifest.pi?.themes ?? []),
+    ...(manifest.pi?.prompts ?? []),
   ]) {
     assert.ok(readFileOrDirectoryExists(join(root, resource)), resource);
   }
@@ -53,11 +55,10 @@ test("portable Host crates remain independent of Tauri", () => {
   assert.ok(existsSync(join(root, "fixtures/host-protocol/command-prompt.json")));
 });
 
-test("package pins Guardian and ships required notices", () => {
-  assert.equal(manifest.dependencies?.["pi-approval-guardian"], "0.7.3");
-  assert.ok(manifest.files?.includes("THIRD_PARTY_NOTICES.md"));
+test("package ships standalone Guardian and required support files", () => {
+  assert.equal(manifest.dependencies?.["pi-approval-guardian"], undefined);
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/guardian/reviewer.ts")));
   assert.ok(manifest.files?.includes("justfile"));
-  assert.ok(existsSync(join(root, "THIRD_PARTY_NOTICES.md")));
   assert.ok(existsSync(join(root, "justfile")));
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
 });
