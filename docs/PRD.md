@@ -62,7 +62,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Replacing Zed's existing completion and attention notifications.
 - Restoring plan, read, edit, or permission modes.
 - Maintaining Pi-Tai's current permission classifier after Guardian integration.
-- Maintaining a large risk-taxonomy policy or compatibility layer outside Pi-Tai's authorization-centered design.
+- Maintaining configurable command taxonomies or compatibility layers outside Pi-Tai's concise risk/authorization policy.
 - Adopting an existing ACP frontend architecture instead of the Host-owned session design.
 - Publishing to the npm registry as a requirement.
 - Implementing MCP, client filesystem delegation, client terminal delegation, NES, or document synchronization in the first ACP release.
@@ -113,11 +113,14 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 
 - Pi-Tai must expose no custom access-mode hierarchy.
 - Pi's normal tools remain available.
-- `openai-codex/codex-auto-review` decides whether each agent-generated `bash` action may execute.
-- Invalid, timed-out, cancelled, and failed reviews fail closed.
-- Interactive TUI users may allow the exact denied or failed invocation once; noninteractive operation remains blocked.
-- Mutating built-in file tools outside canonical workspace/temp roots are blocked; reviewed `bash` is the escalation path.
-- Read-only built-in file tools may additionally inspect Pi's resource/package directories and standard global skill directory.
+- `openai-codex/codex-auto-review` independently scores risk and authorization for every agent-generated `bash` action.
+- Low/medium-risk task work normally proceeds; high-risk work requires meaningful authorization and narrow scope; critical work never executes automatically.
+- Clear denials return failed tool results so the agent can continue without interrupting the user.
+- Plausible consequential actions that cannot be safely allowed may request exact-action TUI confirmation; noninteractive operation remains blocked.
+- Invalid, timed-out, cancelled, and failed reviews fail closed without an approval fallback.
+- Built-in file tools automatically access canonical unignored workspace targets and safe temporary/read-only roots.
+- Git-ignored direct targets, likely secret paths, VCS metadata, Pi credentials/model configuration, and Pi session history receive Guardian review.
+- Pi-state writes, traversal, symlink escapes, and other outside-boundary file operations are blocked; reviewed `bash` is the escalation path.
 
 ### FR-2: goal and execution plan
 
@@ -153,9 +156,10 @@ Requirements:
 
 ### FR-3: Guardian review context
 
-- Guardian receives an exact structured action and a bounded, role-preserving transcript.
-- Only user-role content supplies authorization; assistant text, tool output, and repository contents remain evidence.
-- A broad goal does not authorize broader means, and a failed action does not authorize an expanded follow-up.
+- Guardian receives an exact structured action, deterministic path evidence when applicable, and a bounded role-preserving transcript.
+- Only user-role content supplies authorization; assistant text, tool output, repository contents, path evidence, and work context remain evidence.
+- Network risk depends on destination, payload, sensitivity, and remote effects rather than network access alone.
+- Routine incidental methods do not need exact authorization; a broad goal still does not authorize consequential scope expansion, and failure does not expand authority.
 - The isolated reviewer loads no extensions, skills, templates, themes, context files, or tools.
 
 ### FR-4: automatic session naming

@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { PiTaiConfigService } from "../config/register.ts";
 import {
+  GUARDIAN_CONFIRMATION_REQUIRED_EVENT,
   GUARDIAN_REVIEW_FAILED_EVENT,
+  type GuardianConfirmationRequiredEvent,
   type GuardianReviewFailedEvent,
 } from "./events.ts";
 import {
@@ -29,6 +31,12 @@ export function registerNotifications(
       ? "Automatic action review timed out."
       : "Automatic action review failed.";
     notify("Pi-Tai review", body);
+  });
+
+  pi.events.on(GUARDIAN_CONFIRMATION_REQUIRED_EVENT, (data) => {
+    const event = data as GuardianConfirmationRequiredEvent;
+    if (event.mode !== "tui") return;
+    notify("Pi-Tai Guardian", `${event.riskLevel} risk action needs your review.`);
   });
 
   pi.on("agent_settled", (_event, ctx) => {

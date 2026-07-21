@@ -72,13 +72,15 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 ### Approval Guardian
 
-Pi-Tai includes a small standalone action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. Each review includes the latest structured work context (goal, explanation, and complete plan) as explicit task evidence, separate from user authorization. Built-in file tools stay local to canonical workspace and OS temporary roots. Read-only file tools may additionally inspect Pi's resource/package directories and the standard global `.agents/skills` directory. Traversal and symlink escapes remain blocked, and writes outside workspace/temp roots remain blocked. A denied or failed review may be approved only for that exact invocation in the interactive TUI.
+Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. The reviewer independently scores risk and user authorization: routine low/medium-risk task work proceeds without method-level permission, high-risk work requires meaningful authorization and narrow scope, and critical work never executes automatically. Clear denials become failed tool results so the agent can continue; a plausible consequential action that cannot be safely allowed may be deferred to an exact-action TUI confirmation. Invalid, timed-out, cancelled, and failed reviews fail closed without an approval fallback.
+
+Built-in file tools use deterministic canonical boundaries. Unignored repository files remain frictionless; direct targets ignored by Git, likely credential paths, VCS metadata, Pi `auth.json`, Pi `models.json`, and Pi `sessions/**` receive Guardian review. Repository-wide `grep` and `find` retain their native Git-ignore behavior. Read-only tools may additionally inspect safe Pi state/resources and global `.agents/skills`; Pi-state writes and outside-boundary file operations remain blocked, with reviewed `bash` as the escalation path. Traversal and symlink escapes are always blocked.
 
 Pi-Tai does not provide legacy permission modes. `/mode`, `/review-mode`, and `/implement` are intentionally absent.
 
 ### Native notifications
 
-In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications when automatic action review fails or times out and when the agent settles ready for input. Either notification can be disabled in configuration.
+In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications fire when Guardian needs exact-action user review, when automatic review fails or times out, and when the agent settles ready for input. Confirmation notifications are mandatory; failure and completion notifications can be disabled in configuration.
 
 ### ANSI theme synchronization
 

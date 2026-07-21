@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   checkFileToolPath,
@@ -23,12 +25,14 @@ import {
 } from "../../packages/pi-tai/src/guardian/reviewer.ts";
 import type { WorkContextSnapshot } from "../../packages/pi-tai/src/work-context/domain.ts";
 
+const execFileAsync = promisify(execFile);
+
 test("every agent bash call gets a fresh review without command exceptions", async () => {
+  const requests: ReviewRequest[] = [];
   const { handler } = registerWith(async (request) => {
     requests.push(request);
     return allow();
   });
-  const requests: ReviewRequest[] = [];
   const ctx = fakeContext();
 
   await handler(bashEvent("pwd"), ctx);
@@ -40,7 +44,7 @@ test("every agent bash call gets a fresh review without command exceptions", asy
   assert.notEqual(requests[0].action, requests[1].action);
 });
 
-test("inside-boundary built-in file tools bypass model review", async () => {
+test("inside-boundary unignored built-in file tools bypass model review", async () => {
   let reviews = 0;
   const { handler } = registerWith(async () => {
     reviews++;
@@ -52,7 +56,26 @@ test("inside-boundary built-in file tools bypass model review", async () => {
   assert.equal(reviews, 0);
 });
 
-test("outside, traversal, and symlink-escape file targets are blocked", async () => {
+test("ignored built-in file targets receive Guardian review with path evidence", async () => {
+  const requests: ReviewRequest[] = [];
+  const { handler } = registerWith(async (request) => {
+    requests.push(request);
+    return allow();
+  });
+
+  const result = await handler(
+    toolEvent("read", { path: "node_modules/typescript/package.json" }),
+    fakeContext(),
+  );
+  assert.equal(result, undefined);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(
+    (requests[0].reviewEvidence as { triggers: string[] }).triggers,
+    ["gitignored"],
+  );
+});
+
+test("outside, traversal, and symlink-escape file targets are denied", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-"));
   const workspace = join(root, "workspace");
   const outside = join(root, "outside");
@@ -64,17 +87,174 @@ test("outside, traversal, and symlink-escape file targets are blocked", async ()
   const escaped = await checkFileToolPath("write", { path: "escape/new.txt" }, workspace, [], []);
   const inside = await checkFileToolPath("edit", { path: "new.txt" }, workspace, [], []);
 
-  assert.equal(traversal.allowed, false);
-  assert.equal(escaped.allowed, false);
-  assert.equal(inside.allowed, true);
+  assert.equal(traversal.kind, "deny");
+  assert.equal(escaped.kind, "deny");
+  assert.equal(inside.kind, "allow");
 });
 
-test("default read roots include Pi resources but exclude credential files", () => {
+test("Git-ignored and secret-like direct targets review while aggregate searches stay automatic", async () => {
+  const { workspace, agentDir } = await gitFixture();
+  await mkdir(join(workspace, "ignored"));
+  await writeFile(join(workspace, "ignored", "data.txt"), "private");
+  await mkdir(join(workspace, "nested"));
+  await writeFile(join(workspace, "nested", ".gitignore"), "*.secret\n");
+  await writeFile(join(workspace, "nested", "token.secret"), "private");
+  await writeFile(join(workspace, ".env.example"), "TOKEN=example\n");
+  await symlink(".env.example", join(workspace, ".env.local"));
+  await writeFile(join(workspace, "credentials.json"), "{}\n");
+
+  for (const path of ["ignored/data.txt", "nested/token.secret", "future.log"]) {
+    const decision = await checkFileToolPath("read", { path }, workspace, [], [], agentDir);
+    assert.equal(decision.kind, "review", path);
+    assert.equal(decision.evidence?.triggers[0], "gitignored", path);
+  }
+
+  const futureWrite = await checkFileToolPath(
+    "write",
+    { path: "future.log" },
+    workspace,
+    [],
+    [],
+    agentDir,
+  );
+  assert.equal(futureWrite.kind, "review");
+
+  const credentials = await checkFileToolPath(
+    "read",
+    { path: "credentials.json" },
+    workspace,
+    [],
+    [],
+    agentDir,
+  );
+  assert.equal(credentials.kind, "review");
+  assert.equal(credentials.evidence?.triggers[0], "sensitive-path");
+
+  const dotenvExample = await checkFileToolPath(
+    "read",
+    { path: ".env.example" },
+    workspace,
+    [],
+    [],
+    agentDir,
+  );
+  assert.equal(dotenvExample.kind, "allow");
+  const dotenvSymlink = await checkFileToolPath(
+    "read",
+    { path: ".env.local" },
+    workspace,
+    [],
+    [],
+    agentDir,
+  );
+  assert.equal(dotenvSymlink.kind, "review");
+  assert.equal(dotenvSymlink.evidence?.triggers[0], "sensitive-path");
+
+  for (const toolName of ["grep", "find"]) {
+    const aggregate = await checkFileToolPath(
+      toolName,
+      { path: "." },
+      workspace,
+      [],
+      [],
+      agentDir,
+    );
+    assert.equal(aggregate.kind, "allow", toolName);
+  }
+
+  const metadata = await checkFileToolPath(
+    "read",
+    { path: ".git/config" },
+    workspace,
+    [],
+    [],
+    agentDir,
+  );
+  assert.equal(metadata.kind, "review");
+  assert.equal(metadata.evidence?.triggers[0], "vcs-metadata");
+});
+
+test("Pi credentials and sessions review, safe state reads automatically, and writes deny", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-agent-state-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent");
+  const outside = join(root, "outside");
+  await mkdir(workspace);
+  await mkdir(outside);
+  await mkdir(join(agentDir, "sessions"), { recursive: true });
+  for (const file of ["models.json", "settings.json", "trust.json", "models-store.json", "safe.json"]) {
+    await writeFile(join(agentDir, file), "{}\n");
+  }
+  await symlink("safe.json", join(agentDir, "auth.json"));
+  await symlink(outside, join(agentDir, "escape"));
+  await writeFile(join(agentDir, "sessions", "conversation.jsonl"), "{}\n");
+
+  for (const path of ["auth.json", "models.json", "sessions/conversation.jsonl"]) {
+    const decision = await checkFileToolPath(
+      "read",
+      { path: join(agentDir, path) },
+      workspace,
+      [],
+      [],
+      agentDir,
+    );
+    assert.equal(decision.kind, "review", path);
+  }
+
+  for (const file of ["settings.json", "trust.json", "models-store.json"]) {
+    const decision = await checkFileToolPath(
+      "read",
+      { path: join(agentDir, file) },
+      workspace,
+      [],
+      [],
+      agentDir,
+    );
+    assert.equal(decision.kind, "allow", file);
+  }
+
+  assert.equal((await checkFileToolPath(
+    "find",
+    { path: agentDir },
+    workspace,
+    [],
+    [],
+    agentDir,
+  )).kind, "review");
+  assert.equal((await checkFileToolPath(
+    "ls",
+    { path: agentDir },
+    workspace,
+    [],
+    [],
+    agentDir,
+  )).kind, "allow");
+  assert.equal((await checkFileToolPath(
+    "write",
+    { path: join(agentDir, "settings.json") },
+    workspace,
+    [],
+    [],
+    agentDir,
+  )).kind, "deny");
+  assert.equal((await checkFileToolPath(
+    "read",
+    { path: join(agentDir, "escape", "new.txt") },
+    workspace,
+    [],
+    [],
+    agentDir,
+  )).kind, "deny");
+});
+
+test("default read roots include safe Pi state but exclude credentials and sessions", () => {
   const candidates = defaultReadCandidates();
   assert.ok(candidates.some((path) => path.endsWith("/.agents/skills")));
   assert.ok(candidates.some((path) => path.endsWith("/.pi/agent/extensions")));
+  assert.ok(candidates.some((path) => path.endsWith("/.pi/agent/settings.json")));
   assert.ok(candidates.some((path) => path.endsWith("/@earendil-works/pi-coding-agent")));
   assert.equal(candidates.some((path) => path.endsWith("/.pi/agent/auth.json")), false);
+  assert.equal(candidates.some((path) => path.endsWith("/.pi/agent/sessions")), false);
 });
 
 test("read-only tools may inspect configured skill and Pi roots without allowing writes", async () => {
@@ -82,6 +262,7 @@ test("read-only tools may inspect configured skill and Pi roots without allowing
   const workspace = join(root, "workspace");
   const skills = join(root, "skills");
   const linkedSkills = join(root, "linked-skills");
+  const nonexistentAgent = join(root, "agent");
   await mkdir(workspace);
   await mkdir(skills);
   await symlink(skills, linkedSkills);
@@ -93,8 +274,9 @@ test("read-only tools may inspect configured skill and Pi roots without allowing
       workspace,
       [],
       [linkedSkills],
+      nonexistentAgent,
     );
-    assert.equal(decision.allowed, true, toolName);
+    assert.equal(decision.kind, "allow", toolName);
   }
 
   for (const toolName of ["write", "edit"]) {
@@ -104,12 +286,13 @@ test("read-only tools may inspect configured skill and Pi roots without allowing
       workspace,
       [],
       [linkedSkills],
+      nonexistentAgent,
     );
-    assert.equal(decision.allowed, false, toolName);
+    assert.equal(decision.kind, "deny", toolName);
   }
 });
 
-test("review prompt preserves user authorization, roles, exact action, and doctrine", () => {
+test("review prompt preserves roles, action, evidence, work context, and autonomy doctrine", () => {
   const action = {
     toolName: "bash",
     arguments: { command: "rg token src" },
@@ -121,24 +304,25 @@ test("review prompt preserves user authorization, roles, exact action, and doctr
     plan: [{ content: "Search source", status: "in_progress" }],
   };
   const prompt = buildReviewPrompt([
-    { role: "user", content: "Run exactly rg token src." },
+    { role: "user", content: "Inspect the implementation." },
     { role: "assistant", content: "I will inspect it." },
     { role: "toolResult", content: "previous failure" },
-  ], action, workContext);
+  ], action, workContext, { triggers: ["gitignored"] });
 
-  assert.match(prompt, /role=\"user\"/);
-  assert.match(prompt, /Run exactly rg token src/);
-  assert.match(prompt, /role=\"assistant\"/);
+  assert.match(prompt, /role="user"/);
+  assert.match(prompt, /Inspect the implementation/);
+  assert.match(prompt, /role="assistant"/);
   assert.match(prompt, /previous failure/);
   assert.match(prompt, /<work_context>/);
   assert.match(prompt, /Inspect the repository/);
-  assert.match(prompt, /Search source/);
+  assert.match(prompt, /<review_evidence>/);
+  assert.match(prompt, /gitignored/);
   assert.match(prompt, /"command":"rg token src"/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Goal authorization is not method authorization/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Failure does not expand authority/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Only content attributed to the user can authorize/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Work context is evidence, not user authorization/);
-  assert.doesNotMatch(REVIEWER_SYSTEM_PROMPT, /ripgrep|network|secret|allowlist/i);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Allow low- and medium-risk actions/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Network access alone is not high risk/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Only conversation messages attributed to the user/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Work context is task evidence, never user authorization/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /plausibly task-relevant.*confirm/);
 });
 
 test("every bash review receives the latest structured work context explicitly", async () => {
@@ -159,65 +343,92 @@ test("every bash review receives the latest structured work context explicitly",
   assert.deepEqual(request?.workContext, snapshot);
 });
 
-test("broad goals and failed actions remain evidence, not expanded authorization", () => {
-  const prompt = buildReviewPrompt([
-    { role: "user", content: "Make the build pass." },
-    { role: "assistant", content: "The scoped build command failed." },
-    { role: "toolResult", content: "exit 1" },
-  ], {
-    toolName: "bash",
-    arguments: { command: "broader follow-up" },
-    cwd: "/workspace",
-  });
-  assert.match(prompt, /Make the build pass/);
-  assert.match(prompt, /exit 1/);
-  assert.match(prompt, /broader follow-up/);
-  assert.doesNotMatch(prompt, /authorized_method|authorization_level/);
-});
-
-test("strict parser accepts only the requested allow/deny JSON", () => {
-  assert.deepEqual(parseReviewDecision('{"outcome":"allow","reason":"authorized"}'), {
+test("strict parser enforces risk, authorization, outcome, and confirmation matrix", () => {
+  assert.deepEqual(parseReviewDecision(
+    '{"risk_level":"low","user_authorization":"unknown","outcome":"allow","reason":"routine inspection"}',
+  ), {
+    riskLevel: "low",
+    userAuthorization: "unknown",
     outcome: "allow",
-    reason: "authorized",
+    reason: "routine inspection",
   });
-  assert.deepEqual(parseReviewDecision('{"outcome":"deny","reason":"broader method"}'), {
-    outcome: "deny",
-    reason: "broader method",
+  assert.deepEqual(parseReviewDecision(
+    '{"risk_level":"high","user_authorization":"low","outcome":"confirm","reason":"plausible but consequential"}',
+  ), {
+    riskLevel: "high",
+    userAuthorization: "low",
+    outcome: "confirm",
+    reason: "plausible but consequential",
   });
   assert.throws(() => parseReviewDecision("```json\n{}\n```"));
-  assert.throws(() => parseReviewDecision('{"outcome":"allow","reason":"ok","risk":"low"}'));
+  assert.throws(() => parseReviewDecision(
+    '{"risk_level":"high","user_authorization":"low","outcome":"allow","reason":"unsafe"}',
+  ));
+  assert.throws(() => parseReviewDecision(
+    '{"risk_level":"critical","user_authorization":"medium","outcome":"confirm","reason":"not exact"}',
+  ));
+  assert.throws(() => parseReviewDecision(
+    '{"risk_level":"medium","user_authorization":"low","outcome":"confirm","reason":"unneeded prompt"}',
+  ));
 });
 
-test("interactive denial offers exact one-shot approval; noninteractive denial fails closed", async () => {
-  const denied = async (): Promise<ReviewResult> => ({
-    kind: "decision",
-    decision: { outcome: "deny", reason: "not authorized" },
-  });
-  const interactive = registerWith(denied);
-  const tui = fakeContext("tui", "Allow exact action once");
-  const accepted = await interactive.handler(bashEvent("echo ok"), tui);
-  assert.equal(accepted, undefined);
-  assert.equal(tui.selections.length, 1);
-  assert.deepEqual(tui.selections[0].options, ["Allow exact action once", "Cancel"]);
-  assert.match(tui.selections[0].title, /"command": "echo ok"/);
-
-  const print = fakeContext("print");
-  const blocked = await interactive.handler(bashEvent("echo ok"), print);
+test("clear denial returns a failed tool result without interrupting the user", async () => {
+  const denied = async (): Promise<ReviewResult> => decision(
+    "high",
+    "unknown",
+    "deny",
+    "clearly unauthorized credential access",
+  );
+  const { handler } = registerWith(denied);
+  const tui = fakeContext("tui", "Execute exact action once");
+  const blocked = await handler(bashEvent("credential probe"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Action denied by automatic review: not authorized",
+    reason: "Action denied by automatic review: clearly unauthorized credential access",
+  });
+  assert.equal(tui.selections.length, 0);
+});
+
+test("plausible consequential action defers to exact user review and emits notification", async () => {
+  const deferred = async (): Promise<ReviewResult> => decision(
+    "high",
+    "low",
+    "confirm",
+    "task-relevant but authorization is insufficient",
+  );
+  const interactive = registerWith(deferred);
+  const tui = fakeContext("tui", "Execute exact action once");
+  const accepted = await interactive.handler(bashEvent("deploy candidate"), tui);
+  assert.equal(accepted, undefined);
+  assert.equal(tui.selections.length, 1);
+  assert.deepEqual(tui.selections[0].options, ["Execute exact action once", "Deny"]);
+  assert.match(tui.selections[0].title, /"command": "deploy candidate"/);
+  assert.deepEqual(interactive.emitted, [{
+    name: "pi-tai:guardian-confirmation-required",
+    data: { mode: "tui", riskLevel: "high" },
+  }]);
+
+  const print = fakeContext("print");
+  const blocked = await interactive.handler(bashEvent("deploy candidate"), print);
+  assert.deepEqual(blocked, {
+    block: true,
+    reason: "Action requires interactive user confirmation: task-relevant but authorization is insufficient",
   });
   assert.equal(print.selections.length, 0);
 });
 
-test("timeout and provider failure emit notification events and can use TUI allow-once", async () => {
+test("review failure and timeout fail closed without an approval fallback", async () => {
   for (const result of [
     { kind: "timeout", reason: "timed out" },
     { kind: "failure", reason: "provider failed" },
   ] as const) {
     const { handler, emitted } = registerWith(async () => result);
-    const ctx = fakeContext("tui", "Allow exact action once");
-    assert.equal(await handler(bashEvent("true"), ctx), undefined);
+    const ctx = fakeContext("tui", "Execute exact action once");
+    assert.deepEqual(await handler(bashEvent("true"), ctx), {
+      block: true,
+      reason: `Action blocked because ${result.reason}`,
+    });
+    assert.equal(ctx.selections.length, 0);
     assert.deepEqual(emitted, [{
       name: "pi-tai:guardian-review-failed",
       data: { kind: result.kind, mode: "tui" },
@@ -225,7 +436,7 @@ test("timeout and provider failure emit notification events and can use TUI allo
   }
 
   const { handler } = registerWith(async () => ({ kind: "cancelled", reason: "cancelled" }));
-  const ctx = fakeContext("tui", "Allow exact action once");
+  const ctx = fakeContext("tui", "Execute exact action once");
   assert.deepEqual(await handler(bashEvent("true"), ctx), {
     block: true,
     reason: "Action blocked because cancelled",
@@ -279,6 +490,12 @@ test("reviewer default deadline is 30 seconds", () => {
 test("reviewer session is isolated, tool-free, low-thinking, and strict", async () => {
   let resourceOptions: Record<string, unknown> | undefined;
   let sessionOptions: Record<string, unknown> | undefined;
+  const output = JSON.stringify({
+    risk_level: "low",
+    user_authorization: "unknown",
+    outcome: "allow",
+    reason: "routine task work",
+  });
   const reviewer = createModelReviewer({
     createResourceLoader(options) {
       resourceOptions = options as unknown as Record<string, unknown>;
@@ -286,15 +503,12 @@ test("reviewer session is isolated, tool-free, low-thinking, and strict", async 
     },
     createSession: async (options) => {
       sessionOptions = options as unknown as Record<string, unknown>;
-      return { session: fakeReviewerSession('{"outcome":"allow","reason":"exact"}') } as never;
+      return { session: fakeReviewerSession(output) } as never;
     },
   });
 
   const result = await reviewer(reviewRequest());
-  assert.deepEqual(result, {
-    kind: "decision",
-    decision: { outcome: "allow", reason: "exact" },
-  });
+  assert.deepEqual(result, allow());
   for (const key of [
     "noExtensions", "noSkills", "noPromptTemplates", "noThemes", "noContextFiles",
   ]) assert.equal(resourceOptions?.[key], true, key);
@@ -326,9 +540,24 @@ test("reviewer reports malformed output, timeout, cancellation, and provider fai
 
   const controller = new AbortController();
   controller.abort();
-  const cancelled = createModelReviewer(fakeReviewerDependencies('{"outcome":"allow","reason":"ok"}'));
+  const cancelled = createModelReviewer(fakeReviewerDependencies(JSON.stringify({
+    risk_level: "low",
+    user_authorization: "unknown",
+    outcome: "allow",
+    reason: "ok",
+  })));
   assert.equal((await cancelled(reviewRequest({ signal: controller.signal }))).kind, "cancelled");
 });
+
+async function gitFixture() {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-git-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent-does-not-exist");
+  await mkdir(workspace);
+  await execFileAsync("git", ["init", "-q", workspace]);
+  await writeFile(join(workspace, ".gitignore"), "ignored/\nfuture.log\n");
+  return { workspace, agentDir };
+}
 
 function registerWith(
   reviewer: (request: ReviewRequest) => Promise<ReviewResult>,
@@ -396,7 +625,7 @@ function reviewRequest(overrides: Partial<ReviewRequest> = {}): ReviewRequest {
   return {
     modelRegistry: fakeRegistry(),
     cwd: process.cwd(),
-    messages: [{ role: "user", content: "Run it exactly." }],
+    messages: [{ role: "user", content: "Inspect the repository." }],
     action: { toolName: "bash", arguments: { command: "true" }, cwd: process.cwd() },
     ...overrides,
   };
@@ -423,8 +652,20 @@ function fakeReviewerSession(output: string) {
   } as never;
 }
 
+function decision(
+  riskLevel: "low" | "medium" | "high" | "critical",
+  userAuthorization: "unknown" | "low" | "medium" | "high",
+  outcome: "allow" | "deny" | "confirm",
+  reason: string,
+): ReviewResult {
+  return {
+    kind: "decision",
+    decision: { riskLevel, userAuthorization, outcome, reason },
+  };
+}
+
 function allow(): ReviewResult {
-  return { kind: "decision", decision: { outcome: "allow", reason: "authorized" } };
+  return decision("low", "unknown", "allow", "routine task work");
 }
 
 function bashEvent(command: string) {

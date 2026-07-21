@@ -31,6 +31,7 @@ export interface ReviewRequest {
   cwd: string;
   messages: readonly unknown[];
   workContext?: WorkContextSnapshot;
+  reviewEvidence?: unknown;
   action: ProposedAction;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -83,7 +84,12 @@ export function createModelReviewer(dependencies: ReviewerDependencies = {}) {
       }, () => undefined);
       session = await raceAbort(sessionPromise, signal);
       await raceAbort(
-        session.prompt(buildReviewPrompt(request.messages, request.action, request.workContext)),
+        session.prompt(buildReviewPrompt(
+          request.messages,
+          request.action,
+          request.workContext,
+          request.reviewEvidence,
+        )),
         signal,
         session,
       );

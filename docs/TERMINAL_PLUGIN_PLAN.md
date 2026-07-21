@@ -107,7 +107,7 @@ The title generator receives an explicitly resolved provider/model and thinking 
 
 ### Keep Guardian local and minimal
 
-Pi-Tai reviews every agent-generated `bash` call with an isolated `openai-codex/codex-auto-review` session. The prompt evaluates exact authorization and semantic fidelity only. Mutating built-in file tools use deterministic canonical workspace/temp boundaries; read-only tools may additionally inspect Pi and standard global skill roots. Direct user shell and custom tools remain outside this policy.
+Pi-Tai reviews every agent-generated `bash` call with an isolated `openai-codex/codex-auto-review` session. The prompt scores risk and authorization independently, permits routine low/medium-risk task work, and reserves user confirmation for plausible consequential ambiguity. Built-in file tools use deterministic allow/review/deny classification: canonical unignored workspace targets stay frictionless, while Git-ignored, likely-secret, VCS, Pi credential, and Pi session targets reach Guardian. Direct user shell and custom tools remain outside this policy.
 
 ### Use a dedicated Pi-Tai configuration file
 
@@ -433,10 +433,11 @@ Add integration tests for:
 - every agent-generated `bash` action receiving a fresh review;
 - no Pi-Tai mode commands or prompts;
 - canonical path containment and symlink escapes;
-- strict allow/deny parsing and reviewer failure modes;
-- role-preserved exact authorization evidence;
-- broad goals and failures not expanding authorization;
-- exact-action TUI allow-once and noninteractive fail-closed behavior;
+- strict risk/authorization and allow/deny/confirm parsing;
+- role-preserved authorization plus deterministic path evidence;
+- routine autonomy without consequential scope expansion;
+- clear denials continuing without interruption;
+- exact-action TUI confirmation, notification, bell, and noninteractive fail-closed behavior;
 - reviewer isolation from project resources and tools.
 
 #### Green
@@ -448,8 +449,9 @@ Add integration tests for:
 
 #### Refactor
 
-- Keep the prompt free of examples, command taxonomy, and automatic exceptions.
-- Keep one-shot TUI approval inside the current tool handler with no reusable state.
+- Keep the prompt free of command allowlists and configuration-driven exceptions.
+- Keep one-shot TUI confirmation inside the current tool handler with no reusable state.
+- Never offer user fallback after clear denial or reviewer failure.
 
 #### Acceptance
 

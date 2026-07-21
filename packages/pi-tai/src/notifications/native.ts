@@ -13,9 +13,9 @@ export function terminalNotificationSequence(
   const safeBody = sanitize(body);
   if (env.KITTY_WINDOW_ID) {
     return `\x1b]99;i=pi-tai:d=0;${safeTitle}\x1b\\`
-      + `\x1b]99;i=pi-tai:p=body;${safeBody}\x1b\\`;
+      + `\x1b]99;i=pi-tai:p=body;${safeBody}\x1b\\\x07`;
   }
-  return `\x1b]777;notify;${safeTitle};${safeBody}\x07`;
+  return `\x1b]777;notify;${safeTitle};${safeBody}\x07\x07`;
 }
 
 function sanitize(value: string): string {

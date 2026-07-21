@@ -136,25 +136,28 @@ Add unit tests for:
 Add integration tests for:
 
 - every agent-generated `bash` call reaching model review;
-- built-in file tools staying inside canonical workspace/temp roots;
+- deterministic allow/review/deny classification for built-in file tools;
+- Git-ignored, likely-secret, VCS, Pi credential, and Pi session targets reaching review;
 - traversal and symlink escapes being blocked;
-- exact user authorization remaining role-preserved reviewer evidence;
-- changed and expanded follow-up actions receiving new reviews;
-- invalid, timed-out, cancelled, and failed reviews failing closed;
-- TUI-only exact-action approval after denial or reviewer failure;
+- independent risk/authorization scoring with routine low/medium autonomy;
+- clear denials returning tool failures without user interruption;
+- plausible consequential actions receiving TUI-only exact-action confirmation;
+- invalid, timed-out, cancelled, and failed reviews failing closed without approval fallback;
 - no old mode commands or mode prompt fragments remaining.
 
 #### Green
 
-- Add the local minimal policy, isolated Codex reviewer, path boundary, and tool hook.
+- Add the local risk/authorization policy, isolated Codex reviewer, path classifier, and tool hook.
 - Route `openai-codex/codex-auto-review` through Pi's existing Codex OAuth runtime.
+- Notify and ring the terminal bell when exact user confirmation is required.
 - Keep direct user shell and unknown custom tools outside the extension's scope.
 - Remove the old mode registry, access policies, classifiers, prompts, commands, and runtime.
 
 #### Refactor
 
-- Keep the reviewer prompt minimal and authorization-centered.
-- Do not add command classifiers, allowlists, persistent bypasses, or permission modes.
+- Keep the reviewer autonomy-first, risk-aware, and explicit that network access is not inherently severe.
+- Use confirmation only for plausible consequential ambiguity, never routine work or obvious denial.
+- Do not add command classifiers, allowlists, persistent bypasses, permission modes, or Guardian configuration.
 
 #### Acceptance
 
