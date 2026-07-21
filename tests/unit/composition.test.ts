@@ -18,8 +18,8 @@ test("composition root registers every feature once in order", async () => {
       sessionTitle: () => {
         calls.push("session-title");
       },
-      continueCommand: () => {
-        calls.push("continue-command");
+      notifications: () => {
+        calls.push("notifications");
       },
       guardian: async () => {
         calls.push("guardian");
@@ -33,6 +33,7 @@ test("composition root registers every feature once in order", async () => {
       workContext: createPiSessionWorkContextStore(),
       titleGenerator: async () => "test title",
       queryTerminalBackground: async () => undefined,
+      notificationSender: () => undefined,
     }),
   );
 
@@ -42,7 +43,7 @@ test("composition root registers every feature once in order", async () => {
     "config",
     "work-context",
     "session-title",
-    "continue-command",
+    "notifications",
     "guardian",
     "ansi-theme",
   ]);

@@ -19,6 +19,10 @@ test("returns immutable defaults when files are absent", () => {
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: false });
   assert.equal(loaded.config.sessionTitle.effort, "minimal");
   assert.equal(loaded.config.ansiTheme.darkTheme, "ansi-dark");
+  assert.deepEqual(loaded.config.notifications, {
+    reviewFailure: true,
+    agentCompletion: true,
+  });
   assert.ok(Object.isFrozen(loaded.config));
   assert.deepEqual(loaded.warnings, []);
 });
@@ -28,10 +32,12 @@ test("trusted project values override valid global values", () => {
   writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
     sessionTitle: { provider: "global-provider", model: "global-model", maxWords: 8 },
     ansiTheme: { darkTheme: "global-dark" },
+    notifications: { reviewFailure: false },
   }));
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { model: "project-model" },
     ansiTheme: { lightTheme: "project-light" },
+    notifications: { agentCompletion: false },
   }));
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
@@ -44,6 +50,10 @@ test("trusted project values override valid global values", () => {
   });
   assert.equal(loaded.config.ansiTheme.darkTheme, "global-dark");
   assert.equal(loaded.config.ansiTheme.lightTheme, "project-light");
+  assert.deepEqual(loaded.config.notifications, {
+    reviewFailure: false,
+    agentCompletion: false,
+  });
 });
 
 test("untrusted project configuration is ignored", () => {
@@ -62,6 +72,7 @@ test("invalid overrides are ignored without erasing valid global values", () => 
   }));
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { provider: "", maxWords: 99, surprise: true },
+    notifications: { reviewFailure: "yes", surprise: true },
     unknown: true,
   }));
 
@@ -69,6 +80,7 @@ test("invalid overrides are ignored without erasing valid global values", () => 
   assert.equal(loaded.config.sessionTitle.provider, "global");
   assert.equal(loaded.config.sessionTitle.maxWords, 7);
   assert.ok(loaded.warnings.some((warning) => warning.includes("sessionTitle.maxWords")));
+  assert.ok(loaded.warnings.some((warning) => warning.includes("notifications.reviewFailure")));
   assert.ok(loaded.warnings.some((warning) => warning.includes("Unknown top-level key")));
 });
 

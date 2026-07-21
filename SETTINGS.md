@@ -31,6 +31,15 @@ Both `provider` and `model` must be present before Pi-Tai makes a title-model re
 
 ANSI querying runs only in interactive TUI mode.
 
+### `notifications`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `reviewFailure` | boolean | `true` | Native terminal notification when automatic review fails or times out. |
+| `agentCompletion` | boolean | `true` | Native terminal notification when the agent settles ready for input. |
+
+Notifications run only in interactive TUI mode and use Kitty OSC 99 when available, otherwise OSC 777.
+
 ### Example
 
 ```json
@@ -46,13 +55,17 @@ ANSI querying runs only in interactive TUI mode.
     "darkTheme": "ansi-dark",
     "lightTheme": "ansi-light",
     "pollIntervalMs": 2000
+  },
+  "notifications": {
+    "reviewFailure": true,
+    "agentCompletion": true
   }
 }
 ```
 
 ## Action Guardian
 
-The action guardian has no settings. It reviews every agent-generated `bash` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second review deadline. Built-in file tools are restricted to canonical workspace and OS temporary roots. Interactive approval after a denied or failed review applies once to the exact current invocation; noninteractive modes fail closed.
+The action guardian has no settings. It reviews every agent-generated `bash` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second review deadline. Built-in file tools are restricted to canonical workspace and OS temporary roots, except that read-only tools may inspect Pi's resource/package directories and standard global `.agents/skills`. Writes retain the stricter workspace/temp boundary. Interactive approval after a denied or failed review applies once to the exact current invocation; noninteractive modes fail closed.
 
 ## Native Pi settings
 

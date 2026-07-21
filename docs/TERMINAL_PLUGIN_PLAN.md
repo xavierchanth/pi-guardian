@@ -107,7 +107,7 @@ The title generator receives an explicitly resolved provider/model and thinking 
 
 ### Keep Guardian local and minimal
 
-Pi-Tai reviews every agent-generated `bash` call with an isolated `openai-codex/codex-auto-review` session. The prompt evaluates exact authorization and semantic fidelity only. Built-in file tools use deterministic canonical workspace/temp boundaries; direct user shell and custom tools remain outside this policy.
+Pi-Tai reviews every agent-generated `bash` call with an isolated `openai-codex/codex-auto-review` session. The prompt evaluates exact authorization and semantic fidelity only. Mutating built-in file tools use deterministic canonical workspace/temp boundaries; read-only tools may additionally inspect Pi and standard global skill roots. Direct user shell and custom tools remain outside this policy.
 
 ### Use a dedicated Pi-Tai configuration file
 

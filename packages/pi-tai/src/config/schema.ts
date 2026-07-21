@@ -23,9 +23,15 @@ export interface AnsiThemeConfig {
   pollIntervalMs: number;
 }
 
+export interface NotificationsConfig {
+  reviewFailure: boolean;
+  agentCompletion: boolean;
+}
+
 export interface PiTaiConfig {
   sessionTitle: SessionTitleConfig;
   ansiTheme: AnsiThemeConfig;
+  notifications: NotificationsConfig;
 }
 
 export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
@@ -38,5 +44,9 @@ export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
     darkTheme: "ansi-dark",
     lightTheme: "ansi-light",
     pollIntervalMs: 2000,
+  }),
+  notifications: Object.freeze({
+    reviewFailure: true,
+    agentCompletion: true,
   }),
 });

@@ -34,6 +34,16 @@ test("source uses the current Pi distribution imports", () => {
   assert.deepEqual(legacy, []);
 });
 
+test("continue is packaged as a visible prompt template", () => {
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/continue.md"), "utf8");
+  assert.match(prompt, /description: Continue the agent's previous work/);
+  assert.match(prompt, /Continue what you were doing\./);
+  assert.doesNotMatch(
+    walkSource(join(root, "packages")).map((file) => readFileSync(file, "utf8")).join("\n"),
+    /registerCommand\(["']continue["']/,
+  );
+});
+
 test("legacy task blocks and permission modes are absent", () => {
   assert.equal(existsSync(join(root, "packages/pi-tai/src/modes")), false);
   assert.equal(existsSync(join(root, "packages/pi-tai/src/task-context")), false);

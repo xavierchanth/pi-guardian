@@ -6,6 +6,7 @@ import {
 import { canonicalizeCwd, checkFileToolPath, FILE_TOOL_NAMES } from "./paths.ts";
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../notifications/events.ts";
 
 export type ActionReviewer = (request: ReviewRequest) => Promise<ReviewResult>;
 
@@ -54,6 +55,12 @@ export function registerApprovalGuardian(
     }
 
     if (result.kind === "decision" && result.decision.outcome === "allow") return undefined;
+    if (result.kind === "failure" || result.kind === "timeout") {
+      pi.events.emit(GUARDIAN_REVIEW_FAILED_EVENT, {
+        kind: result.kind,
+        mode: ctx.mode,
+      });
+    }
     if (result.kind !== "cancelled" && ctx.mode === "tui") {
       const exactAction = JSON.stringify({
         toolName: event.toolName,

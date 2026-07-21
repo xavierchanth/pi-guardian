@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, hidden work continuation, independent session naming, Approval Guardian, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -62,9 +62,9 @@ Plan: 2/5 | Now: Integrate Guardian
 
 Long goal and active-step text is truncated to the available terminal width. Run `/plan-status` for a read-only full-plan view. `update_plan` results show a compact progress summary by default and the full checklist when tool output is expanded.
 
-### Hidden work continuation
+### Work continuation prompt
 
-Use `/continue` after interrupting the agent to send `Continue what you were doing.` and start another turn. The continuation is hidden from the chat transcript but persists as model context. The command refuses arguments, empty conversations, and invocations while the agent is still working.
+Use `/continue` after interrupting the agent. It expands to the visible prompt `Continue what you were doing.` and starts a normal turn.
 
 ### Independent session naming
 
@@ -72,9 +72,13 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 ### Approval Guardian
 
-Pi-Tai includes a small standalone action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. Each review includes the latest structured work context (goal, explanation, and complete plan) as explicit task evidence, separate from user authorization. Built-in file tools stay local to canonical workspace and OS temporary roots; traversal and symlink escapes are blocked. A denied or failed review may be approved only for that exact invocation in the interactive TUI.
+Pi-Tai includes a small standalone action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. Each review includes the latest structured work context (goal, explanation, and complete plan) as explicit task evidence, separate from user authorization. Built-in file tools stay local to canonical workspace and OS temporary roots. Read-only file tools may additionally inspect Pi's resource/package directories and the standard global `.agents/skills` directory. Traversal and symlink escapes remain blocked, and writes outside workspace/temp roots remain blocked. A denied or failed review may be approved only for that exact invocation in the interactive TUI.
 
 Pi-Tai does not provide legacy permission modes. `/mode`, `/review-mode`, and `/implement` are intentionally absent.
+
+### Native notifications
+
+In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications when automatic action review fails or times out and when the agent settles ready for input. Either notification can be disabled in configuration.
 
 ### ANSI theme synchronization
 
@@ -104,6 +108,10 @@ Project configuration is loaded only for a trusted project and overrides global 
     "darkTheme": "ansi-dark",
     "lightTheme": "ansi-light",
     "pollIntervalMs": 2000
+  },
+  "notifications": {
+    "reviewFailure": true,
+    "agentCompletion": true
   }
 }
 ```
@@ -136,9 +144,10 @@ packages/pi-tai/src/config/         trusted Pi-Tai configuration
 packages/pi-tai/src/work-context/   update_plan domain and persistence
 packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       standalone action review and path boundaries
+packages/pi-tai/src/notifications/  native review/completion notifications
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes
-packages/pi-tai/prompts/design.md   /design prompt template
+packages/pi-tai/prompts/            /design and /continue prompt templates
 apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract
 crates/host-lifecycle/               portable Host lifecycle policy

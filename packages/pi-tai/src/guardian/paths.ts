@@ -1,8 +1,11 @@
 import { lstat, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export const FILE_TOOL_NAMES = new Set(["read", "write", "edit", "grep", "find", "ls"]);
+export const READ_ONLY_FILE_TOOL_NAMES = new Set(["read", "grep", "find", "ls"]);
 
 export interface PathDecision {
   allowed: boolean;
@@ -15,6 +18,7 @@ export async function checkFileToolPath(
   input: Record<string, unknown>,
   cwd: string,
   tempCandidates: readonly string[] = [tmpdir(), "/tmp", "/var/tmp"],
+  readCandidates: readonly string[] = defaultReadCandidates(),
 ): Promise<PathDecision> {
   if (!FILE_TOOL_NAMES.has(toolName)) return { allowed: true };
   const rawPath = typeof input.path === "string" ? input.path : ".";
@@ -22,14 +26,17 @@ export async function checkFileToolPath(
   try {
     const workspace = await realpath(cwd);
     const allowedRoots = await canonicalRoots([workspace, ...tempCandidates]);
+    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName)
+      ? await canonicalRoots(readCandidates)
+      : [];
     const canonicalPath = await canonicalizeTarget(cwd, stripAtPrefix(rawPath));
-    if (allowedRoots.some((root) => contains(root, canonicalPath))) {
+    if ([...allowedRoots, ...readRoots].some((root) => contains(root, canonicalPath))) {
       return { allowed: true, canonicalPath };
     }
     return {
       allowed: false,
       canonicalPath,
-      reason: `File tool target is outside the workspace and approved temporary roots: ${canonicalPath}. Use reviewed bash only when an outside-boundary operation is explicitly authorized.`,
+      reason: `File tool target is outside allowed workspace, temporary, or read-only Pi/skill roots: ${canonicalPath}. Use reviewed bash only when an outside-boundary operation is explicitly authorized.`,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -38,6 +45,29 @@ export async function checkFileToolPath(
       reason: `File tool target could not be canonicalized safely: ${message}`,
     };
   }
+}
+
+export function defaultReadCandidates(): string[] {
+  const agentDir = getAgentDir();
+  const piPackageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const runtimePackageRoot = findPiPackageRoot(process.argv[1]);
+  return [
+    ...["skills", "extensions", "prompts", "themes", "npm", "git"]
+      .map((directory) => join(agentDir, directory)),
+    join(agentDir, "AGENTS.md"),
+    join(homedir(), ".agents", "skills"),
+    resolve(dirname(piPackageEntry), ".."),
+    ...(runtimePackageRoot ? [runtimePackageRoot] : []),
+  ];
+}
+
+function findPiPackageRoot(entry: string | undefined): string | undefined {
+  if (!entry) return undefined;
+  const marker = `${sep}@earendil-works${sep}pi-coding-agent${sep}`;
+  const absolute = resolve(entry);
+  const markerIndex = absolute.lastIndexOf(marker);
+  if (markerIndex === -1) return undefined;
+  return absolute.slice(0, markerIndex + marker.length - 1);
 }
 
 export async function canonicalizeCwd(cwd: string): Promise<string> {

@@ -6,8 +6,12 @@ import {
   registerPiTaiConfig,
   type PiTaiConfigService,
 } from "./src/config/register.ts";
-import { registerContinueCommand } from "./src/continue/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
+import {
+  registerNotifications,
+  sendNativeTerminalNotification,
+  type NotificationSender,
+} from "./src/notifications/index.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
@@ -21,6 +25,7 @@ export interface PiTaiRuntime {
   workContext: WorkContextStore;
   titleGenerator: TitleGenerator;
   queryTerminalBackground: QueryTerminalBackground;
+  notificationSender: NotificationSender;
 }
 
 export type PiTaiRegistrar = (
@@ -32,7 +37,7 @@ export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
-  continueCommand: PiTaiRegistrar;
+  notifications: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
   ansiTheme: PiTaiRegistrar;
 }
@@ -45,8 +50,8 @@ const productionRegistrars: PiTaiRegistrars = {
   sessionTitle: (pi, runtime) => {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
   },
-  continueCommand: (pi) => {
-    registerContinueCommand(pi);
+  notifications: (pi, runtime) => {
+    registerNotifications(pi, runtime.config, runtime.notificationSender);
   },
   guardian: (pi, runtime) => registerApprovalGuardian(pi, {
     workContext: () => runtime.workContext.current(),
@@ -62,6 +67,7 @@ function createProductionRuntime(): PiTaiRuntime {
     workContext: createPiSessionWorkContextStore(),
     titleGenerator: generateModelTitle,
     queryTerminalBackground,
+    notificationSender: sendNativeTerminalNotification,
   };
 }
 
@@ -74,7 +80,7 @@ export function createPiTaiExtension(
     await registrars.config(pi, runtime);
     await registrars.workContext(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
-    await registrars.continueCommand(pi, runtime);
+    await registrars.notifications(pi, runtime);
     await registrars.guardian(pi, runtime);
     await registrars.ansiTheme(pi, runtime);
   };

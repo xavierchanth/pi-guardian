@@ -36,7 +36,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Replace the fenced `task-context` protocol with a structured planning tool.
 - Preserve a concise goal and optional task plan across session resume and branch changes.
 - Review every agent-generated `bash` action with an isolated Codex auto-review session.
-- Restrict built-in file tools to canonical workspace and OS temporary roots.
+- Restrict mutating built-in file tools to canonical workspace and OS temporary roots while allowing read-only inspection of Pi and global skill directories.
 - Automatically name new sessions using a separately configured provider, model, and effort.
 - Keep the ANSI terminal themes and dynamic terminal palette detection.
 - Remove obsolete permission-plugin and external Guardian integration artifacts.
@@ -116,7 +116,8 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - `openai-codex/codex-auto-review` decides whether each agent-generated `bash` action may execute.
 - Invalid, timed-out, cancelled, and failed reviews fail closed.
 - Interactive TUI users may allow the exact denied or failed invocation once; noninteractive operation remains blocked.
-- Built-in file tools outside canonical workspace/temp roots are blocked; reviewed `bash` is the escalation path.
+- Mutating built-in file tools outside canonical workspace/temp roots are blocked; reviewed `bash` is the escalation path.
+- Read-only built-in file tools may additionally inspect Pi's resource/package directories and standard global skill directory.
 
 ### FR-2: goal and execution plan
 

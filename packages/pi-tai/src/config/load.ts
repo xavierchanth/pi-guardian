@@ -4,6 +4,7 @@ import {
   DEFAULT_PI_TAI_CONFIG,
   TITLE_EFFORTS,
   type AnsiThemeConfig,
+  type NotificationsConfig,
   type PiTaiConfig,
   type SessionTitleConfig,
   type TitleEffort,
@@ -12,6 +13,7 @@ import {
 interface PartialPiTaiConfig {
   sessionTitle?: Partial<SessionTitleConfig>;
   ansiTheme?: Partial<AnsiThemeConfig>;
+  notifications?: Partial<NotificationsConfig>;
 }
 
 export interface LoadPiTaiConfigOptions {
@@ -46,6 +48,11 @@ export function loadPiTaiConfig(options: LoadPiTaiConfigOptions): LoadedPiTaiCon
       ...global.ansiTheme,
       ...project.ansiTheme,
     }),
+    notifications: Object.freeze({
+      ...DEFAULT_PI_TAI_CONFIG.notifications,
+      ...global.notifications,
+      ...project.notifications,
+    }),
   });
 
   return {
@@ -72,7 +79,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
   }
 
   for (const key of Object.keys(value)) {
-    if (key !== "sessionTitle" && key !== "ansiTheme") {
+    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications") {
       warnings.push(`Unknown top-level key ${key} in ${path}.`);
     }
   }
@@ -80,6 +87,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
   return {
     sessionTitle: parseSessionTitle(value.sessionTitle, path, warnings),
     ansiTheme: parseAnsiTheme(value.ansiTheme, path, warnings),
+    notifications: parseNotifications(value.notifications, path, warnings),
   };
 }
 
@@ -141,6 +149,33 @@ function parseAnsiTheme(
     } else {
       warnings.push(`Invalid ansiTheme.pollIntervalMs in ${path}: expected an integer from 250 to 60000.`);
     }
+  }
+  return result;
+}
+
+function parseNotifications(
+  value: unknown,
+  path: string,
+  warnings: string[],
+): Partial<NotificationsConfig> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    warnings.push(`Invalid notifications in ${path}: expected an object.`);
+    return undefined;
+  }
+
+  warnUnknown(
+    value,
+    new Set(["reviewFailure", "agentCompletion"]),
+    "notifications",
+    path,
+    warnings,
+  );
+  const result: Partial<NotificationsConfig> = {};
+  for (const key of ["reviewFailure", "agentCompletion"] as const) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] === "boolean") result[key] = value[key];
+    else warnings.push(`Invalid notifications.${key} in ${path}: expected a boolean.`);
   }
   return result;
 }

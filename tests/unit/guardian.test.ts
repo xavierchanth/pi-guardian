@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { checkFileToolPath } from "../../packages/pi-tai/src/guardian/paths.ts";
+import {
+  checkFileToolPath,
+  defaultReadCandidates,
+} from "../../packages/pi-tai/src/guardian/paths.ts";
 import {
   REVIEWER_SYSTEM_PROMPT,
   buildReviewPrompt,
@@ -57,13 +60,53 @@ test("outside, traversal, and symlink-escape file targets are blocked", async ()
   await mkdir(outside);
   await symlink(outside, join(workspace, "escape"));
 
-  const traversal = await checkFileToolPath("read", { path: "../outside" }, workspace, []);
-  const escaped = await checkFileToolPath("write", { path: "escape/new.txt" }, workspace, []);
-  const inside = await checkFileToolPath("edit", { path: "new.txt" }, workspace, []);
+  const traversal = await checkFileToolPath("read", { path: "../outside" }, workspace, [], []);
+  const escaped = await checkFileToolPath("write", { path: "escape/new.txt" }, workspace, [], []);
+  const inside = await checkFileToolPath("edit", { path: "new.txt" }, workspace, [], []);
 
   assert.equal(traversal.allowed, false);
   assert.equal(escaped.allowed, false);
   assert.equal(inside.allowed, true);
+});
+
+test("default read roots include Pi resources but exclude credential files", () => {
+  const candidates = defaultReadCandidates();
+  assert.ok(candidates.some((path) => path.endsWith("/.agents/skills")));
+  assert.ok(candidates.some((path) => path.endsWith("/.pi/agent/extensions")));
+  assert.ok(candidates.some((path) => path.endsWith("/@earendil-works/pi-coding-agent")));
+  assert.equal(candidates.some((path) => path.endsWith("/.pi/agent/auth.json")), false);
+});
+
+test("read-only tools may inspect configured skill and Pi roots without allowing writes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-read-roots-"));
+  const workspace = join(root, "workspace");
+  const skills = join(root, "skills");
+  const linkedSkills = join(root, "linked-skills");
+  await mkdir(workspace);
+  await mkdir(skills);
+  await symlink(skills, linkedSkills);
+
+  for (const toolName of ["read", "grep", "find", "ls"]) {
+    const decision = await checkFileToolPath(
+      toolName,
+      { path: join(linkedSkills, "jj-guidelines", "SKILL.md") },
+      workspace,
+      [],
+      [linkedSkills],
+    );
+    assert.equal(decision.allowed, true, toolName);
+  }
+
+  for (const toolName of ["write", "edit"]) {
+    const decision = await checkFileToolPath(
+      toolName,
+      { path: join(linkedSkills, "new.md") },
+      workspace,
+      [],
+      [linkedSkills],
+    );
+    assert.equal(decision.allowed, false, toolName);
+  }
 });
 
 test("review prompt preserves user authorization, roles, exact action, and doctrine", () => {
@@ -167,14 +210,18 @@ test("interactive denial offers exact one-shot approval; noninteractive denial f
   assert.equal(print.selections.length, 0);
 });
 
-test("timeout and provider failure can use TUI allow-once; cancellation stays blocked", async () => {
+test("timeout and provider failure emit notification events and can use TUI allow-once", async () => {
   for (const result of [
     { kind: "timeout", reason: "timed out" },
     { kind: "failure", reason: "provider failed" },
   ] as const) {
-    const { handler } = registerWith(async () => result);
+    const { handler, emitted } = registerWith(async () => result);
     const ctx = fakeContext("tui", "Allow exact action once");
     assert.equal(await handler(bashEvent("true"), ctx), undefined);
+    assert.deepEqual(emitted, [{
+      name: "pi-tai:guardian-review-failed",
+      data: { kind: result.kind, mode: "tui" },
+    }]);
   }
 
   const { handler } = registerWith(async () => ({ kind: "cancelled", reason: "cancelled" }));
@@ -288,10 +335,16 @@ function registerWith(
   workContext?: () => WorkContextSnapshot | undefined,
 ) {
   let handler: (event: never, ctx: never) => Promise<unknown> = async () => undefined;
+  const emitted: Array<{ name: string; data: unknown }> = [];
   const pi = {
     on(name: string, received: typeof handler) {
       assert.equal(name, "tool_call");
       handler = received;
+    },
+    events: {
+      emit(name: string, data: unknown) {
+        emitted.push({ name, data });
+      },
     },
     getAllTools: () => [...["read", "write", "edit", "grep", "find", "ls"].map((name) => ({
       name,
@@ -299,7 +352,7 @@ function registerWith(
     }))],
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, { reviewer, workContext });
-  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown> };
+  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted };
 }
 
 function fakeContext(mode: "tui" | "print" = "print", choice?: string) {
