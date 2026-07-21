@@ -369,6 +369,8 @@ feat(host): prove tray-owned lifecycle
 
 - A self-contained worker creates a persistent Pi session, runs one fake prompt, emits semantic events, closes, reopens, and continues history without a user-managed Node installation.
 
+Detailed proof plan, packaging experiment, and evidence requirements: [H2_RUNTIME_WORKER_PLAN.md](proofs/H2_RUNTIME_WORKER_PLAN.md).
+
 #### Checkpoint
 
 ```text
