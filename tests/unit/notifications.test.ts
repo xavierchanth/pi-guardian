@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_PI_TAI_CONFIG, type PiTaiConfig } from "../../packages/pi-tai/src/config/schema.ts";
-import {
-  GUARDIAN_CONFIRMATION_REQUIRED_EVENT,
-  GUARDIAN_REVIEW_FAILED_EVENT,
-} from "../../packages/pi-tai/src/notifications/events.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/notifications/events.ts";
 import { terminalNotificationSequence } from "../../packages/pi-tai/src/notifications/native.ts";
 import { registerNotifications } from "../../packages/pi-tai/src/notifications/register.ts";
 
@@ -45,25 +42,6 @@ test("notifies when automatic review fails or times out", () => {
     { title: "Pi-Tai review", body: "Automatic action review failed." },
     { title: "Pi-Tai review", body: "Automatic action review timed out." },
   ]);
-});
-
-test("confirmation notification is mandatory in TUI and suppressed headlessly", () => {
-  const disabled = harness({ reviewFailure: false, agentCompletion: false });
-  disabled.eventHandlers.get(GUARDIAN_CONFIRMATION_REQUIRED_EVENT)?.({
-    mode: "tui",
-    riskLevel: "high",
-  });
-  assert.deepEqual(disabled.sent, [{
-    title: "Pi-Tai Guardian",
-    body: "high risk action needs your review.",
-  }]);
-
-  const headless = harness();
-  headless.eventHandlers.get(GUARDIAN_CONFIRMATION_REQUIRED_EVENT)?.({
-    mode: "rpc",
-    riskLevel: "critical",
-  });
-  assert.deepEqual(headless.sent, []);
 });
 
 test("notification settings and headless modes suppress configured output", () => {

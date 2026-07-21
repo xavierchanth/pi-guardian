@@ -11,15 +11,17 @@ import {
 } from "./paths.ts";
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../notifications/events.ts";
 import {
-  GUARDIAN_CONFIRMATION_REQUIRED_EVENT,
-  GUARDIAN_REVIEW_FAILED_EVENT,
-} from "../notifications/events.ts";
+  createGuardianReviewRecorder,
+  type GuardianReviewRecorder,
+} from "./records.ts";
 
 export type ActionReviewer = (request: ReviewRequest) => Promise<ReviewResult>;
 
 export interface GuardianOptions {
   reviewer?: ActionReviewer;
+  recorder?: GuardianReviewRecorder;
   workContext?: () => WorkContextSnapshot | undefined;
 }
 
@@ -28,6 +30,7 @@ export function registerApprovalGuardian(
   options: GuardianOptions = {},
 ): void {
   const reviewer = options.reviewer ?? reviewAction;
+  const recorder = options.recorder ?? createGuardianReviewRecorder();
 
   pi.on("tool_call", async (event, ctx) => {
     let reviewEvidence: PathReviewEvidence | undefined;
@@ -41,7 +44,9 @@ export function registerApprovalGuardian(
       if (pathDecision.kind === "deny") {
         return {
           block: true,
-          reason: pathDecision.reason ?? "File tool target is outside allowed boundaries.",
+          reason: autonomousBlockReason(
+            pathDecision.reason ?? "File tool target is outside allowed boundaries.",
+          ),
         };
       }
       reviewEvidence = pathDecision.evidence;
@@ -51,33 +56,50 @@ export function registerApprovalGuardian(
 
     let result: ReviewResult;
     let canonicalCwd: string;
+    const messages = collectConversation(ctx);
+    const workContext = options.workContext?.();
+    let action: ReviewRequest["action"];
     try {
       canonicalCwd = await canonicalizeCwd(ctx.cwd);
+      action = {
+        toolName: event.toolName,
+        arguments: event.input as Record<string, unknown>,
+        cwd: canonicalCwd,
+      };
       result = await reviewer({
         modelRegistry: ctx.modelRegistry,
         cwd: canonicalCwd,
-        messages: collectConversation(ctx),
-        workContext: options.workContext?.(),
+        messages,
+        workContext,
         reviewEvidence,
-        action: {
-          toolName: event.toolName,
-          arguments: event.input as Record<string, unknown>,
-          cwd: canonicalCwd,
-        },
+        action,
         signal: ctx.signal,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result = { kind: "failure", reason: `Automatic action review failed: ${message}` };
       canonicalCwd = ctx.cwd;
+      action = {
+        toolName: event.toolName,
+        arguments: event.input as Record<string, unknown>,
+        cwd: canonicalCwd,
+      };
     }
 
-    if (result.kind === "decision") {
-      if (result.decision.outcome === "allow") return undefined;
-      if (result.decision.outcome === "deny") {
-        return { block: true, reason: blockReason(result) };
-      }
-      return confirmExactAction(pi, event, ctx, canonicalCwd, result);
+    if (result.kind === "decision" && result.decision.outcome === "allow") return undefined;
+    try {
+      await recorder({
+        result,
+        action,
+        messages,
+        workContext,
+        reviewEvidence,
+        mode: ctx.mode,
+        sessionId: ctx.sessionManager.getSessionId(),
+        sessionFile: ctx.sessionManager.getSessionFile(),
+      });
+    } catch {
+      // Evaluation capture must never interrupt the surrounding agent run.
     }
 
     if (result.kind === "failure" || result.kind === "timeout") {
@@ -90,42 +112,6 @@ export function registerApprovalGuardian(
   });
 }
 
-async function confirmExactAction(
-  pi: ExtensionAPI,
-  event: { toolName: string; input: unknown },
-  ctx: ExtensionContext,
-  cwd: string,
-  result: Extract<ReviewResult, { kind: "decision" }>,
-): Promise<{ block: true; reason: string } | undefined> {
-  if (ctx.mode !== "tui") {
-    return {
-      block: true,
-      reason: `Action requires interactive user confirmation: ${result.decision.reason}`,
-    };
-  }
-
-  pi.events.emit(GUARDIAN_CONFIRMATION_REQUIRED_EVENT, {
-    mode: ctx.mode,
-    riskLevel: result.decision.riskLevel,
-  });
-  const exactAction = JSON.stringify({
-    toolName: event.toolName,
-    arguments: event.input,
-    cwd,
-  }, null, 2);
-  try {
-    const choice = await ctx.ui.select(
-      `Guardian requests your review: ${result.decision.reason}\n\n${exactAction}`,
-      ["Execute exact action once", "Deny"],
-    );
-    if (choice === "Execute exact action once") return undefined;
-    return { block: true, reason: "Action denied by user after Guardian requested confirmation." };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { block: true, reason: `Action blocked because confirmation failed: ${message}` };
-  }
-}
-
 function isBuiltinTool(pi: ExtensionAPI, toolName: string): boolean {
   return pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo.source === "builtin";
 }
@@ -136,7 +122,11 @@ function collectConversation(ctx: ExtensionContext): unknown[] {
 
 function blockReason(result: ReviewResult): string {
   if (result.kind === "decision") {
-    return `Action denied by automatic review: ${result.decision.reason}`;
+    return autonomousBlockReason(`Action denied by automatic review: ${result.decision.reason}`);
   }
-  return `Action blocked because ${result.reason}`;
+  return autonomousBlockReason(`Action blocked because ${result.reason}`);
+}
+
+function autonomousBlockReason(reason: string): string {
+  return `${reason.replace(/[.\s]+$/g, "")}. The action was not executed; continue with other authorized work without asking the user to approve it.`;
 }

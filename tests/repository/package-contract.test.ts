@@ -13,7 +13,7 @@ const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as
 
 test("root manifest is a discoverable Pi package", () => {
   assert.ok(manifest.keywords?.includes("pi-package"));
-  assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/extension.ts"]);
+  assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/pi-tai.ts"]);
   assert.deepEqual(manifest.pi?.themes, ["./packages/pi-tai/themes"]);
   assert.deepEqual(manifest.pi?.prompts, ["./packages/pi-tai/prompts"]);
 
@@ -32,6 +32,14 @@ test("source uses the current Pi distribution imports", () => {
     readFileSync(file, "utf8").includes("@mariozechner/"),
   );
   assert.deepEqual(legacy, []);
+});
+
+test("Pi-Tai packages user-authored system and role instruction files", () => {
+  for (const name of ["system.md", "parent.md", "child.md"]) {
+    const path = join(root, "packages/pi-tai/instructions", name);
+    assert.ok(existsSync(path), path);
+    assert.equal(readFileSync(path, "utf8"), "", `${name} starts user-authored and empty`);
+  }
 });
 
 test("continue is packaged as a visible prompt template", () => {

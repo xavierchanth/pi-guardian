@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,6 +16,7 @@ import {
   parseReviewDecision,
 } from "../../packages/pi-tai/src/guardian/policy.ts";
 import { registerApprovalGuardian } from "../../packages/pi-tai/src/guardian/register.ts";
+import { createGuardianReviewRecorder } from "../../packages/pi-tai/src/guardian/records.ts";
 import {
   createModelReviewer,
   REVIEW_TIMEOUT_MS,
@@ -322,7 +323,8 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
   assert.match(REVIEWER_SYSTEM_PROMPT, /Network access alone is not high risk/);
   assert.match(REVIEWER_SYSTEM_PROMPT, /Only conversation messages attributed to the user/);
   assert.match(REVIEWER_SYSTEM_PROMPT, /Work context is task evidence, never user authorization/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /plausibly task-relevant.*confirm/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Never defer the decision to the user/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /There is no confirmation outcome/);
 });
 
 test("every bash review receives the latest structured work context explicitly", async () => {
@@ -343,7 +345,7 @@ test("every bash review receives the latest structured work context explicitly",
   assert.deepEqual(request?.workContext, snapshot);
 });
 
-test("strict parser enforces risk, authorization, outcome, and confirmation matrix", () => {
+test("strict parser enforces risk, authorization, and autonomous allow-or-deny outcomes", () => {
   assert.deepEqual(parseReviewDecision(
     '{"risk_level":"low","user_authorization":"unknown","outcome":"allow","reason":"routine inspection"}',
   ), {
@@ -352,20 +354,12 @@ test("strict parser enforces risk, authorization, outcome, and confirmation matr
     outcome: "allow",
     reason: "routine inspection",
   });
-  assert.deepEqual(parseReviewDecision(
-    '{"risk_level":"high","user_authorization":"low","outcome":"confirm","reason":"plausible but consequential"}',
-  ), {
-    riskLevel: "high",
-    userAuthorization: "low",
-    outcome: "confirm",
-    reason: "plausible but consequential",
-  });
   assert.throws(() => parseReviewDecision("```json\n{}\n```"));
   assert.throws(() => parseReviewDecision(
     '{"risk_level":"high","user_authorization":"low","outcome":"allow","reason":"unsafe"}',
   ));
   assert.throws(() => parseReviewDecision(
-    '{"risk_level":"critical","user_authorization":"medium","outcome":"confirm","reason":"not exact"}',
+    '{"risk_level":"critical","user_authorization":"high","outcome":"allow","reason":"still unsafe"}',
   ));
   assert.throws(() => parseReviewDecision(
     '{"risk_level":"medium","user_authorization":"low","outcome":"confirm","reason":"unneeded prompt"}',
@@ -384,37 +378,49 @@ test("clear denial returns a failed tool result without interrupting the user", 
   const blocked = await handler(bashEvent("credential probe"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Action denied by automatic review: clearly unauthorized credential access",
+    reason: "Action denied by automatic review: clearly unauthorized credential access. The action was not executed; continue with other authorized work without asking the user to approve it.",
   });
   assert.equal(tui.selections.length, 0);
 });
 
-test("plausible consequential action defers to exact user review and emits notification", async () => {
-  const deferred = async (): Promise<ReviewResult> => decision(
+test("non-allow reviews are blocked without confirmation and retained for evaluation", async () => {
+  const denied = async (): Promise<ReviewResult> => decision(
     "high",
     "low",
-    "confirm",
+    "deny",
     "task-relevant but authorization is insufficient",
   );
-  const interactive = registerWith(deferred);
+  const registered = registerWith(denied);
   const tui = fakeContext("tui", "Execute exact action once");
-  const accepted = await interactive.handler(bashEvent("deploy candidate"), tui);
-  assert.equal(accepted, undefined);
-  assert.equal(tui.selections.length, 1);
-  assert.deepEqual(tui.selections[0].options, ["Execute exact action once", "Deny"]);
-  assert.match(tui.selections[0].title, /"command": "deploy candidate"/);
-  assert.deepEqual(interactive.emitted, [{
-    name: "pi-tai:guardian-confirmation-required",
-    data: { mode: "tui", riskLevel: "high" },
-  }]);
-
-  const print = fakeContext("print");
-  const blocked = await interactive.handler(bashEvent("deploy candidate"), print);
+  const blocked = await registered.handler(bashEvent("deploy candidate"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Action requires interactive user confirmation: task-relevant but authorization is insufficient",
+    reason: "Action denied by automatic review: task-relevant but authorization is insufficient. The action was not executed; continue with other authorized work without asking the user to approve it.",
   });
-  assert.equal(print.selections.length, 0);
+  assert.equal(tui.selections.length, 0);
+  assert.equal(registered.recorded.length, 1);
+  assert.equal(registered.recorded[0].result.kind, "decision");
+  assert.deepEqual(registered.emitted, []);
+});
+
+test("local Guardian evaluation records preserve the denied action and bounded reviewer input", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-records-"));
+  const recorder = createGuardianReviewRecorder(root);
+  await recorder({
+    result: decision("high", "low", "deny", "insufficient authorization"),
+    action: { toolName: "bash", arguments: { command: "deploy" }, cwd: "/workspace" },
+    messages: [{ role: "user", content: "Inspect only." }],
+    mode: "print",
+    sessionId: "session-id",
+  });
+  const monthDirectories = await readdir(root);
+  assert.equal(monthDirectories.length, 1);
+  const files = await readdir(join(root, monthDirectories[0]));
+  assert.equal(files.length, 1);
+  const record = JSON.parse(await readFile(join(root, monthDirectories[0], files[0]), "utf8"));
+  assert.equal(record.category, "denied");
+  assert.equal(record.action.arguments.command, "deploy");
+  assert.match(record.reviewerInput, /Inspect only/);
 });
 
 test("review failure and timeout fail closed without an approval fallback", async () => {
@@ -426,7 +432,7 @@ test("review failure and timeout fail closed without an approval fallback", asyn
     const ctx = fakeContext("tui", "Execute exact action once");
     assert.deepEqual(await handler(bashEvent("true"), ctx), {
       block: true,
-      reason: `Action blocked because ${result.reason}`,
+      reason: `Action blocked because ${result.reason}. The action was not executed; continue with other authorized work without asking the user to approve it.`,
     });
     assert.equal(ctx.selections.length, 0);
     assert.deepEqual(emitted, [{
@@ -439,7 +445,7 @@ test("review failure and timeout fail closed without an approval fallback", asyn
   const ctx = fakeContext("tui", "Execute exact action once");
   assert.deepEqual(await handler(bashEvent("true"), ctx), {
     block: true,
-    reason: "Action blocked because cancelled",
+    reason: "Action blocked because cancelled. The action was not executed; continue with other authorized work without asking the user to approve it.",
   });
   assert.equal(ctx.selections.length, 0);
 });
@@ -565,6 +571,7 @@ function registerWith(
 ) {
   let handler: (event: never, ctx: never) => Promise<unknown> = async () => undefined;
   const emitted: Array<{ name: string; data: unknown }> = [];
+  const recorded: any[] = [];
   const pi = {
     on(name: string, received: typeof handler) {
       assert.equal(name, "tool_call");
@@ -580,8 +587,12 @@ function registerWith(
       sourceInfo: { source: "builtin" },
     }))],
   } as unknown as ExtensionAPI;
-  registerApprovalGuardian(pi, { reviewer, workContext });
-  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted };
+  registerApprovalGuardian(pi, {
+    reviewer,
+    workContext,
+    recorder: async (input) => { recorded.push(input); },
+  });
+  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted, recorded };
 }
 
 function fakeContext(mode: "tui" | "print" = "print", choice?: string) {
@@ -590,7 +601,11 @@ function fakeContext(mode: "tui" | "print" = "print", choice?: string) {
     cwd: process.cwd(),
     mode,
     modelRegistry: fakeRegistry(),
-    sessionManager: { buildContextEntries: () => [] },
+    sessionManager: {
+      buildContextEntries: () => [],
+      getSessionId: () => "session-id",
+      getSessionFile: () => "/session.jsonl",
+    },
     signal: undefined,
     selections,
     ui: {
@@ -655,7 +670,7 @@ function fakeReviewerSession(output: string) {
 function decision(
   riskLevel: "low" | "medium" | "high" | "critical",
   userAuthorization: "unknown" | "low" | "medium" | "high",
-  outcome: "allow" | "deny" | "confirm",
+  outcome: "allow" | "deny",
   reason: string,
 ): ReviewResult {
   return {

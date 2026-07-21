@@ -140,23 +140,23 @@ Add integration tests for:
 - Git-ignored, likely-secret, VCS, Pi credential, and Pi session targets reaching review;
 - traversal and symlink escapes being blocked;
 - independent risk/authorization scoring with routine low/medium autonomy;
-- clear denials returning tool failures without user interruption;
-- plausible consequential actions receiving TUI-only exact-action confirmation;
+- every non-allow result returning a tool failure without user interruption or approval requests;
 - invalid, timed-out, cancelled, and failed reviews failing closed without approval fallback;
+- local evaluation records retaining non-allow review inputs, outcomes, and actions;
 - no old mode commands or mode prompt fragments remaining.
 
 #### Green
 
 - Add the local risk/authorization policy, isolated Codex reviewer, path classifier, and tool hook.
 - Route `openai-codex/codex-auto-review` through Pi's existing Codex OAuth runtime.
-- Notify and ring the terminal bell when exact user confirmation is required.
+- Retain non-allow review records locally without interrupting the agent if recording fails.
 - Keep direct user shell and unknown custom tools outside the extension's scope.
 - Remove the old mode registry, access policies, classifiers, prompts, commands, and runtime.
 
 #### Refactor
 
 - Keep the reviewer autonomy-first, risk-aware, and explicit that network access is not inherently severe.
-- Use confirmation only for plausible consequential ambiguity, never routine work or obvious denial.
+- Make autonomous allow-or-deny decisions and never ask the user to approve a blocked action.
 - Do not add command classifiers, allowlists, persistent bypasses, permission modes, or Guardian configuration.
 
 #### Acceptance

@@ -14,6 +14,7 @@ import {
 } from "./src/notifications/index.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
+import { registerSubagents } from "./src/subagents/register.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
 import {
   createPiSessionWorkContextStore,
@@ -36,6 +37,7 @@ export type PiTaiRegistrar = (
 export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
+  subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
@@ -46,6 +48,9 @@ const productionRegistrars: PiTaiRegistrars = {
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   workContext: (pi, runtime) => {
     registerWorkContext(pi, runtime.workContext);
+  },
+  subagents: (pi) => {
+    registerSubagents(pi);
   },
   sessionTitle: (pi, runtime) => {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
@@ -79,6 +84,7 @@ export function createPiTaiExtension(
     const runtime = createRuntime();
     await registrars.config(pi, runtime);
     await registrars.workContext(pi, runtime);
+    await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
     await registrars.notifications(pi, runtime);
     await registrars.guardian(pi, runtime);

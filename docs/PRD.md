@@ -115,9 +115,9 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Pi's normal tools remain available.
 - `openai-codex/codex-auto-review` independently scores risk and authorization for every agent-generated `bash` action.
 - Low/medium-risk task work normally proceeds; high-risk work requires meaningful authorization and narrow scope; critical work never executes automatically.
-- Clear denials return failed tool results so the agent can continue without interrupting the user.
-- Plausible consequential actions that cannot be safely allowed may request exact-action TUI confirmation; noninteractive operation remains blocked.
+- Every non-allow result returns a failed tool result so the agent can continue without interrupting or asking the user for approval.
 - Invalid, timed-out, cancelled, and failed reviews fail closed without an approval fallback.
+- Non-allow review inputs, decisions/failures, and actions are retained locally for evaluation.
 - Built-in file tools automatically access canonical unignored workspace targets and safe temporary/read-only roots.
 - Git-ignored direct targets, likely secret paths, VCS metadata, Pi credentials/model configuration, and Pi session history receive Guardian review.
 - Pi-state writes, traversal, symlink escapes, and other outside-boundary file operations are blocked; reviewed `bash` is the escalation path.

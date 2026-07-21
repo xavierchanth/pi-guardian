@@ -58,6 +58,7 @@ lines.on("line", (line) => {
     if (
       event.success !== true ||
       !names.has("continue") ||
+      !names.has("sub-agents") ||
       legacy.some((name) => names.has(name))
     ) {
       console.error(`Unexpected extension commands: ${line}\n${stderr}`);

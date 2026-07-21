@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createPiTaiExtension } from "../../packages/pi-tai/extension.ts";
+import { createPiTaiExtension } from "../../packages/pi-tai/pi-tai.ts";
 import { createPiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../packages/pi-tai/src/work-context/persistence.ts";
 
@@ -14,6 +14,9 @@ test("composition root registers every feature once in order", async () => {
       },
       workContext: () => {
         calls.push("work-context");
+      },
+      subagents: () => {
+        calls.push("subagents");
       },
       sessionTitle: () => {
         calls.push("session-title");
@@ -42,6 +45,7 @@ test("composition root registers every feature once in order", async () => {
   assert.deepEqual(calls, [
     "config",
     "work-context",
+    "subagents",
     "session-title",
     "notifications",
     "guardian",

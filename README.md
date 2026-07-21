@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, opt-in JJ-isolated subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -70,9 +70,24 @@ Use `/continue` after interrupting the agent. It expands to the visible prompt `
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.
 
+### Persistent JJ subagents
+
+Subagents are disabled by default. Run `/sub-agents` to make the current session a parent, `/sub-agents status` to inspect it, or `/sub-agents off` after every child is resolved. New and forked sessions start standalone.
+
+A parent can delegate bounded tasks with `spawn_child`. Every direct child receives:
+
+- an independent persistent Pi session and detached process;
+- a dedicated JJ workspace rooted at the parent's `@-` change;
+- one semantic model preference (`thinker`, `worker`, or `mechanical`);
+- only `report_to_parent`, with no ability to delegate further.
+
+Parents receive `spawn_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. `wait_for_children` waits without parent model calls until its snapshot reports. Completed child stacks are integrated with `jj rebase -s <childRootChangeId> -B <parentWorkspace>@`; all descendants are preserved. Integration cleanup is a separate finalization step after parent validation, and abandonment removes only the workspace—not the child's JJ changes.
+
+Pi-Tai composes normal Pi context with three intentionally empty, user-authored files: `packages/pi-tai/instructions/system.md`, `parent.md`, and `child.md`. It also adds generated factual role/delegation metadata. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for lifecycle and recovery details.
+
 ### Approval Guardian
 
-Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. The reviewer independently scores risk and user authorization: routine low/medium-risk task work proceeds without method-level permission, high-risk work requires meaningful authorization and narrow scope, and critical work never executes automatically. Clear denials become failed tool results so the agent can continue; a plausible consequential action that cannot be safely allowed may be deferred to an exact-action TUI confirmation. Invalid, timed-out, cancelled, and failed reviews fail closed without an approval fallback.
+Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. The reviewer independently scores risk and user authorization: routine low/medium-risk task work proceeds without method-level permission, high-risk work requires meaningful authorization and narrow scope, and critical work never executes automatically. Guardian never asks for approval: every non-allow result becomes a failed tool result and the agent continues with other authorized work. Invalid, timed-out, cancelled, and failed reviews fail closed. Non-allow review records are retained locally under `~/.pi/agent/pi-tai/guardian-reviews/` for evaluation.
 
 Built-in file tools use deterministic canonical boundaries. Unignored repository files remain frictionless; direct targets ignored by Git, likely credential paths, VCS metadata, Pi `auth.json`, Pi `models.json`, and Pi `sessions/**` receive Guardian review. Repository-wide `grep` and `find` retain their native Git-ignore behavior. Read-only tools may additionally inspect safe Pi state/resources and global `.agents/skills`; Pi-state writes and outside-boundary file operations remain blocked, with reviewed `bash` as the escalation path. Traversal and symlink escapes are always blocked.
 
@@ -80,7 +95,7 @@ Pi-Tai does not provide legacy permission modes. `/mode`, `/review-mode`, and `/
 
 ### Native notifications
 
-In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications fire when Guardian needs exact-action user review, when automatic review fails or times out, and when the agent settles ready for input. Confirmation notifications are mandatory; failure and completion notifications can be disabled in configuration.
+In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications fire when automatic review fails or times out and when the agent settles ready for input. Failure and completion notifications can be disabled in configuration.
 
 ### ANSI theme synchronization
 
