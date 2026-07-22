@@ -53,6 +53,31 @@ export interface HostProtocolError {
   details?: unknown;
 }
 
+export type HostResponseOutcome =
+  | { status: "ok"; result: unknown }
+  | { status: "error"; error: HostProtocolError };
+
+export interface HostResponse {
+  protocolVersion: number;
+  requestId: string;
+  outcome: HostResponseOutcome;
+}
+
+export type ClientFrame =
+  | {
+      type: "authenticate";
+      protocolVersion: number;
+      token: string;
+      client: ImplementationInfo;
+    }
+  | { type: "command"; command: HostCommand };
+
+export type ServerFrame =
+  | { type: "authenticated"; protocolVersion: number; host: ImplementationInfo }
+  | { type: "response"; response: HostResponse }
+  | { type: "event"; event: HostEvent }
+  | { type: "error"; error: HostProtocolError };
+
 export class ProtocolDecodeError extends Error {
   constructor(message: string) {
     super(message);
@@ -154,6 +179,46 @@ export function parseHostEvent(value: unknown): HostEvent {
     type: string(input.type, "type"),
     payload: input.payload,
   };
+}
+
+export function parseServerFrame(value: unknown): ServerFrame {
+  const input = record(value, "server frame");
+  const type = string(input.type, "type");
+  switch (type) {
+    case "authenticated":
+      return {
+        type,
+        protocolVersion: safeInteger(input.protocolVersion, "protocolVersion"),
+        host: implementationInfo(input.host),
+      };
+    case "response": {
+      const response = record(input.response, "Host response");
+      const status = string(response.status, "response.status");
+      const base = {
+        protocolVersion: safeInteger(response.protocolVersion, "response.protocolVersion"),
+        requestId: string(response.requestId, "response.requestId"),
+      };
+      if (status === "ok") {
+        return { type, response: { ...base, outcome: { status, result: response.result } } };
+      }
+      if (status === "error") {
+        return {
+          type,
+          response: {
+            ...base,
+            outcome: { status, error: parseHostProtocolError(response.error) },
+          },
+        };
+      }
+      throw new ProtocolDecodeError(`Invalid response status: ${status}`);
+    }
+    case "event":
+      return { type, event: parseHostEvent(input.event) };
+    case "error":
+      return { type, error: parseHostProtocolError(input.error) };
+    default:
+      throw new ProtocolDecodeError(`Invalid server frame type: ${type}`);
+  }
 }
 
 export function parseHostProtocolError(value: unknown): HostProtocolError {
