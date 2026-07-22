@@ -156,7 +156,7 @@ pi -ne -e . "Reply with exactly: pi-tai-loaded"
 
 ```text
 justfile                            local Pi-Tai terminal launcher
-packages/pi-tai/extension.ts        Pi extension composition root
+packages/pi-tai/pi-tai.ts           Pi extension composition root
 packages/pi-tai/src/config/         trusted Pi-Tai configuration
 packages/pi-tai/src/work-context/   update_plan domain and persistence
 packages/pi-tai/src/session-title/  independent title generation

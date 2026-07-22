@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for review. H2 implementation has not started.
+Approved for implementation. H2 proceeds through the proof gates below.
 
 H2 is a disposable architecture proof. It must establish that Pi can run reliably behind a supervised, self-contained TypeScript worker before Host-to-worker integration begins in H3. The worker protocol and event mapping remain proof-level until Gate H.
 
@@ -49,6 +49,13 @@ Those boundaries remain H3, H4, H5, or post-Gate-H work.
 ### Planned repository shape
 
 ```text
+crates/runtime-protocol/
+└── src/                      canonical Serde + Specta wire DTOs and binding export
+packages/runtime-protocol/
+├── package.json
+└── src/
+    ├── generated.ts          checked-in Specta-generated Zod schemas and inferred types
+    └── *.ts                  framing, dispatch registries, refinements, and stable errors
 services/pi-runtime/
 ├── package.json
 └── src/
@@ -59,10 +66,7 @@ services/pi-runtime/
     ├── headless-ui.ts        hosted extension UI bridge
     ├── diagnostics.ts        redacted stderr records
     └── jsonl.ts              bounded framed transport
-packages/runtime-protocol/
-├── package.json
-└── src/                      envelopes, payload types, and runtime decoders
-fixtures/runtime-protocol/    valid and invalid cross-process frames
+fixtures/runtime-protocol/    valid and invalid cross-language frames
 tests/runtime/                spawned-worker SDK and lifecycle tests
 tests/smoke/                  packaged-artifact black-box scenario
 scripts/runtime-packaging/    Bun, SEA, sidecar, and measurement drivers
@@ -94,7 +98,7 @@ Load the Pi-Tai composition root as a named inline SDK extension factory:
 DefaultResourceLoader
 └── extensionFactories
     └── <inline:pi-tai-hosted>
-        └── packages/pi-tai/extension.ts
+        └── packages/pi-tai/pi-tai.ts
 ```
 
 This exercises Pi's SDK resource/extension path while allowing the packaging tool to statically include Pi-Tai. It avoids depending on JIT-loading a repository TypeScript path in the packaged artifact.
@@ -122,7 +126,13 @@ The faux path is enabled only by a proof/test launch option. It is not a Host pr
 
 ## Runtime protocol v1 proof
 
-Add explicit TypeScript contracts and decoders under `packages/runtime-protocol`, plus shared fixtures under `fixtures/runtime-protocol`.
+`crates/runtime-protocol` is the structural source of truth. Rust DTOs derive Serde and Specta; an exact-pinned `specta-zod` exporter generates checked-in Zod schemas plus inferred TypeScript types under `packages/runtime-protocol/src/generated.ts`. A drift check regenerates in memory and fails when the checked-in output differs. The packaged worker depends on Zod, not Rust or Specta.
+
+The first H2.1 gate must prove that the current pre-stable Specta/Zod exporter correctly handles camel-case Serde fields, tagged enums, optional fields, empty objects, JSON values, strict object parsing, and representative command/event payloads. Generated output is never manually patched. If that gate fails, stop for review and fall back to `specta-typescript` with explicitly compatible handwritten Zod schemas.
+
+Zod validates only TypeScript process boundaries: the generic frame after `JSON.parse`, recognized method parameters, and outbound response/event frames. State transitions, duplicate IDs, path semantics, framing limits, and cancellation remain handwritten. Zod issue objects are mapped to stable bounded Pi-Tai protocol errors and never become the wire contract.
+
+Shared fixtures under `fixtures/runtime-protocol` are decoded by both Rust/Serde and TypeScript/Zod. JSON counters are non-negative safe integers even where Rust stores them as `u64`. Existing `host-protocol` migration is outside H2.
 
 ### Frame shapes
 
@@ -246,7 +256,10 @@ H2 does not claim that arbitrary tools are transactionally reversible.
 
 Red:
 
+- Specta/Zod exporter compatibility and generated-binding drift tests;
+- shared Rust/Serde and TypeScript/Zod fixture tests;
 - valid/invalid frame decoder tests;
+- generic-envelope then method-parameter validation tests;
 - first-command initialization rule;
 - duplicate command ID and unsupported-method tests;
 - stdout contamination test;
@@ -254,7 +267,9 @@ Red:
 
 Green:
 
-- `packages/runtime-protocol`;
+- `crates/runtime-protocol` with canonical Serde + Specta DTOs;
+- exact-pinned Specta/Zod generation into `packages/runtime-protocol`;
+- stable boundary errors and method/event schema registries;
 - JSONL reader/writer;
 - worker state machine with fake runtime port;
 - structured stderr sink.

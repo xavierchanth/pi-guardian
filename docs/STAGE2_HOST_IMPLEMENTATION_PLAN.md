@@ -350,6 +350,7 @@ feat(host): prove tray-owned lifecycle
 
 #### Red
 
+- Rust-first Serde/Specta runtime DTOs generate drift-checked Zod schemas that share fixtures with Rust.
 - Fake-model prompt streams ordered text and lifecycle events.
 - Pi-Tai extension tools and commands load through SDK resources.
 - Persistent session create/open works.
@@ -359,6 +360,7 @@ feat(host): prove tray-owned lifecycle
 
 #### Green
 
+- Add `crates/runtime-protocol` as the structural DTO source and generate checked-in bindings under `packages/runtime-protocol`.
 - Add `services/pi-runtime`.
 - Build `AgentSessionRuntime` through Pi's SDK.
 - Implement minimal worker JSONL framing.

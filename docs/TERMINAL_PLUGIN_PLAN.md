@@ -30,7 +30,7 @@ The root manifest will point directly to the plugin entrypoint and themes:
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./packages/pi-tai/extension.ts"],
+    "extensions": ["./packages/pi-tai/pi-tai.ts"],
     "themes": ["./packages/pi-tai/themes"]
   }
 }
@@ -47,7 +47,7 @@ The root may become an npm workspace root when Host applications are added, but 
 
 ### Use one Pi extension composition root
 
-`packages/pi-tai/extension.ts` is the single Pi-loaded entrypoint. It registers focused feature modules in deterministic order:
+`packages/pi-tai/pi-tai.ts` is the single Pi-loaded entrypoint. It registers focused feature modules in deterministic order:
 
 1. work context;
 2. session naming;
@@ -159,7 +159,7 @@ pi-tai/
 │   └── ACP_SCOPE.md
 ├── packages/
 │   └── pi-tai/
-│       ├── extension.ts         # deterministic composition root
+│       ├── pi-tai.ts            # deterministic composition root
 │       ├── src/
 │       │   ├── config/
 │       │   │   ├── load.ts
@@ -280,7 +280,7 @@ Add tests proving:
 
 #### Green
 
-- Create `packages/pi-tai/extension.ts`.
+- Create `packages/pi-tai/pi-tai.ts`.
 - Move existing extensions and themes under `packages/pi-tai`.
 - Initially adapt existing factories behind focused registrar functions; avoid behavior rewrites in the same step.
 - Point the root Pi manifest at the composition root and relocated themes.
