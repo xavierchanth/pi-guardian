@@ -2,9 +2,9 @@
 
 ## Status
 
-Approved for implementation. H2 proceeds through the proof gates below.
+Implemented and accepted on 2026-07-22. H3 may use the internal runtime protocol and the Bun packaging route selected by [ADR 0005](../adr/0005-runtime-worker-packaging.md).
 
-H2 is a disposable architecture proof. It must establish that Pi can run reliably behind a supervised, self-contained TypeScript worker before Host-to-worker integration begins in H3. The worker protocol and event mapping remain proof-level until Gate H.
+H2 is a disposable architecture proof. It establishes that Pi can run reliably behind a supervised, self-contained TypeScript worker before Host-to-worker integration begins in H3. The worker protocol and event mapping remain proof-level until Gate H.
 
 ## Outcome
 
@@ -63,13 +63,11 @@ services/pi-runtime/
     ├── main.ts               command dispatch and worker state machine
     ├── pi-runtime.ts         AgentSessionRuntime adapter
     ├── event-map.ts          allowlisted Pi-to-worker events
-    ├── headless-ui.ts        hosted extension UI bridge
     ├── diagnostics.ts        redacted stderr records
     └── jsonl.ts              bounded framed transport
 fixtures/runtime-protocol/    valid and invalid cross-language frames
 tests/runtime/                spawned-worker SDK and lifecycle tests
-tests/smoke/                  packaged-artifact black-box scenario
-scripts/runtime-packaging/    Bun, SEA, sidecar, and measurement drivers
+scripts/runtime-packaging/    packaged black-box, Bun, SEA, sidecar, and measurement drivers
 ```
 
 Generated binaries and measurement output remain ignored artifacts. Stable conclusions move into ADR 0005 rather than committing large build products.
@@ -329,7 +327,7 @@ For each candidate, record:
 
 Provisional review flags—not automatic optimization targets—are warm readiness p95 over 2 seconds or idle RSS over 200 MiB per worker.
 
-Write [ADR 0005](../adr/) with the selected route, evidence, rejected alternatives, and known signing/assets work. If no candidate passes from an isolated directory without a user runtime, H2 fails and stops before H3.
+[ADR 0005](../adr/0005-runtime-worker-packaging.md) selects Bun standalone. Bun and the private Node sidecar passed from an isolated directory without a user runtime; Node SEA built but crashed with `SIGSEGV` before protocol initialization.
 
 Final H2 checkpoint:
 
@@ -356,19 +354,21 @@ The final smoke test runs only packaged artifacts:
 
 ## Acceptance evidence
 
-H2 is complete only when the checkpoint records:
+H2 completed with:
 
 - protocol fixture and decoder tests;
 - SDK integration test results;
 - persistent session file inspection;
 - replacement/subscription test results;
 - cancellation and signal timings;
-- packaged black-box smoke output;
-- packaging comparison table and ADR 0005;
-- startup/RSS/size measurements;
+- packaged black-box smoke output for Bun standalone and the private Node sidecar;
+- the packaging comparison and decision in [ADR 0005](../adr/0005-runtime-worker-packaging.md);
+- Bun measurements of 81,163,490 bytes, 213.5 ms median readiness, 961.9 ms p95 readiness, 178,064 KiB idle RSS, and 179,824 KiB active RSS;
+- sidecar measurements of 84,791,892 bytes, 303.1 ms median readiness, 868.9 ms p95 readiness, 246,176 KiB idle RSS, and 248,800 KiB active RSS;
+- a reproducible Node SEA rejection after its 84,499,344-byte artifact crashed before initialization;
 - unchanged terminal Pi-Tai checks.
 
-Required commands will include:
+Acceptance commands:
 
 ```bash
 npm run check
@@ -403,4 +403,4 @@ H2 deliberately leaves these for later review:
 - universal macOS builds, signing, notarization, and updater integration;
 - whether measured worker memory warrants pooling instead of one worker per loaded session.
 
-No additional product decision is required before starting H2. The packaging choice is made from proof evidence and reviewed before H3.
+No additional H2 product decision remains. H3 inherits the provisional runtime protocol and the Bun standalone packaging choice.

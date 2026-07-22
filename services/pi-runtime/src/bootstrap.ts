@@ -17,15 +17,19 @@ const guardedWrite = (() => {
 }) as typeof process.stdout.write;
 process.stdout.write = guardedWrite;
 
-try {
-  const { runWorker } = await import("./main.ts");
-  await runWorker({ output: protocolOutput, diagnostics });
-} catch (error) {
-  diagnostics({
-    timestamp: new Date().toISOString(),
-    level: "error",
-    event: "runtime_fatal",
-    data: { error: error instanceof Error ? error.name : "unknown" },
-  });
-  process.exitCode = 1;
+async function bootstrap(): Promise<void> {
+  try {
+    const { runWorker } = await import("./main.ts");
+    await runWorker({ output: protocolOutput, diagnostics });
+  } catch (error) {
+    diagnostics({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      event: "runtime_fatal",
+      data: { error: error instanceof Error ? error.name : "unknown" },
+    });
+    process.exitCode = 1;
+  }
 }
+
+void bootstrap();

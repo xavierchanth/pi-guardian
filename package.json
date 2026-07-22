@@ -34,6 +34,9 @@
     "typecheck": "tsc -p tsconfig.json",
     "protocol:generate": "cargo run -p pi-tai-runtime-protocol --bin export-bindings",
     "protocol:check": "cargo run -p pi-tai-runtime-protocol --bin export-bindings -- --check",
+    "runtime:build": "node --experimental-strip-types scripts/runtime-packaging/build.ts all",
+    "runtime:smoke": "npm run runtime:build && node --experimental-strip-types scripts/runtime-packaging/smoke.ts all",
+    "runtime:package-compare": "npm run runtime:smoke",
     "check": "npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs"
@@ -49,6 +52,7 @@
     "@earendil-works/pi-coding-agent": "^0.80.10",
     "@earendil-works/pi-tui": "^0.80.10",
     "@types/node": "^24.10.1",
+    "postject": "1.0.0-alpha.6",
     "typebox": "^1.3.6",
     "typescript": "^5.9.3"
   },

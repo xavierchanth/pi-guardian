@@ -47,7 +47,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Make one broker-owned Pi session authoritative across Zed and future companion clients.
 - Package Pi-Tai Host as a tray-resident Tauri application rather than an installed daemon initially.
 - Keep the configuration/status desktop manager independent from the session-owning Host process.
-- Run Pi through its SDK in a bundled TypeScript runtime helper supervised by the Host.
+- Run Pi through its SDK in a self-contained Bun runtime-worker executable supervised by the Host.
 - Build a thin, product-owned ACP shim against the official ACP SDK contracts.
 - Let Zed disconnect without intentionally terminating a healthy host-owned Pi turn.
 - Optimize semantic rendering for Zed while remaining protocol-correct for other ACP clients.
@@ -335,6 +335,5 @@ Work stops at this gate until explicit approval.
 - Whether priorities should be required by the planning tool or default to `medium`.
 - Whether Guardian accepts an upstream context-provider contribution.
 - Whether the Host and Desktop ship as two visible application bundles or one signed bundle containing the Host helper application.
-- Exact packaging for the self-contained TypeScript Pi runtime helper.
 - Exact model-visible steering semantics for an externally replaced plan during an active turn.
 - Whether the ACP executable is installed globally from Git or through a future ACP Registry entry.

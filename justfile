@@ -40,6 +40,14 @@ protocol-generate:
 package-check:
     npm run package:check
 
+# Run the packaged runtime black-box smoke suite.
+runtime-smoke:
+    npm run runtime:smoke
+
+# Build and measure all H2 runtime packaging candidates.
+runtime-package-compare:
+    npm run runtime:package-compare
+
 # Load only Pi-Tai in offline RPC mode and verify its extension commands.
 smoke:
     npm run smoke:isolated

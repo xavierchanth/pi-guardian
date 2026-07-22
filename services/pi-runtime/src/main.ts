@@ -20,7 +20,7 @@ export async function runWorker(options: WorkerMainOptions): Promise<void> {
   }
   const writer = new JsonlWriter(options.output);
   const port = options.port
-    ?? (process.env.PI_TAI_RUNTIME_FAKE_PORT === "1" ? new FakeRuntimePort() : new PiSdkRuntimePort());
+    ?? (process.env.PI_TAI_RUNTIME_FAKE_PORT === "1" ? new FakeRuntimePort() : new PiSdkRuntimePort(diagnostics));
   const worker = new RuntimeWorker(port, writer, diagnostics);
   const input = options.input ?? process.stdin;
   let stopping = false;

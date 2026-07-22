@@ -3,6 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
 import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
 
@@ -14,6 +15,16 @@ async function fixture() {
   await (await import("node:fs/promises")).mkdir(cwd, { recursive: true });
   return { root, cwd, agentDir, sessionDir };
 }
+
+test("hosted extension UI rejects interaction and redacts notifications", async () => {
+  const records: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  const ui = createHeadlessUiContext((record) => records.push(record));
+  await assert.rejects(ui.select("choose", ["secret option"]), /unavailable in hosted mode: select/);
+  ui.notify("private notification", "warning");
+  assert.equal(records[0]?.event, "extension_notification");
+  assert.deepEqual(records[0]?.data, { characters: 20 });
+  assert.equal(JSON.stringify(records).includes("private notification"), false);
+});
 
 test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async () => {
   const paths = await fixture();

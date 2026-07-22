@@ -27,14 +27,13 @@ import type {
   ThinkingInfo,
 } from "@pi-tai/runtime-protocol";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { createPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
+import type { DiagnosticSink } from "./diagnostics.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";
+import { createHeadlessUiContext } from "./headless-ui.ts";
 import type { PromptStart, RuntimeEventSink, RuntimePort } from "./runtime-port.ts";
-
-const PROMPT_PATH = fileURLToPath(new URL("../../../packages/pi-tai/prompts", import.meta.url));
 
 export class PiSdkRuntimePort implements RuntimePort {
   private modelRuntime?: ModelRuntime;
@@ -44,6 +43,11 @@ export class PiSdkRuntimePort implements RuntimePort {
   private unsubscribe?: () => void;
   private extensionErrors: string[] = [];
   private active?: { commandId: string; turnId: string; emit: RuntimeEventSink };
+  private readonly diagnostics: DiagnosticSink;
+
+  constructor(diagnostics: DiagnosticSink = () => {}) {
+    this.diagnostics = diagnostics;
+  }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     if (!this.runtime) {
@@ -227,7 +231,23 @@ export class PiSdkRuntimePort implements RuntimePort {
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [{ name: "pi-tai-hosted", factory: hostedExtension }],
-          additionalPromptTemplatePaths: [PROMPT_PATH],
+          promptsOverride: () => ({
+            prompts: [
+              {
+                name: "continue",
+                description: "Continue the agent's previous work",
+                content: "Continue what you were doing.",
+                filePath: "pi-tai:continue",
+                sourceInfo: {
+                  path: "pi-tai:continue",
+                  source: "pi-tai-runtime",
+                  scope: "temporary",
+                  origin: "top-level",
+                },
+              },
+            ],
+            diagnostics: [],
+          }),
           noSkills: true,
           noThemes: true,
           noContextFiles: true,
@@ -258,6 +278,7 @@ export class PiSdkRuntimePort implements RuntimePort {
     this.unsubscribe?.();
     await session.bindExtensions({
       mode: "rpc",
+      uiContext: createHeadlessUiContext(this.diagnostics),
       onError: (error) => {
         this.extensionErrors.push(`${error.extensionPath}:${error.event}:${error.error}`);
       },

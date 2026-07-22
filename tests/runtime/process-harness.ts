@@ -12,12 +12,12 @@ export class RuntimeProcessHarness {
   private readonly events = new EventEmitter();
   private buffer = Buffer.alloc(0);
 
-  constructor(options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[] } = {}) {
+  constructor(options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[]; cwd?: string } = {}) {
     this.child = spawn(
       options.executable ?? process.execPath,
       options.args ?? ["--experimental-strip-types", bootstrap],
       {
-        cwd: root,
+        cwd: options.cwd ?? root,
         env: { ...process.env, ...options.env },
         stdio: ["pipe", "pipe", "pipe"],
       },

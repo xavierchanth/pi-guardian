@@ -2,7 +2,7 @@
 
 ## Status
 
-Design pass approved. H0 workspace/protocol contracts and the H1 Tauri Host Agent lifecycle proof are implemented; H2 Pi SDK runtime-worker proof is next. Terminal Pi-Tai session-title tuning may continue independently if needed.
+Design pass approved. H0 workspace/protocol contracts, the H1 Tauri Host Agent lifecycle proof, and the H2 Pi SDK runtime-worker proof are implemented; H3 Host-to-worker supervision is next. Terminal Pi-Tai session-title tuning may continue independently if needed.
 
 Stage 2 proceeds through disposable architecture proofs. Production Host and ACP implementation starts only after those proofs are reviewed.
 
@@ -12,6 +12,7 @@ Accepted architecture decisions:
 - [ADR 0002: Valid mutations transfer active-client control immediately](adr/0002-immediate-client-control.md)
 - [ADR 0003: Unload idle runtimes and recover interrupted turns explicitly](adr/0003-runtime-idle-and-recovery.md)
 - [ADR 0004: macOS-first shell with a portable core](adr/0004-macos-first-portable-core.md)
+- [ADR 0005: Package the runtime worker as a Bun standalone executable](adr/0005-runtime-worker-packaging.md)
 
 ## Product decisions from the design pass
 
@@ -346,7 +347,7 @@ Proof procedure and manual tray checks: [H1_HOST_LIFECYCLE.md](proofs/H1_HOST_LI
 feat(host): prove tray-owned lifecycle
 ```
 
-### H2: Pi SDK runtime-worker proof
+### H2: Pi SDK runtime-worker proof — implemented
 
 #### Red
 
@@ -369,9 +370,10 @@ feat(host): prove tray-owned lifecycle
 
 #### Acceptance
 
-- A self-contained worker creates a persistent Pi session, runs one fake prompt, emits semantic events, closes, reopens, and continues history without a user-managed Node installation.
+- A Bun standalone worker creates a persistent Pi session, runs deterministic faux prompts and tools, emits semantic events, closes, reopens, continues history, cancels, and survives signal shutdown without a user-managed runtime or repository files.
+- The private Node sidecar also passes as a fallback; the Node SEA candidate is rejected after crashing before initialization.
 
-Detailed proof plan, packaging experiment, and evidence requirements: [H2_RUNTIME_WORKER_PLAN.md](proofs/H2_RUNTIME_WORKER_PLAN.md).
+Detailed proof plan and recorded evidence: [H2_RUNTIME_WORKER_PLAN.md](proofs/H2_RUNTIME_WORKER_PLAN.md) and [ADR 0005](adr/0005-runtime-worker-packaging.md).
 
 #### Checkpoint
 
