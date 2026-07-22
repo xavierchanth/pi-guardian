@@ -7,6 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
+import { CAPABILITY_STATE_ENTRY } from "../../packages/pi-tai/src/capabilities/domain.ts";
 import { JjWorkspaceService, type JjCommandRunner } from "../../packages/pi-tai/src/subagents/jj.ts";
 import type { DelegationRecord, DelegationStore } from "../../packages/pi-tai/src/subagents/store.ts";
 import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
@@ -20,7 +21,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-test("JJ relocation creates a successor workspace above the source @", async () => {
+test("JJ relocation creates a successor workspace above the source @-", async () => {
   const calls: Array<{ cwd: string; args: string[] }> = [];
   const source = "/repo";
   const target = "/repo/.jj/workspaces/focused";
@@ -31,7 +32,8 @@ test("JJ relocation creates a successor workspace above the source @", async () 
     if (command.startsWith("workspace list")) return "default|source-change\n";
     if (command === "diff -r @ --summary") return "";
     if (command.includes("-r @ --no-graph") && cwd === target) return "successor-root\n";
-    if (command.includes("-r @- --no-graph") && cwd === target) return "source-change\n";
+    if (command.includes("-r @- --no-graph") && cwd === target) return "source-parent\n";
+    if (command.includes("-r @- --no-graph")) return "source-parent\n";
     if (command.includes("-r @ --no-graph")) return "source-change\n";
     if (command.startsWith("workspace add")) return "";
     throw new Error(`Unexpected command: ${cwd}: ${command}`);
@@ -41,11 +43,11 @@ test("JJ relocation creates a successor workspace above the source @", async () 
     rm: async () => undefined,
   });
   const created = await service.createRelocationWorkspace(source, "focused");
-  assert.equal(created.baseChangeId, "source-change");
+  assert.equal(created.baseChangeId, "source-parent");
   assert.equal(created.childRootChangeId, "successor-root");
   assert.deepEqual(
     calls.find((call) => call.args[0] === "workspace" && call.args[1] === "add")?.args,
-    ["workspace", "add", target, "--name", "focused", "-r", "source-change"],
+    ["workspace", "add", target, "--name", "focused", "-r", "source-parent"],
   );
 });
 
@@ -212,6 +214,74 @@ test("direct JJ capability forks the session, switches cwd, and stays standalone
   assert.equal(transitions.records[0]?.state, "switched");
   assert.equal(transitions.records[0]?.successorSessionId, successor.getSessionId());
   assert.ok(tools.has("create_jj_workspace"));
+});
+
+test("direct JJ capability creates a fresh successor when used before the first persisted message", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-first-relocation-"));
+  const sourceCwd = join(root, "source");
+  const targetCwd = join(root, "target");
+  const sessions = join(root, "sessions");
+  await Promise.all([mkdir(sourceCwd), mkdir(targetCwd), mkdir(sessions)]);
+  const source = SessionManager.create(sourceCwd, sessions);
+  source.appendCustomEntry("pi-tai-capabilities", { enabled: ["jj-workspaces"] });
+  const sourceFile = source.getSessionFile();
+  assert.ok(sourceFile);
+  await assert.rejects(access(sourceFile!));
+
+  const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
+  const pi = {
+    on() {},
+    registerCommand(name: string, options: { handler: (args: string, ctx: any) => Promise<void> }) {
+      commands.set(name, options.handler);
+    },
+    registerTool() {},
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  const transitions = new MemoryTransitionStore();
+  const workspace = {
+    kind: "jj",
+    probe: async () => ({ available: true }),
+    create: async () => ({
+      backend: "jj",
+      purpose: "relocation",
+      repoRoot: root,
+      sourceWorkspace: "default",
+      baseChangeId: "source-parent",
+      name: "focused",
+      path: targetCwd,
+      rootChangeId: "successor",
+    }),
+  } as unknown as WorkspacePort;
+  registerWorkspaceCapabilities(pi, {
+    capabilities: new SessionCapabilityController(),
+    jj: workspace,
+    transitions,
+    delegations: emptyDelegations(),
+  });
+
+  let switchedFile: string | undefined;
+  await commands.get("cap:jj-workspaces")?.("new focused", {
+    cwd: sourceCwd,
+    sessionManager: source,
+    waitForIdle: async () => {},
+    switchSession: async (path: string) => {
+      switchedFile = path;
+      return { cancelled: false };
+    },
+    ui: { notify() {} },
+  });
+
+  assert.ok(switchedFile);
+  const successor = SessionManager.open(switchedFile!);
+  assert.equal(successor.getCwd(), targetCwd);
+  assert.equal(successor.getHeader()?.parentSession, undefined);
+  assert.equal(successor.getEntries().some((entry) => entry.type === "message"), false);
+  assert.equal(successor.getEntries().some(
+    (entry) => entry.type === "custom"
+      && entry.customType === CAPABILITY_STATE_ENTRY
+      && (entry.data as { enabled?: string[] }).enabled?.includes("jj-workspaces"),
+  ), true);
+  assert.equal(transitions.records[0]?.state, "switched");
 });
 
 class MemoryTransitionStore implements WorkspaceTransitionStore {

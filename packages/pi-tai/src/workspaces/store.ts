@@ -10,7 +10,7 @@ export interface WorkspaceTransitionRecord {
   id: string;
   state: WorkspaceTransitionState;
   sourceSessionId: string;
-  sourceSessionFile: string;
+  sourceSessionFile?: string;
   sourceCwd: string;
   workspace: WorkspaceAttachment;
   successorSessionId?: string;

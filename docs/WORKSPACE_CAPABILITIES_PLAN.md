@@ -71,13 +71,13 @@ Direct create-and-enter is allowed only from `standalone` role while the agent i
 The operation:
 
 1. allocates a workspace with purpose `relocation`;
-2. creates a successor Pi session with `SessionManager.forkFrom(sourceSessionFile, targetCwd)`;
+2. forks a persisted source with `SessionManager.forkFrom(sourceSessionFile, targetCwd)`, or creates a fresh persistent target session when the command is the first message and the source file has not yet been flushed;
 3. appends workspace-transition metadata to the successor session;
 4. switches with `ExtensionCommandContext.switchSession()`;
 5. reconstructs the new runtime at the target cwd;
 6. remains `standalone` and continues normal work.
 
-The old Pi session remains a resumable ancestor. The successor has no delegation record, parent callback, `report_to_parent`, or integration obligation.
+A persisted old Pi session remains a resumable ancestor. A first-command relocation has no persisted source context and therefore starts a brand-new target session instead. The successor has no delegation record, parent callback, `report_to_parent`, or integration obligation.
 
 Because model tools cannot switch sessions directly, model-initiated relocation is two-stage: a backend-specific tool queues its matching `/cap:` extension command as a follow-up after the tool turn settles. The extension command owns allocation, fork, and switch. User invocation may call the extension command directly.
 
@@ -157,8 +157,8 @@ Bump delegation record version and provide a bounded migration from the current 
 ### JJ relocation
 
 - Require a clean source working copy using the existing JJ cleanliness proof.
-- Create the successor workspace from source `@`, preserving the old working-copy change as ancestry.
-- Record source workspace/change ID and successor root change ID.
+- Create the successor workspace from source `@-`, leaving the current working-copy change out of the successor ancestry.
+- Record the source workspace, source-parent change ID, and successor root change ID.
 - Do not rebase the successor back automatically: it is now the standalone agent's active line of work.
 - If session fork/switch fails after allocation, retain a recoverable transition record and workspace rather than guessing that deletion is safe.
 
@@ -266,7 +266,7 @@ refactor(subagents): abstract workspace ownership
 
 - `/cap:jj-workspaces` is unavailable outside JJ repositories.
 - Create-and-enter rejects non-standalone, streaming, unsaved-session, and dirty-workspace states.
-- Success creates a workspace from source `@`, forks the full Pi session, switches cwd, and remains standalone.
+- Success creates a workspace from source `@-`, forks a persisted Pi session (or creates a fresh session when invoked as the first command), switches cwd, and remains standalone.
 - Work context, title, model/thinking state, and capability intent reconstruct.
 - Old-context use after `switchSession` fails the test.
 - Cancellation/failure leaves a recoverable workspace record.

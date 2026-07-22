@@ -128,10 +128,10 @@ Workspace allocation supports two deliberately different operating models:
 
 | Invocation | Session role after creation | Runtime ownership | Completion path |
 | --- | --- | --- | --- |
-| Direct JJ-workspace or Git-worktree capability | `standalone` | The current logical agent moves to a forked successor Pi session whose cwd is the new workspace | Normal standalone work; no parent callback or delegation integration |
+| Direct JJ-workspace or Git-worktree capability | `standalone` | The current logical agent moves to a successor Pi session whose cwd is the new workspace; a persisted source is forked, while a first-command source starts fresh | Normal standalone work; no parent callback or delegation integration |
 | `spawn_child` from enabled subagents | Parent remains `parent`; new session is `child` | The detached child exclusively owns its workspace while the parent remains in the source workspace and pauses non-orchestration work | Child calls `report_to_parent`; parent waits, integrates or abandons, then finalizes |
 
-The direct path must not create a `DelegationRecord`, expose `report_to_parent`, or make the source session an active orchestration parent. It creates a workspace-transition record, forks the source Pi session with `SessionManager.forkFrom`, switches the active runtime to the new session/cwd, and preserves `standalone` role. The old Pi session remains an immutable, resumable ancestor; the new Pi session is genealogically its child through `parentSession`, but operationally it is the same logical agent's **successor session**, not a Pi-Tai subagent.
+The direct path must not create a `DelegationRecord`, expose `report_to_parent`, or make the source session an active orchestration parent. It creates a workspace-transition record, switches the active runtime to the new session/cwd, and preserves `standalone` role. A persisted source is forked with `SessionManager.forkFrom` and remains an immutable, resumable ancestor. When relocation is the first command and Pi has not flushed a source session file, Pi-Tai instead creates a brand-new persistent target session. In either case the target is operationally the same logical agent's **successor session**, not a Pi-Tai subagent.
 
 The delegated path keeps the behavior enforced by the current implementation: `spawn_child` is the only parent operation that allocates a workspace, the child starts a distinct persistent RPC session in that path, parent messages travel through the durable child control channel, and the child reports back before terminating. Parent mode must reject direct workspace-transition tools and commands.
 
@@ -157,11 +157,11 @@ Git records use backend-appropriate durable linkage: repository identity, base c
 
 ### Standalone workspace behavior
 
-A standalone agent may create a JJ workspace or Git worktree for inspection/staging without moving, or request a direct transition that continues work there. Creation always returns and records the absolute path. A create-only operation leaves the current Pi session unchanged; a create-and-enter operation forks and replaces the session so the rebuilt runtime's cwd is the new path while its role remains `standalone`.
+A standalone agent may create a JJ workspace or Git worktree for inspection/staging without moving, or request a direct transition that continues work there. Creation always returns and records the absolute path. A create-only operation leaves the current Pi session unchanged; a create-and-enter operation replaces the session so the rebuilt runtime's cwd is the new path while its role remains `standalone`. Persisted context is forked; a first-command invocation creates a fresh target session.
 
 Pi's tools, resource discovery, project trust, and extension context are bound to the cwd used to construct `AgentSessionRuntime`. Running `cd` in one shell command or calling `process.chdir()` would not safely rebind those services.
 
-Pi already exposes the primitives for a real transition. `SessionManager.forkFrom(sourceSessionFile, targetCwd)` creates a new persistent session with a new ID and target-cwd header, links the old file as `parentSession`, and copies the old session entries. An extension command can then call `ctx.switchSession(newSessionFile)`; `AgentSessionRuntime` shuts down the old session, rebuilds cwd-bound services and resources, rebinds extensions, and starts the copied session in the workspace. Code after replacement must use only the fresh `withSession` context.
+Pi already exposes the primitives for a real transition. `SessionManager.forkFrom(sourceSessionFile, targetCwd)` creates a new persistent session with a new ID and target-cwd header, links the old file as `parentSession`, and copies the old session entries. For a first-command relocation with no flushed source file, `SessionManager.create(targetCwd, sessionDir)` provides the fresh target instead. An extension command can then call `ctx.switchSession(newSessionFile)`; `AgentSessionRuntime` shuts down the old session, rebuilds cwd-bound services and resources, rebinds extensions, and starts the copied session in the workspace. Code after replacement must use only the fresh `withSession` context.
 
 The capability offers these distinct flows:
 
@@ -172,4 +172,4 @@ The capability offers these distinct flows:
 
 Model-callable tools cannot directly perform session replacement because they receive `ExtensionContext`, not `ExtensionCommandContext`. They may prepare a workspace, but the actual transition belongs to an extension command or typed Host operation. The transition must be rejected while unresolved child delegations or other feature state cannot be safely rebound. Copied work context and extension entries reconstruct normally; features keyed by the old Pi session ID need explicit migration or reset policy.
 
-JJ workspaces live under `<repo>/.jj/workspaces/<name>`. Git worktrees live under `~/.pi/agent/pi-tai/workspaces/git/<repo-key>/<workspace-id>` or the injected hosted agent-data root. This avoids untracked nested worktrees; every path is recorded durably and returned in capability and subagent results.
+Standalone JJ workspaces are rooted above source `@-` and live under `<repo>/.jj/workspaces/<name>`. Git worktrees live under `~/.pi/agent/pi-tai/workspaces/git/<repo-key>/<workspace-id>` or the injected hosted agent-data root. This avoids untracked nested worktrees; every path is recorded durably and returned in capability and subagent results.

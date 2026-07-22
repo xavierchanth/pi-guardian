@@ -132,6 +132,10 @@ export class JjWorkspaceService {
     if (sourceDiff.trim()) {
       throw new Error("Workspace relocation requires a fresh empty source @. Checkpoint the current work first.");
     }
+    const baseChangeId = line(
+      await this.run(sourceCwd, ["log", "-r", "@-", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),
+      "source @- change ID",
+    );
     const workspacesRoot = join(repoRoot, ".jj", "workspaces");
     const workspacePath = join(workspacesRoot, workspaceName);
     await this.files.mkdir(workspacesRoot);
@@ -142,7 +146,7 @@ export class JjWorkspaceService {
       "--name",
       workspaceName,
       "-r",
-      sourceChangeId,
+      baseChangeId,
     ]);
     try {
       const rootChangeId = line(
@@ -153,13 +157,13 @@ export class JjWorkspaceService {
         await this.run(workspacePath, ["log", "-r", "@-", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),
         "successor workspace parent change ID",
       );
-      if (actualBase !== sourceChangeId) {
-        throw new Error(`Successor workspace parent mismatch: expected ${sourceChangeId}, received ${actualBase}.`);
+      if (actualBase !== baseChangeId) {
+        throw new Error(`Successor workspace parent mismatch: expected ${baseChangeId}, received ${actualBase}.`);
       }
       return {
         repoRoot,
         parentWorkspace: sourceWorkspace,
-        baseChangeId: sourceChangeId,
+        baseChangeId,
         childWorkspace: workspaceName,
         childWorkspacePath: workspacePath,
         childRootChangeId: rootChangeId,

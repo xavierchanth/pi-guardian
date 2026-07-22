@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getAgentDir, SessionManager, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
+import { CAPABILITY_STATE_ENTRY } from "../capabilities/domain.ts";
 import { reconstructSubagentRole } from "../subagents/domain.ts";
 import { FileDelegationStore, isResolvedDelegation, type DelegationStore } from "../subagents/store.ts";
 import type { WorkspacePort } from "./domain.ts";
@@ -97,7 +99,7 @@ export function registerWorkspaceCapabilities(
         ctx.ui.notify(`Created JJ workspace ${record.workspace.path}.`, "info");
         return;
       }
-      await relocate(jj, transitions, delegations, ctx, name);
+      await relocate(jj, transitions, delegations, capabilities, ctx, name);
     },
   });
 
@@ -138,7 +140,7 @@ export function registerWorkspaceCapabilities(
         ctx.ui.notify(`Created Git worktree ${record.workspace.path}.`, "info");
         return;
       }
-      await relocate(git, transitions, delegations, ctx, name);
+      await relocate(git, transitions, delegations, capabilities, ctx, name);
     },
   });
 
@@ -221,6 +223,7 @@ async function relocate(
   workspace: WorkspacePort,
   transitions: WorkspaceTransitionStore,
   delegations: DelegationStore,
+  capabilities: SessionCapabilityController,
   ctx: ExtensionCommandContext,
   name: string,
 ): Promise<void> {
@@ -230,21 +233,32 @@ async function relocate(
     throw new Error("Cannot relocate a session with unresolved child delegations.");
   }
   const sourceSessionFile = ctx.sessionManager.getSessionFile();
-  if (!sourceSessionFile || !existsSync(sourceSessionFile)) {
-    throw new Error("Workspace relocation requires a persisted source session. Complete one assistant turn first.");
+  const sourceIsPersisted = Boolean(sourceSessionFile && existsSync(sourceSessionFile));
+  const hasConversationContext = ctx.sessionManager.getEntries().some((entry) =>
+    entry.type === "message"
+    || entry.type === "custom_message"
+    || entry.type === "compaction"
+    || entry.type === "branch_summary"
+  );
+  if (!sourceIsPersisted && hasConversationContext) {
+    throw new Error("Workspace relocation cannot preserve an unpersisted source session with conversation context.");
   }
   const record = await allocateTransition(workspace, transitions, ctx, name);
   try {
-    const successor = SessionManager.forkFrom(
-      sourceSessionFile,
-      record.workspace.path,
-      dirname(sourceSessionFile),
-    );
+    const sessionDir = sourceSessionFile ? dirname(sourceSessionFile) : ctx.sessionManager.getSessionDir();
+    const successor = sourceIsPersisted
+      ? SessionManager.forkFrom(sourceSessionFile!, record.workspace.path, sessionDir)
+      : await createPersistedSession(record.workspace.path, sessionDir);
     successor.appendCustomEntry(TRANSITION_ENTRY, {
       transitionId: record.id,
       sourceSessionId: record.sourceSessionId,
       sourceSessionFile,
       workspace: record.workspace,
+    });
+    successor.appendCustomEntry(CAPABILITY_STATE_ENTRY, {
+      enabled: capabilities.snapshot().capabilities
+        .filter((capability) => capability.leases.some((lease) => lease.owner === "user"))
+        .map((capability) => capability.id),
     });
     const successorSessionFile = successor.getSessionFile();
     if (!successorSessionFile) throw new Error("Successor session is not persistent.");
@@ -274,6 +288,14 @@ async function relocate(
   }
 }
 
+async function createPersistedSession(cwd: string, sessionDir: string): Promise<SessionManager> {
+  const pending = SessionManager.create(cwd, sessionDir);
+  const sessionFile = pending.getSessionFile();
+  if (!sessionFile) throw new Error("Successor session is not persistent.");
+  await writeFile(sessionFile, "", { encoding: "utf8", mode: 0o600, flag: "wx" });
+  return SessionManager.open(sessionFile, sessionDir, cwd);
+}
+
 async function allocateTransition(
   workspace: WorkspacePort,
   transitions: WorkspaceTransitionStore,
@@ -281,7 +303,6 @@ async function allocateTransition(
   name: string,
 ): Promise<WorkspaceTransitionRecord> {
   const sourceSessionFile = ctx.sessionManager.getSessionFile();
-  if (!sourceSessionFile) throw new Error("Workspace creation requires a persistent source session.");
   const attachment = await workspace.create({ cwd: ctx.cwd, name, purpose: "relocation" });
   const now = new Date().toISOString();
   const record: WorkspaceTransitionRecord = {
