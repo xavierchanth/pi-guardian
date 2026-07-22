@@ -91,6 +91,61 @@ pub struct HostProtocolError {
     pub details: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HostResponse {
+    pub protocol_version: u32,
+    pub request_id: String,
+    #[serde(flatten)]
+    pub outcome: HostResponseOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum HostResponseOutcome {
+    Ok { result: Value },
+    Error { error: HostProtocolError },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientFrame {
+    Authenticate {
+        protocol_version: u32,
+        token: String,
+        client: ImplementationInfo,
+    },
+    Command {
+        command: HostCommand,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ServerFrame {
+    Authenticated {
+        protocol_version: u32,
+        host: ImplementationInfo,
+    },
+    Response {
+        response: HostResponse,
+    },
+    Event {
+        event: HostEvent,
+    },
+    Error {
+        error: HostProtocolError,
+    },
+}
+
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error(
     "incompatible protocol ranges: client {client_min}-{client_max}, host {host_min}-{host_max}"
