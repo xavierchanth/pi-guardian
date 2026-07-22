@@ -1,4 +1,4 @@
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use serde_json::Value;
 use specta::{Type, Types};
 use specta_serde::PhasesFormat as SerdeFormat;
@@ -300,7 +300,9 @@ where
     const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
     let value = u64::deserialize(deserializer)?;
     if value > MAX_SAFE_INTEGER {
-        return Err(D::Error::custom("value exceeds JavaScript safe integer range"));
+        return Err(D::Error::custom(
+            "value exceeds JavaScript safe integer range",
+        ));
     }
     Ok(value)
 }
