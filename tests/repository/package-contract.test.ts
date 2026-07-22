@@ -71,7 +71,17 @@ test("runtime protocol ships Rust-first DTOs and checked-in TypeScript bindings"
 });
 
 test("portable Host crates remain independent of Tauri", () => {
-  for (const crate of ["host-protocol", "host-lifecycle", "host-platform"]) {
+  for (const crate of [
+    "broker",
+    "event-store",
+    "host-kernel",
+    "host-lifecycle",
+    "host-platform",
+    "host-protocol",
+    "host-server",
+    "local-ipc",
+    "runtime-supervisor",
+  ]) {
     const cargo = readFileSync(join(root, `crates/${crate}/Cargo.toml`), "utf8");
     assert.doesNotMatch(cargo, /tauri/i, crate);
   }
@@ -79,6 +89,22 @@ test("portable Host crates remain independent of Tauri", () => {
   assert.match(shellCargo, /tauri/);
   assert.ok(existsSync(join(root, "packages/host-protocol/src/index.ts")));
   assert.ok(existsSync(join(root, "fixtures/host-protocol/command-prompt.json")));
+});
+
+test("desktop manager uses Tauri 2, Vite, React Compiler, and Tailwind", () => {
+  const desktop = JSON.parse(readFileSync(join(root, "apps/host/package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const vite = readFileSync(join(root, "apps/host/vite.config.ts"), "utf8");
+  const tauri = readFileSync(join(root, "apps/host/src-tauri/Cargo.toml"), "utf8");
+
+  assert.equal(desktop.dependencies?.react, "19.2.8");
+  assert.ok(desktop.devDependencies?.["babel-plugin-react-compiler"]);
+  assert.ok(desktop.devDependencies?.tailwindcss);
+  assert.match(vite, /reactCompilerPreset/);
+  assert.match(vite, /tailwindcss\(\)/);
+  assert.match(tauri, /tauri = \{ version = "2"/);
 });
 
 test("package ships standalone Guardian and required support files", () => {

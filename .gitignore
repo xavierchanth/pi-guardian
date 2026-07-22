@@ -3,6 +3,7 @@
 .DS_Store
 node_modules/
 coverage/
+*.tsbuildinfo
 /dist/
 target/
 apps/*/src-tauri/gen/

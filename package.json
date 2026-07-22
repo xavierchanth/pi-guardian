@@ -20,6 +20,7 @@
     "node": ">=22.19.0"
   },
   "workspaces": [
+    "apps/*",
     "packages/*",
     "services/*",
     "bins/*"
@@ -37,6 +38,8 @@
     "runtime:build": "node --experimental-strip-types scripts/runtime-packaging/build.ts all",
     "runtime:smoke": "npm run runtime:build && node --experimental-strip-types scripts/runtime-packaging/smoke.ts all",
     "runtime:package-compare": "npm run runtime:smoke",
+    "desktop:dev": "npm run dev --workspace @pi-tai/host-ui",
+    "desktop:build": "npm run build --workspace @pi-tai/host-ui",
     "check": "npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs"
