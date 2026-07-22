@@ -4,9 +4,9 @@ import {
   getAgentDir,
   type ExtensionAPI,
   type ExtensionContext,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import {
   DEFAULT_MODEL_PREFERENCES,
   MODEL_PREFERENCE_IDS,
@@ -14,10 +14,14 @@ import {
   activeToolsForRole,
   composePiTaiInstructions,
   parseSubagentsCommand,
+  reconstructSubagentRole,
   type SubagentRole,
 } from "./domain.ts";
 import { loadPackagedInstructions, roleInstructions, type InstructionLoader } from "./instructions.ts";
-import { JjWorkspaceService } from "./jj.ts";
+import type { WorkspacePort } from "../workspaces/domain.ts";
+import { GitWorktreePort } from "../workspaces/git.ts";
+import { JjWorkspacePort } from "../workspaces/jj.ts";
+import { PreferredWorkspacePort } from "../workspaces/preferred.ts";
 import { PiChildProcessLauncher } from "./launcher.ts";
 import { SubagentOrchestrator } from "./orchestrator.ts";
 import {
@@ -36,19 +40,34 @@ export interface SubagentDependencies {
   orchestrator?: SubagentOrchestrator;
   loadInstructions?: InstructionLoader;
   childDelegationId?: string;
+  capabilities?: SessionCapabilityController;
+  workspace?: WorkspacePort;
+  agentDir?: string;
 }
 
 export function registerSubagents(
   pi: ExtensionAPI,
   dependencies: SubagentDependencies = {},
 ): void {
+  const agentDir = dependencies.agentDir ?? getAgentDir();
   const storeRoot = process.env[STORE_ENV]
-    || join(getAgentDir(), "pi-tai", "subagents", "delegations");
+    || join(agentDir, "pi-tai", "subagents", "delegations");
   const store = dependencies.store ?? new FileDelegationStore(storeRoot);
+  const workspace = dependencies.workspace ?? new PreferredWorkspacePort(
+    new JjWorkspacePort(),
+    new GitWorktreePort(join(agentDir, "pi-tai", "workspaces", "git")),
+  );
   const orchestrator = dependencies.orchestrator ?? new SubagentOrchestrator({
     store,
-    jj: new JjWorkspaceService(),
+    workspace,
     launcher: new PiChildProcessLauncher(store),
+  });
+  const capabilities = dependencies.capabilities;
+  capabilities?.register({
+    id: "subagents",
+    label: "Subagents",
+    description: "Delegate work to direct child sessions in isolated workspaces",
+    toolNames: PARENT_TOOL_NAMES,
   });
   const loadInstructions = dependencies.loadInstructions ?? loadPackagedInstructions;
   const processChildDelegationId = dependencies.childDelegationId ?? process.env[CHILD_ENV];
@@ -58,12 +77,30 @@ export function registerSubagents(
   let spawnSeenThisTurn = false;
   const parentTools = new Set<string>(PARENT_TOOL_NAMES);
 
+  const acquireSubagentBackend = async (cwd: string): Promise<void> => {
+    if (!capabilities) return;
+    const selected = workspace.kind === "preferred"
+      ? await (workspace as PreferredWorkspacePort).select(cwd)
+      : workspace;
+    const capabilityId = selected.kind === "jj" ? "jj-workspaces" : "git-worktrees";
+    await capabilities.enable(capabilityId, {
+      owner: "feature:subagents",
+      exposure: "service-only",
+    });
+  };
+
+  const releaseSubagentBackends = () => {
+    capabilities?.disable("jj-workspaces", "feature:subagents");
+    capabilities?.disable("git-worktrees", "feature:subagents");
+  };
+
   const applyRoleTools = () => {
+    capabilities?.suppressTools(["jj-workspaces", "git-worktrees"], role !== "standalone");
     pi.setActiveTools(activeToolsForRole(pi.getActiveTools(), role));
   };
 
   pi.on("session_start", async (event, ctx) => {
-    const persisted = reconstructRoleState(ctx.sessionManager.getEntries());
+    const persisted = reconstructSubagentRole(ctx.sessionManager.getEntries());
     role = processChildDelegationId
       ? "child"
       : event.reason === "new" || event.reason === "fork"
@@ -75,6 +112,8 @@ export function registerSubagents(
     if (!processChildDelegationId && (event.reason === "new" || event.reason === "fork")) {
       pi.appendEntry(ROLE_ENTRY, { role: "standalone" });
     }
+    if (role === "parent") await acquireSubagentBackend(ctx.cwd);
+    else releaseSubagentBackends();
     if (role === "child") {
       if (!childDelegationId) throw new Error("Child session is missing its durable delegation identity.");
       childDelegation = await orchestrator.child(childDelegationId);
@@ -105,9 +144,14 @@ export function registerSubagents(
           delegation: {
             id: childDelegation.id,
             parentSessionId: childDelegation.parentSessionId,
-            workspace: childDelegation.childWorkspace,
-            baseChangeId: childDelegation.baseChangeId,
-            childRootChangeId: childDelegation.childRootChangeId,
+            backend: childDelegation.workspace.backend,
+            workspace: childDelegation.workspace.path,
+            baseId: childDelegation.workspace.backend === "jj"
+              ? childDelegation.workspace.baseChangeId
+              : childDelegation.workspace.baseCommit,
+            rootId: childDelegation.workspace.backend === "jj"
+              ? childDelegation.workspace.rootChangeId
+              : childDelegation.workspace.branch,
           },
         } : {}),
       }),
@@ -124,10 +168,16 @@ export function registerSubagents(
       spawnSeenThisTurn = true;
       return;
     }
-    if (event.toolName === "bash" && requestsJjWorkspaceCreation(event.input)) {
+    if (event.toolName === "create_jj_workspace" || event.toolName === "create_git_worktree") {
       return {
         block: true,
-        reason: "Parent sessions must use spawn_child to create a JJ workspace and delegate its task; do not run jj workspace add directly.",
+        reason: "Parent sessions must use spawn_child; direct workspace relocation is standalone-only.",
+      };
+    }
+    if (event.toolName === "bash" && requestsWorkspaceCreation(event.input)) {
+      return {
+        block: true,
+        reason: "Parent sessions must use spawn_child to create a workspace and delegate its task; do not run workspace creation commands directly.",
       };
     }
     if (parentTools.has(event.toolName)) return;
@@ -153,12 +203,12 @@ export function registerSubagents(
     }
   });
 
-  pi.registerCommand("sub-agents", {
+  pi.registerCommand("cap:subagents", {
     description: "Enable, inspect, or disable direct-child subagents",
     handler: async (args, ctx) => {
       const command = parseSubagentsCommand(args);
       if (!command) {
-        ctx.ui.notify("Usage: /sub-agents [on|off|status]", "warning");
+        ctx.ui.notify("Usage: /cap:subagents [on|off|status]", "warning");
         return;
       }
       if (command === "status") {
@@ -172,6 +222,8 @@ export function registerSubagents(
         return;
       }
       if (command === "on") {
+        await acquireSubagentBackend(ctx.cwd);
+        await capabilities?.enable("subagents", { owner: "user", exposure: "model-tools" });
         if (role !== "parent") {
           role = "parent";
           pi.appendEntry(ROLE_ENTRY, { role });
@@ -187,6 +239,8 @@ export function registerSubagents(
         return;
       }
       role = "standalone";
+      capabilities?.disable("subagents", "user");
+      releaseSubagentBackends();
       pi.appendEntry(ROLE_ENTRY, { role });
       applyRoleTools();
       ctx.ui.notify("Subagents disabled for this session.", "info");
@@ -196,11 +250,11 @@ export function registerSubagents(
   pi.registerTool({
     name: "spawn_child",
     label: "Spawn Child",
-    description: "Create a linked JJ workspace and persistent direct-child Pi session that exclusively performs the delegated task. Parent sessions only.",
-    promptSnippet: "Create a JJ workspace and delegate all work in it to a direct child",
+    description: "Create an isolated workspace and persistent direct-child Pi session that exclusively performs the delegated task. Prefers JJ and falls back to Git before creation. Parent sessions only.",
+    promptSnippet: "Create an isolated workspace and delegate all work in it to a direct child",
     promptGuidelines: [
-      "Use spawn_child whenever the user asks a parent session to create a JJ workspace for work; include the complete task and acceptance criteria so the child performs all workspace work.",
-      "Never run jj workspace add directly in a parent session; spawn_child owns workspace creation.",
+      "Use spawn_child whenever the user asks a parent session to create an isolated workspace for work; include the complete task and acceptance criteria so the child performs all workspace work.",
+      "Never run jj workspace add or git worktree add directly in a parent session; spawn_child owns workspace creation.",
       "After spawning requested children, call wait_for_children immediately instead of reading, editing, testing, or otherwise doing their work in the parent thread.",
     ],
     parameters: Type.Object({
@@ -218,7 +272,7 @@ export function registerSubagents(
         parentSessionId: ctx.sessionManager.getSessionId(),
         parentSessionFile: ctx.sessionManager.getSessionFile(),
       });
-      return result(`Spawned child ${record.id} (${record.modelPreferenceId}) in ${record.childWorkspacePath}. Parent work is paused; wait for the child or message it.`, record);
+      return result(`Spawned child ${record.id} (${record.modelPreferenceId}) in ${record.workspace.path}. Parent work is paused; wait for the child or message it.`, record);
     },
   });
 
@@ -324,7 +378,12 @@ export function registerSubagents(
       const existing = await orchestrator.child(params.delegationId);
       assertParent(existing, ctx.sessionManager.getSessionId());
       const record = await orchestrator.abandon(params.delegationId);
-      return result(`Abandoned child ${record.id}; its JJ changes were not automatically abandoned.`, record);
+      return result(
+        record.workspaceRetained
+          ? `Abandoned child ${record.id}; dirty workspace retained for recovery at ${record.workspaceRecoveryPath}.`
+          : `Abandoned child ${record.id}; workspace removed without deleting backend history.`,
+        record,
+      );
     },
   });
 
@@ -360,26 +419,11 @@ export function registerSubagents(
   });
 }
 
-function reconstructRoleState(entries: readonly SessionEntry[]): {
-  role: SubagentRole;
-  delegationId?: string;
-} {
-  for (let index = entries.length - 1; index >= 0; index--) {
-    const entry = entries[index];
-    if (entry.type !== "custom" || entry.customType !== ROLE_ENTRY) continue;
-    const data = entry.data as { role?: unknown; delegationId?: unknown } | undefined;
-    if (data?.role === "standalone" || data?.role === "parent" || data?.role === "child") {
-      return {
-        role: data.role,
-        ...(typeof data.delegationId === "string" ? { delegationId: data.delegationId } : {}),
-      };
-    }
-  }
-  return { role: "standalone" };
-}
-
-function hasRoleEntry(entries: readonly SessionEntry[], expected: SubagentRole): boolean {
-  return reconstructRoleState(entries).role === expected;
+function hasRoleEntry(
+  entries: Parameters<typeof reconstructSubagentRole>[0],
+  expected: SubagentRole,
+): boolean {
+  return reconstructSubagentRole(entries).role === expected;
 }
 
 function requireRole(actual: SubagentRole, expected: SubagentRole): void {
@@ -390,10 +434,13 @@ function assertParent(record: DelegationRecord, sessionId: string): void {
   if (record.parentSessionId !== sessionId) throw new Error(`Delegation ${record.id} does not belong to this parent session.`);
 }
 
-function requestsJjWorkspaceCreation(input: unknown): boolean {
+function requestsWorkspaceCreation(input: unknown): boolean {
   if (!input || typeof input !== "object" || Array.isArray(input)) return false;
   const command = (input as { command?: unknown }).command;
-  return typeof command === "string" && /(?:^|[;&|()\s])jj\b[^\n;&|]*\bworkspace\s+add(?:\s|$)/i.test(command);
+  return typeof command === "string" && (
+    /(?:^|[;&|()\s])jj\b[^\n;&|]*\bworkspace\s+add(?:\s|$)/i.test(command)
+    || /(?:^|[;&|()\s])git\b[^\n;&|]*\bworktree\s+add(?:\s|$)/i.test(command)
+  );
 }
 
 function entrySpawnsChild(entry: unknown): boolean {

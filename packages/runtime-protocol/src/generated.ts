@@ -34,10 +34,21 @@ export type QueueData = {
 
 export type ResponseFrameKind = "response";
 
-export type RuntimeCapabilities = {
+export type RuntimeCapabilities = RuntimeCapabilities_Serialize | RuntimeCapabilities_Deserialize;
+
+export type RuntimeCapabilities_Deserialize = {
 	methods: string[],
 	tools: string[],
 	commands: string[],
+	sessionCapabilities: SessionCapabilityState_Deserialize[],
+	extensionErrors: string[],
+};
+
+export type RuntimeCapabilities_Serialize = {
+	methods: string[],
+	tools: string[],
+	commands: string[],
+	sessionCapabilities: SessionCapabilityState_Serialize[],
 	extensionErrors: string[],
 };
 
@@ -95,14 +106,14 @@ export type RuntimeInitializeResult_Deserialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities,
+	capabilities: RuntimeCapabilities_Deserialize,
 };
 
 export type RuntimeInitializeResult_Serialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities,
+	capabilities: RuntimeCapabilities_Serialize,
 };
 
 export type RuntimeProtocolError = RuntimeProtocolError_Serialize | RuntimeProtocolError_Deserialize;
@@ -145,6 +156,24 @@ export type SessionCancelParams = {
 	turnId: string,
 };
 
+export type SessionCapabilityState = SessionCapabilityState_Serialize | SessionCapabilityState_Deserialize;
+
+export type SessionCapabilityState_Deserialize = {
+	id: string,
+	available: boolean,
+	serviceEnabled: boolean,
+	toolsExposed: boolean,
+	reason: string | null,
+};
+
+export type SessionCapabilityState_Serialize = {
+	id: string,
+	available: boolean,
+	serviceEnabled: boolean,
+	toolsExposed: boolean,
+	reason?: string | null,
+};
+
 export type SessionCreateParams = {
 	cwd: string,
 	agentDir: string,
@@ -168,6 +197,16 @@ export type SessionOpenParams = {
 export type SessionPromptParams = {
 	turnId: string,
 	text: string,
+};
+
+export type SessionRelocateWorkspaceParams = {
+	backend: WorkspaceBackend,
+	name: string,
+};
+
+export type SessionSetCapabilityParams = {
+	capabilityId: string,
+	enabled: boolean,
 };
 
 export type SessionSetModelParams = {
@@ -216,3 +255,5 @@ export type ToolLifecycleData_Serialize = {
 	toolName: string,
 	isError?: boolean | null,
 };
+
+export type WorkspaceBackend = "jj" | "git";

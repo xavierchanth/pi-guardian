@@ -66,7 +66,7 @@ export class PiChildProcessLauncher implements ChildLauncher {
     let child: ReturnType<typeof spawn> | undefined;
     try {
       child = spawn(invocation.command, invocation.args, {
-        cwd: record.childWorkspacePath,
+        cwd: record.workspace.path,
         detached: true,
         shell: false,
         stdio: [control, stdout, stderr],
@@ -147,9 +147,20 @@ function childPrompt(record: DelegationRecord): string {
   return [
     `Delegation: ${record.id}`,
     `Task: ${record.task}`,
-    `Workspace: ${record.childWorkspacePath}`,
-    `Base change: ${record.baseChangeId}`,
-    `Child root change: ${record.childRootChangeId}`,
+    `Workspace backend: ${record.workspace.backend}`,
+    `Workspace: ${record.workspace.path}`,
+    ...(record.workspace.backend === "jj"
+      ? [
+          `Base change: ${record.workspace.baseChangeId}`,
+          `Child root change: ${record.workspace.rootChangeId}`,
+        ]
+      : [
+          `Base commit: ${record.workspace.baseCommit}`,
+          `Child branch: ${record.workspace.branch}`,
+        ]),
+    ...(record.workspace.backend === "git"
+      ? ["Commit intended Git worktree changes on the delegated branch and leave the worktree clean before reporting."]
+      : []),
     "Complete only this delegated task. Accept parent messages as updated instructions. Before finishing, call report_to_parent exactly once with the outcome and validation evidence.",
   ].join("\n");
 }

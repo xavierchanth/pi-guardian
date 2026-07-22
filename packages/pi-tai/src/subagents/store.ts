@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { WorkspaceAttachment } from "../workspaces/domain.ts";
 import type { ModelPreferenceId } from "./domain.ts";
 
 export const DELEGATION_STATES = [
@@ -23,6 +24,8 @@ export interface ChildReport {
   validation?: string[];
   changedFiles?: string[];
   concerns?: string[];
+  childTipId?: string;
+  /** Legacy JJ-only alias retained when reading version-1 records. */
   childTipChangeId?: string;
   reportedAt: string;
 }
@@ -36,19 +39,14 @@ export interface ParentMessage {
 }
 
 export interface DelegationRecord {
-  version: 1;
+  version: 2;
   id: string;
   state: DelegationState;
   task: string;
   modelPreferenceId: ModelPreferenceId | string;
   parentSessionId: string;
   parentSessionFile?: string;
-  parentWorkspace: string;
-  repoRoot: string;
-  baseChangeId: string;
-  childWorkspace: string;
-  childWorkspacePath: string;
-  childRootChangeId: string;
+  workspace: WorkspaceAttachment;
   childSessionId?: string;
   childSessionFile?: string;
   childPid?: number;
@@ -58,6 +56,8 @@ export interface DelegationRecord {
   parentCollectedAt?: string;
   report?: ChildReport;
   conflictFiles?: string[];
+  workspaceRetained?: boolean;
+  workspaceRecoveryPath?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -114,7 +114,7 @@ export class FileDelegationStore implements DelegationStore {
       const next = {
         ...update(current),
         id: current.id,
-        version: 1 as const,
+        version: 2 as const,
         updatedAt: new Date().toISOString(),
       };
       const temporary = join(this.root, `.${id}.${process.pid}.${randomUUID()}.tmp`);
@@ -248,12 +248,60 @@ function parseRecord(value: unknown): DelegationRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid delegation record.");
   }
-  const record = value as Partial<DelegationRecord>;
-  if (record.version !== 1 || typeof record.id !== "string" || typeof record.state !== "string") {
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.state !== "string") {
     throw new Error("Invalid delegation record.");
   }
   if (!DELEGATION_STATES.includes(record.state as DelegationState)) {
     throw new Error(`Invalid delegation state: ${record.state}`);
   }
-  return record as DelegationRecord;
+  if (record.version === 2) {
+    const workspace = record.workspace as { backend?: unknown } | undefined;
+    if (workspace?.backend !== "jj" && workspace?.backend !== "git") {
+      throw new Error("Invalid delegation workspace.");
+    }
+    return record as unknown as DelegationRecord;
+  }
+  if (record.version !== 1) throw new Error("Invalid delegation record version.");
+  for (const field of [
+    "parentWorkspace",
+    "repoRoot",
+    "baseChangeId",
+    "childWorkspace",
+    "childWorkspacePath",
+    "childRootChangeId",
+  ]) {
+    if (typeof record[field] !== "string") throw new Error(`Invalid legacy delegation field: ${field}`);
+  }
+  const report = record.report && typeof record.report === "object"
+    ? {
+        ...(record.report as ChildReport),
+        childTipId: (record.report as ChildReport).childTipId
+          ?? (record.report as ChildReport).childTipChangeId,
+      }
+    : undefined;
+  const {
+    parentWorkspace,
+    repoRoot,
+    baseChangeId,
+    childWorkspace,
+    childWorkspacePath,
+    childRootChangeId,
+    ...rest
+  } = record;
+  return {
+    ...rest,
+    version: 2,
+    ...(report ? { report } : {}),
+    workspace: {
+      backend: "jj",
+      purpose: "delegation",
+      repoRoot: repoRoot as string,
+      sourceWorkspace: parentWorkspace as string,
+      baseChangeId: baseChangeId as string,
+      name: childWorkspace as string,
+      path: childWorkspacePath as string,
+      rootChangeId: childRootChangeId as string,
+    },
+  } as DelegationRecord;
 }

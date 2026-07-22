@@ -68,6 +68,31 @@ test("worker enforces initialization, unique IDs, and unsupported command respon
   ]);
 });
 
+test("worker exposes typed capability mutation and workspace relocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-runtime-capability-"));
+  const output = new MemoryWritable();
+  const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
+  await worker.handleValue(initialize);
+  await worker.handleValue(command("create", "session.create", {
+    cwd: root,
+    agentDir: join(root, "agent"),
+    sessionDir: join(root, "sessions"),
+    faux: true,
+  }));
+  await worker.handleValue(command("enable", "session.set_capability", {
+    capabilityId: "jj-workspaces",
+    enabled: true,
+  }));
+  await worker.handleValue(command("relocate", "session.relocate_workspace", {
+    backend: "jj",
+    name: "focused",
+  }));
+  const frames = output.frames();
+  assert.ok(frames.some((frame) => frame.id === "enable" && frame.result.sessionCapabilities[0].toolsExposed));
+  assert.ok(frames.some((frame) => frame.event === "session.capabilities_changed"));
+  assert.ok(frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")));
+});
+
 test("worker accepts a prompt without blocking cancellation and returns to idle", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-worker-"));
   const output = new MemoryWritable();

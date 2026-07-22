@@ -17,6 +17,8 @@ import {
   type SessionCreateParams,
   type SessionOpenParams,
   type SessionPromptParams,
+  type SessionRelocateWorkspaceParams,
+  type SessionSetCapabilityParams,
   type SessionSetModelParams,
   type SessionSetThinkingParams,
   type SessionTextParams,
@@ -177,6 +179,10 @@ export class RuntimeWorker {
         return this.setModel(command, params as SessionSetModelParams);
       case "session.set_thinking":
         return this.setThinking(command, params as SessionSetThinkingParams);
+      case "session.set_capability":
+        return this.setCapability(command, params as SessionSetCapabilityParams);
+      case "session.relocate_workspace":
+        return this.relocateWorkspace(command, params as SessionRelocateWorkspaceParams);
       case "session.dispose":
         return this.disposeSession(command, params as EmptyParams);
       case "runtime.shutdown":
@@ -305,6 +311,24 @@ export class RuntimeWorker {
   private async setThinking(command: RuntimeCommand, params: SessionSetThinkingParams): Promise<void> {
     this.requireSessionIdle();
     await this.writeSuccess(command, await this.port.setThinking(params));
+  }
+
+  private async setCapability(
+    command: RuntimeCommand,
+    params: SessionSetCapabilityParams,
+  ): Promise<void> {
+    this.requireSessionIdle();
+    await this.writeSuccess(command, await this.port.setCapability(params, (event) => this.emit(event)));
+  }
+
+  private async relocateWorkspace(
+    command: RuntimeCommand,
+    params: SessionRelocateWorkspaceParams,
+  ): Promise<void> {
+    this.requireSessionIdle();
+    const session = await this.port.relocateWorkspace(params, (event) => this.emit(event));
+    this.sessionId = session.sessionId;
+    await this.writeSuccess(command, session);
   }
 
   private async disposeSession(command: RuntimeCommand, _params: EmptyParams): Promise<void> {

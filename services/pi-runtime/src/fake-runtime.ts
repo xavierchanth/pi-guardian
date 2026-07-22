@@ -8,6 +8,8 @@ import type {
   SessionInfo,
   SessionOpenParams,
   SessionPromptParams,
+  SessionRelocateWorkspaceParams,
+  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -26,6 +28,7 @@ export class FakeRuntimePort implements RuntimePort {
       methods: [],
       tools: ["update_plan"],
       commands: ["continue", "plan-status"],
+      sessionCapabilities: [],
       extensionErrors: [],
     };
   }
@@ -93,6 +96,25 @@ export class FakeRuntimePort implements RuntimePort {
   async setThinking(params: SessionSetThinkingParams): Promise<ThinkingInfo> {
     this.thinking = { level: params.level };
     return this.thinking;
+  }
+
+  async setCapability(params: SessionSetCapabilityParams, emit: RuntimeEventSink): Promise<RuntimeCapabilities> {
+    const capabilities = await this.capabilities();
+    capabilities.sessionCapabilities = [{
+      id: params.capabilityId,
+      available: true,
+      serviceEnabled: params.enabled,
+      toolsExposed: params.enabled,
+    }];
+    emit({ event: "session.capabilities_changed", sessionId: this.session?.sessionId, data: { capabilities } });
+    return capabilities;
+  }
+
+  async relocateWorkspace(params: SessionRelocateWorkspaceParams, emit: RuntimeEventSink): Promise<SessionInfo> {
+    if (!this.session) throw new Error("No session is loaded.");
+    this.session = { ...this.session, cwd: join(this.session.cwd, params.name) };
+    emit({ event: "session.replaced", sessionId: this.session.sessionId, data: this.session });
+    return this.session;
   }
 
   async disposeSession(): Promise<void> {

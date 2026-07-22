@@ -164,9 +164,41 @@ pub struct SessionSetThinkingParams {
     pub level: ThinkingLevel,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionSetCapabilityParams {
+    pub capability_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceBackend {
+    Jj,
+    Git,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionRelocateWorkspaceParams {
+    pub backend: WorkspaceBackend,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EmptyParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCapabilityState {
+    pub id: String,
+    pub available: bool,
+    pub service_enabled: bool,
+    pub tools_exposed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -174,6 +206,7 @@ pub struct RuntimeCapabilities {
     pub methods: Vec<String>,
     pub tools: Vec<String>,
     pub commands: Vec<String>,
+    pub session_capabilities: Vec<SessionCapabilityState>,
     pub extension_errors: Vec<String>,
 }
 
@@ -285,7 +318,10 @@ pub fn protocol_types() -> Types {
         .register::<SessionCancelParams>()
         .register::<SessionSetModelParams>()
         .register::<SessionSetThinkingParams>()
+        .register::<SessionSetCapabilityParams>()
+        .register::<SessionRelocateWorkspaceParams>()
         .register::<EmptyParams>()
+        .register::<SessionCapabilityState>()
         .register::<RuntimeInitializeResult>()
         .register::<SessionInfo>()
         .register::<AcceptedResult>()

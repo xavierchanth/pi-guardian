@@ -58,7 +58,11 @@ lines.on("line", (line) => {
     if (
       event.success !== true ||
       !names.has("continue") ||
-      !names.has("sub-agents") ||
+      !names.has("cap:list") ||
+      !names.has("cap:subagents") ||
+      !names.has("cap:jj-workspaces") ||
+      !names.has("cap:git-worktrees") ||
+      names.has("sub-agents") ||
       legacy.some((name) => names.has(name))
     ) {
       console.error(`Unexpected extension commands: ${line}\n${stderr}`);

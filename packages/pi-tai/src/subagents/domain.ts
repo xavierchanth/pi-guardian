@@ -1,3 +1,5 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+
 export const SUBAGENT_ROLES = ["standalone", "parent", "child"] as const;
 export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
 
@@ -57,6 +59,24 @@ export function parseSubagentsCommand(input: string): SubagentsCommand | undefin
   return undefined;
 }
 
+export function reconstructSubagentRole(entries: readonly SessionEntry[]): {
+  role: SubagentRole;
+  delegationId?: string;
+} {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry.type !== "custom" || entry.customType !== "pi-tai-subagent-role") continue;
+    const data = entry.data as { role?: unknown; delegationId?: unknown } | undefined;
+    if (data?.role === "standalone" || data?.role === "parent" || data?.role === "child") {
+      return {
+        role: data.role,
+        ...(typeof data.delegationId === "string" ? { delegationId: data.delegationId } : {}),
+      };
+    }
+  }
+  return { role: "standalone" };
+}
+
 export function activeToolsForRole(
   activeTools: readonly string[],
   role: SubagentRole,
@@ -77,9 +97,10 @@ export interface ComposeInstructionOptions {
   delegation?: {
     id: string;
     parentSessionId: string;
+    backend: "jj" | "git";
     workspace: string;
-    baseChangeId: string;
-    childRootChangeId: string;
+    baseId: string;
+    rootId: string;
   };
 }
 
@@ -97,7 +118,7 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
     const facts = [`<pi_tai_subagents subagent_role="${options.role}">`];
     if (options.role === "parent") {
       facts.push(
-        '<delegation_policy jj_workspace_creation="spawn_child_only" parent_work_while_child_active="forbidden" next_action_after_spawn="wait_for_children" />',
+        '<delegation_policy workspace_creation="spawn_child_only" backend_selection="jj_then_git" parent_work_while_child_active="forbidden" next_action_after_spawn="wait_for_children" />',
       );
       for (const preference of options.modelPreferences ?? []) {
         facts.push(
@@ -107,7 +128,7 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
     }
     if (options.delegation) {
       facts.push(
-        `<delegation id="${escapeAttribute(options.delegation.id)}" parent_session_id="${escapeAttribute(options.delegation.parentSessionId)}" workspace="${escapeAttribute(options.delegation.workspace)}" base_change_id="${escapeAttribute(options.delegation.baseChangeId)}" child_root_change_id="${escapeAttribute(options.delegation.childRootChangeId)}" />`,
+        `<delegation id="${escapeAttribute(options.delegation.id)}" parent_session_id="${escapeAttribute(options.delegation.parentSessionId)}" backend="${options.delegation.backend}" workspace="${escapeAttribute(options.delegation.workspace)}" base_id="${escapeAttribute(options.delegation.baseId)}" root_id="${escapeAttribute(options.delegation.rootId)}" />`,
       );
     }
     facts.push("</pi_tai_subagents>");

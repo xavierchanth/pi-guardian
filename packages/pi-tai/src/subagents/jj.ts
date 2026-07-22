@@ -114,6 +114,63 @@ export class JjWorkspaceService {
     }
   }
 
+  async createRelocationWorkspace(
+    sourceCwd: string,
+    workspaceName: string,
+  ): Promise<CreatedChildWorkspace> {
+    validateWorkspaceName(workspaceName);
+    const repoRoot = line(await this.run(sourceCwd, ["root"]), "Jujutsu repository root");
+    const sourceChangeId = line(
+      await this.run(sourceCwd, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),
+      "source working-copy change ID",
+    );
+    const sourceWorkspace = currentWorkspace(
+      await this.run(sourceCwd, ["workspace", "list", "-T", WORKSPACE_TEMPLATE]),
+      sourceChangeId,
+    );
+    const sourceDiff = await this.run(sourceCwd, ["diff", "-r", "@", "--summary"]);
+    if (sourceDiff.trim()) {
+      throw new Error("Workspace relocation requires a fresh empty source @. Checkpoint the current work first.");
+    }
+    const workspacesRoot = join(repoRoot, ".jj", "workspaces");
+    const workspacePath = join(workspacesRoot, workspaceName);
+    await this.files.mkdir(workspacesRoot);
+    await this.run(sourceCwd, [
+      "workspace",
+      "add",
+      workspacePath,
+      "--name",
+      workspaceName,
+      "-r",
+      sourceChangeId,
+    ]);
+    try {
+      const rootChangeId = line(
+        await this.run(workspacePath, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),
+        "successor workspace root change ID",
+      );
+      const actualBase = line(
+        await this.run(workspacePath, ["log", "-r", "@-", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),
+        "successor workspace parent change ID",
+      );
+      if (actualBase !== sourceChangeId) {
+        throw new Error(`Successor workspace parent mismatch: expected ${sourceChangeId}, received ${actualBase}.`);
+      }
+      return {
+        repoRoot,
+        parentWorkspace: sourceWorkspace,
+        baseChangeId: sourceChangeId,
+        childWorkspace: workspaceName,
+        childWorkspacePath: workspacePath,
+        childRootChangeId: rootChangeId,
+      };
+    } catch (error) {
+      await this.run(sourceCwd, ["workspace", "forget", workspaceName]).catch(() => undefined);
+      await this.files.rm(workspacePath).catch(() => undefined);
+      throw error;
+    }
+  }
+
   async currentChangeId(cwd: string): Promise<string> {
     return line(
       await this.run(cwd, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]),

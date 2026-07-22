@@ -11,6 +11,7 @@
       "methods": ["runtime.initialize", "session.create"],
       "tools": ["update_plan"],
       "commands": ["continue", "plan-status"],
+      "sessionCapabilities": [],
       "extensionErrors": []
     }
   }

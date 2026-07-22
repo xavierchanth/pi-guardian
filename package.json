@@ -1,7 +1,7 @@
 {
   "name": "pi-tai",
   "version": "0.1.0",
-  "description": "A guarded Pi distribution with structured work context, JJ-isolated subagents, independent session naming, and terminal-aware themes.",
+  "description": "A guarded Pi distribution with structured work context, capability-gated isolated workspaces and subagents, independent session naming, and terminal-aware themes.",
   "type": "module",
   "keywords": [
     "pi-package",

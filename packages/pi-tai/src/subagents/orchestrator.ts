@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ModelPreference } from "./domain.ts";
 import { DEFAULT_MODEL_PREFERENCES } from "./domain.ts";
 import type { ChildLauncher } from "./launcher.ts";
-import type { JjWorkspaceService } from "./jj.ts";
+import type { WorkspacePort } from "../workspaces/domain.ts";
 import {
   isResolvedDelegation,
   waitForChildren,
@@ -22,18 +22,18 @@ export interface SpawnChildRequest {
 
 export class SubagentOrchestrator {
   private readonly store: DelegationStore;
-  private readonly jj: JjWorkspaceService;
+  private readonly workspace: WorkspacePort;
   private readonly launcher: ChildLauncher;
   private readonly preferences: readonly ModelPreference[];
 
   constructor(options: {
     store: DelegationStore;
-    jj: JjWorkspaceService;
+    workspace: WorkspacePort;
     launcher: ChildLauncher;
     preferences?: readonly ModelPreference[];
   }) {
     this.store = options.store;
-    this.jj = options.jj;
+    this.workspace = options.workspace;
     this.launcher = options.launcher;
     this.preferences = options.preferences ?? DEFAULT_MODEL_PREFERENCES;
   }
@@ -44,22 +44,21 @@ export class SubagentOrchestrator {
     const preference = this.preferences.find((entry) => entry.id === request.modelPreferenceId);
     if (!preference) throw new Error(`Unknown model preference: ${request.modelPreferenceId}`);
     const id = delegationId(task);
-    const workspace = await this.jj.createChildWorkspace(request.parentCwd, id);
+    const workspace = await this.workspace.create({
+      cwd: request.parentCwd,
+      name: id,
+      purpose: "delegation",
+    });
     const now = new Date().toISOString();
     const record: DelegationRecord = {
-      version: 1,
+      version: 2,
       id,
       state: "created",
       task,
       modelPreferenceId: preference.id,
       parentSessionId: request.parentSessionId,
       ...(request.parentSessionFile ? { parentSessionFile: request.parentSessionFile } : {}),
-      parentWorkspace: workspace.parentWorkspace,
-      repoRoot: workspace.repoRoot,
-      baseChangeId: workspace.baseChangeId,
-      childWorkspace: workspace.childWorkspace,
-      childWorkspacePath: workspace.childWorkspacePath,
-      childRootChangeId: workspace.childRootChangeId,
+      workspace,
       createdAt: now,
       updatedAt: now,
     };
@@ -135,19 +134,26 @@ export class SubagentOrchestrator {
     }));
   }
 
-  async report(id: string, report: Omit<ChildReport, "reportedAt" | "childTipChangeId">): Promise<DelegationRecord> {
+  async report(
+    id: string,
+    report: Omit<ChildReport, "reportedAt" | "childTipId" | "childTipChangeId">,
+  ): Promise<DelegationRecord> {
     const record = await this.child(id);
     if (isResolvedDelegation(record)) {
       if (record.report) return record;
       throw new Error(`Delegation is already resolved: ${record.state}`);
     }
-    const childTipChangeId = await this.jj.currentChangeId(record.childWorkspacePath);
+    const tip = await this.workspace.captureTip(record.workspace);
+    if (record.workspace.backend === "git" && !tip.clean) {
+      throw new Error("Git child must commit or otherwise clean its worktree before reporting.");
+    }
     return this.store.update(id, (current) => ({
       ...current,
       state: report.outcome,
       report: {
         ...report,
-        childTipChangeId,
+        childTipId: tip.id,
+        ...(record.workspace.backend === "jj" ? { childTipChangeId: tip.id } : {}),
         reportedAt: new Date().toISOString(),
       },
     }));
@@ -159,7 +165,7 @@ export class SubagentOrchestrator {
       if (record.state !== "integrated_pending_verification" && record.state !== "conflicted") {
         throw new Error("Child integration can be finalized only after integration, conflict resolution, and parent verification.");
       }
-      await this.jj.finalizeChildWorkspace(record);
+      await this.workspace.finalize(record.workspace);
       await this.launcher.cleanup(record);
       return this.store.update(id, (current) => ({ ...current, state: "integrated" }));
     }
@@ -169,7 +175,7 @@ export class SubagentOrchestrator {
     if (record.childPid && isProcessAlive(record.childPid)) {
       await waitForProcessExit(record.childPid, 5_000);
     }
-    const result = await this.jj.integrateChildWorkspace(record);
+    const result = await this.workspace.integrate(record.workspace);
     return this.store.update(id, (current) => ({
       ...current,
       state: result.conflicted ? "conflicted" : "integrated_pending_verification",
@@ -186,9 +192,14 @@ export class SubagentOrchestrator {
         // Process exited between reconciliation and cancellation.
       }
     }
-    await this.jj.abandonChildWorkspace(record);
+    const disposition = await this.workspace.abandon(record.workspace);
     await this.launcher.cleanup(record);
-    return this.store.update(id, (current) => ({ ...current, state: "abandoned" }));
+    return this.store.update(id, (current) => ({
+      ...current,
+      state: "abandoned",
+      workspaceRetained: !disposition.removed,
+      ...(disposition.recoveryPath ? { workspaceRecoveryPath: disposition.recoveryPath } : {}),
+    }));
   }
 
   async cleanupChildControl(id: string): Promise<void> {

@@ -21,6 +21,8 @@ import type {
   SessionInfo,
   SessionOpenParams,
   SessionPromptParams,
+  SessionRelocateWorkspaceParams,
+  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -28,6 +30,7 @@ import type {
 } from "@pi-tai/runtime-protocol";
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
+import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
 import { createPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
@@ -42,6 +45,7 @@ export class PiSdkRuntimePort implements RuntimePort {
   private runtime?: AgentSessionRuntime;
   private unsubscribe?: () => void;
   private extensionErrors: string[] = [];
+  private capabilityController?: SessionCapabilityController;
   private active?: { commandId: string; turnId: string; emit: RuntimeEventSink };
   private readonly diagnostics: DiagnosticSink;
 
@@ -55,6 +59,7 @@ export class PiSdkRuntimePort implements RuntimePort {
         methods: [],
         tools: ["update_plan"],
         commands: ["continue", "plan-status"],
+        sessionCapabilities: [],
         extensionErrors: [...this.extensionErrors],
       };
     }
@@ -63,6 +68,13 @@ export class PiSdkRuntimePort implements RuntimePort {
       methods: [],
       tools: this.runtime.session.getAllTools().map((tool) => tool.name).sort(),
       commands: extensionRuntime.getCommands().map((command) => command.name).sort(),
+      sessionCapabilities: this.capabilityController?.snapshot().capabilities.map((capability) => ({
+        id: capability.id,
+        available: capability.available,
+        serviceEnabled: capability.serviceEnabled,
+        toolsExposed: capability.toolsExposed,
+        ...(capability.reason ? { reason: capability.reason } : {}),
+      })) ?? [],
       extensionErrors: [...this.extensionErrors],
     };
   }
@@ -154,12 +166,50 @@ export class PiSdkRuntimePort implements RuntimePort {
     return { level: session.thinkingLevel };
   }
 
+  async setCapability(
+    params: SessionSetCapabilityParams,
+    emit: RuntimeEventSink,
+  ): Promise<RuntimeCapabilities> {
+    const known = this.capabilityController?.snapshot().capabilities.some(
+      (capability) => capability.id === params.capabilityId,
+    );
+    if (!known) throw new Error(`Unknown capability: ${params.capabilityId}`);
+    await this.requireSession().prompt(
+      `/cap:${params.capabilityId} ${params.enabled ? "on" : "off"}`,
+      { source: "rpc" },
+    );
+    const capabilities = await this.capabilities();
+    emit({
+      event: "session.capabilities_changed",
+      sessionId: this.requireSession().sessionId,
+      data: { capabilities },
+    });
+    return capabilities;
+  }
+
+  async relocateWorkspace(
+    params: SessionRelocateWorkspaceParams,
+    emit: RuntimeEventSink,
+  ): Promise<SessionInfo> {
+    const command = params.backend === "jj" ? "jj-workspaces" : "git-worktrees";
+    await this.requireSession().prompt(`/cap:${command} new ${params.name}`, { source: "rpc" });
+    if (!this.runtime) throw new Error("Session runtime was disposed during relocation.");
+    const info = sessionInfo(this.runtime.session, this.runtime.cwd);
+    emit({
+      event: "session.replaced",
+      sessionId: info.sessionId,
+      data: { ...info, capabilities: await this.capabilities() },
+    });
+    return info;
+  }
+
   async disposeSession(): Promise<void> {
     this.active = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     if (this.runtime) await this.runtime.dispose();
     this.runtime = undefined;
+    this.capabilityController = undefined;
   }
 
   async shutdown(): Promise<void> {
@@ -217,13 +267,19 @@ export class PiSdkRuntimePort implements RuntimePort {
     const modelRuntime = this.modelRuntime;
     const model = this.faux?.getModel();
     if (!modelRuntime || !model) throw new Error("Faux model runtime is unavailable.");
-    const hostedExtension = createPiTaiExtension(undefined, () => ({
-      config: createPiTaiConfigService(agentDir),
-      workContext: createPiSessionWorkContextStore(),
-      titleGenerator: async () => "Hosted session",
-      queryTerminalBackground: async () => { throw new Error("TTY access is disabled in hosted mode."); },
-      notificationSender: () => {},
-    }));
+    const hostedExtension = createPiTaiExtension(undefined, () => {
+      const capabilities = new SessionCapabilityController();
+      this.capabilityController = capabilities;
+      return {
+        config: createPiTaiConfigService(agentDir),
+        workContext: createPiSessionWorkContextStore(),
+        titleGenerator: async () => "Hosted session",
+        queryTerminalBackground: async () => { throw new Error("TTY access is disabled in hosted mode."); },
+        notificationSender: () => {},
+        capabilities,
+        agentDir,
+      };
+    });
     const factory: CreateAgentSessionRuntimeFactory = async (options) => {
       const services = await createAgentSessionServices({
         cwd: options.cwd,
@@ -276,9 +332,22 @@ export class PiSdkRuntimePort implements RuntimePort {
 
   private async bindSession(session: AgentSession): Promise<void> {
     this.unsubscribe?.();
+    const runtime = this.runtime;
+    if (!runtime) throw new Error("Session runtime is unavailable during extension binding.");
     await session.bindExtensions({
       mode: "rpc",
       uiContext: createHeadlessUiContext(this.diagnostics),
+      commandContextActions: {
+        waitForIdle: () => session.waitForIdle(),
+        newSession: async (options) => runtime.newSession(options),
+        fork: async (entryId, options) => {
+          const result = await runtime.fork(entryId, options);
+          return { cancelled: result.cancelled };
+        },
+        navigateTree: async (targetId, options) => session.navigateTree(targetId, options),
+        switchSession: async (sessionPath, options) => runtime.switchSession(sessionPath, options),
+        reload: async () => session.reload(),
+      },
       onError: (error) => {
         this.extensionErrors.push(`${error.extensionPath}:${error.event}:${error.error}`);
       },

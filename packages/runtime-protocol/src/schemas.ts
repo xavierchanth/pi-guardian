@@ -15,10 +15,13 @@ import type {
   RuntimeProtocolError,
   RuntimeResponse,
   SessionCancelParams,
+  SessionCapabilityState,
   SessionCreateParams,
   SessionInfo,
   SessionOpenParams,
   SessionPromptParams,
+  SessionRelocateWorkspaceParams,
+  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -130,12 +133,31 @@ export const SessionSetThinkingParamsSchema: z.ZodType<SessionSetThinkingParams>
   level: ThinkingLevelSchema,
 }).strict();
 
+export const SessionSetCapabilityParamsSchema: z.ZodType<SessionSetCapabilityParams> = z.object({
+  capabilityId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+  enabled: z.boolean(),
+}).strict();
+
+export const SessionRelocateWorkspaceParamsSchema: z.ZodType<SessionRelocateWorkspaceParams> = z.object({
+  backend: z.enum(["jj", "git"]),
+  name: z.string().regex(/^[a-z0-9][a-z0-9-]{0,47}$/),
+}).strict();
+
 export const EmptyParamsSchema: z.ZodType<EmptyParams> = strictEmpty;
+
+export const SessionCapabilityStateSchema: z.ZodType<SessionCapabilityState> = z.object({
+  id: nonEmptyString,
+  available: z.boolean(),
+  serviceEnabled: z.boolean(),
+  toolsExposed: z.boolean(),
+  reason: nonEmptyString.optional(),
+}).strict();
 
 export const RuntimeCapabilitiesSchema: z.ZodType<RuntimeCapabilities> = z.object({
   methods: z.array(nonEmptyString),
   tools: z.array(nonEmptyString),
   commands: z.array(nonEmptyString),
+  sessionCapabilities: z.array(SessionCapabilityStateSchema),
   extensionErrors: z.array(nonEmptyString),
 }).strict();
 

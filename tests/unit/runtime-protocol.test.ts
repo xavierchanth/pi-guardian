@@ -26,6 +26,14 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
   });
   assert.equal(RuntimeResponseSchema.parse(fixture("initialize-response.json")).ok, true);
   assert.equal(RuntimeEventSchema.parse(fixture("text-delta-event.json")).event, "assistant.text_delta");
+  assert.deepEqual(decodeMethodParams("session.set_capability", {
+    capabilityId: "jj-workspaces",
+    enabled: true,
+  }), { capabilityId: "jj-workspaces", enabled: true });
+  assert.deepEqual(decodeMethodParams("session.relocate_workspace", {
+    backend: "git",
+    name: "focused-task",
+  }), { backend: "git", name: "focused-task" });
 });
 
 test("generic envelopes preserve unsupported methods while known params validate separately", () => {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdtemp, mkdir, open, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
 import {
   DEFAULT_MODEL_PREFERENCES,
   ROLE_TOOL_NAMES,
@@ -24,6 +25,10 @@ import {
   type JjCommandRunner,
 } from "../../packages/pi-tai/src/subagents/jj.ts";
 import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
+import { GitWorktreePort } from "../../packages/pi-tai/src/workspaces/git.ts";
+import { JjWorkspacePort } from "../../packages/pi-tai/src/workspaces/jj.ts";
+import { PreferredWorkspacePort } from "../../packages/pi-tai/src/workspaces/preferred.ts";
+import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
 import { PiChildProcessLauncher } from "../../packages/pi-tai/src/subagents/launcher.ts";
 import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
 import type { DelegationStore } from "../../packages/pi-tai/src/subagents/store.ts";
@@ -65,7 +70,7 @@ test("subagent roles expose only their own tools", () => {
   }
 });
 
-test("sub-agents command defaults to on and accepts explicit status/off", () => {
+test("cap:subagents command defaults to on and accepts explicit status/off", () => {
   assert.equal(parseSubagentsCommand(""), "on");
   assert.equal(parseSubagentsCommand("on"), "on");
   assert.equal(parseSubagentsCommand("status"), "status");
@@ -92,7 +97,8 @@ test("instruction composition skips empty authored files and injects factual rol
   assert.match(parent, /Omakase/);
   assert.match(parent, /Parent taste/);
   assert.match(parent, /subagent_role="parent"/);
-  assert.match(parent, /jj_workspace_creation="spawn_child_only"/);
+  assert.match(parent, /workspace_creation="spawn_child_only"/);
+  assert.match(parent, /backend_selection="jj_then_git"/);
   assert.match(parent, /next_action_after_spawn="wait_for_children"/);
   assert.match(parent, /id="thinker"/);
   assert.match(parent, /gpt-5\.6-sol/);
@@ -114,20 +120,63 @@ test("file delegation store updates records atomically and wait snapshots direct
   assert.equal(persisted.state, "completed");
 });
 
+test("version-1 JJ delegation records migrate to tagged version-2 workspaces", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-delegation-migration-"));
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, "legacy.json"), JSON.stringify({
+    version: 1,
+    id: "legacy",
+    state: "completed",
+    task: "legacy task",
+    modelPreferenceId: "worker",
+    parentSessionId: "parent-session",
+    parentWorkspace: "default",
+    repoRoot: "/repo",
+    baseChangeId: "base",
+    childWorkspace: "legacy-child",
+    childWorkspacePath: "/repo/.jj/workspaces/legacy-child",
+    childRootChangeId: "root",
+    report: {
+      outcome: "completed",
+      summary: "done",
+      childTipChangeId: "tip",
+      reportedAt: new Date(0).toISOString(),
+    },
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  }));
+  const migrated = await new FileDelegationStore(root).get("legacy");
+  assert.equal(migrated?.version, 2);
+  assert.deepEqual(migrated?.workspace, {
+    backend: "jj",
+    purpose: "delegation",
+    repoRoot: "/repo",
+    sourceWorkspace: "default",
+    baseChangeId: "base",
+    name: "legacy-child",
+    path: "/repo/.jj/workspaces/legacy-child",
+    rootChangeId: "root",
+  });
+  assert.equal(migrated?.report?.childTipId, "tip");
+});
+
 test("orchestrator persists child launch, wakes parent wait from report, and captures child tip", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-orchestrator-"));
   const store = new FileDelegationStore(root);
-  const jj = {
-    createChildWorkspace: async (_cwd: string, childWorkspace: string) => ({
+  const workspace = {
+    kind: "jj",
+    create: async ({ name }: { name: string }) => ({
+      backend: "jj",
+      purpose: "delegation",
       repoRoot: "/repo",
-      parentWorkspace: "default",
+      sourceWorkspace: "default",
       baseChangeId: "base",
-      childWorkspace,
-      childWorkspacePath: `/repo/.jj/workspaces/${childWorkspace}`,
-      childRootChangeId: "child-root",
+      name,
+      path: `/repo/.jj/workspaces/${name}`,
+      rootChangeId: "child-root",
     }),
-    currentChangeId: async () => "child-tip",
-  } as unknown as JjWorkspaceService;
+    captureTip: async () => ({ id: "child-tip", clean: true }),
+  } as unknown as WorkspacePort;
   const childMessages: Array<{ message: string; delivery: string }> = [];
   const launcher = {
     launch: async () => ({
@@ -140,7 +189,7 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
     },
     cleanup: async () => undefined,
   };
-  const orchestrator = new SubagentOrchestrator({ store, jj, launcher });
+  const orchestrator = new SubagentOrchestrator({ store, workspace, launcher });
   const spawned = await orchestrator.spawnChild({
     task: "Implement the bounded change",
     modelPreferenceId: "worker",
@@ -148,7 +197,8 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
     parentSessionId: "parent-session",
   });
   assert.equal(spawned.state, "running");
-  assert.equal(spawned.childRootChangeId, "child-root");
+  assert.equal(spawned.workspace.backend, "jj");
+  assert.equal(spawned.workspace.backend === "jj" && spawned.workspace.rootChangeId, "child-root");
   assert.equal(spawned.childControlPath, "/tmp/child.fifo");
 
   const messaged = await orchestrator.message(spawned.id, "Focus on the failing test", "steer");
@@ -161,8 +211,41 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
     summary: "done",
     validation: ["tests pass"],
   });
-  assert.equal(reported.report?.childTipChangeId, "child-tip");
+  assert.equal(reported.report?.childTipId, "child-tip");
   assert.deepEqual((await waiting).map((record) => record.state), ["completed"]);
+});
+
+test("subagent workspace selection falls back to Git before child launch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-git-child-"));
+  const repo = join(root, "repo");
+  await mkdir(repo);
+  await execFileAsync("git", ["init", "-q"], { cwd: repo });
+  await writeFile(join(repo, "file.txt"), "base\n");
+  await execFileAsync("git", ["add", "file.txt"], { cwd: repo });
+  await execFileAsync("git", ["-c", "user.name=Pi Tai", "-c", "user.email=pi@example.invalid", "commit", "-qm", "base"], { cwd: repo });
+  const jjUnavailable = {
+    kind: "jj",
+    probe: async () => ({ available: false, reason: "not jj" }),
+  } as unknown as WorkspacePort;
+  const git = new GitWorktreePort(join(root, "managed"));
+  const workspace = new PreferredWorkspacePort(jjUnavailable, git);
+  const store = new FileDelegationStore(join(root, "delegations"));
+  const launcher = {
+    launch: async () => ({ pid: 999_999_999, logPath: "/tmp/child.log", controlPath: "/tmp/child.fifo" }),
+    message: async () => {},
+    cleanup: async () => {},
+  };
+  const orchestrator = new SubagentOrchestrator({ store, workspace, launcher });
+  const spawned = await orchestrator.spawnChild({
+    task: "Git fallback task",
+    modelPreferenceId: "worker",
+    parentCwd: repo,
+    parentSessionId: "parent",
+  });
+  assert.equal(spawned.workspace.backend, "git");
+  assert.equal(spawned.workspace.purpose, "delegation");
+  assert.equal(spawned.workspace.backend === "git" && spawned.workspace.branch.startsWith("pi-tai/delegation/"), true);
+  await git.abandon(spawned.workspace);
 });
 
 test("persistent child control channel writes RPC steering commands", async () => {
@@ -212,9 +295,31 @@ test("subagent extension starts standalone and enables parent tools only through
   const orchestrator = {
     children: async () => [],
   } as unknown as SubagentOrchestrator;
+  const capabilities = new SessionCapabilityController();
+  capabilities.bindTools({
+    getActiveTools: () => [...active],
+    setActiveTools: (next) => { active = [...next]; },
+  });
+  capabilities.register({
+    id: "jj-workspaces",
+    label: "JJ Workspaces",
+    description: "JJ",
+    toolNames: ["create_jj_workspace"],
+  });
+  capabilities.register({
+    id: "git-worktrees",
+    label: "Git Worktrees",
+    description: "Git",
+    toolNames: ["create_git_worktree"],
+  });
   registerSubagents(pi, {
     store: {} as DelegationStore,
     orchestrator,
+    capabilities,
+    workspace: {
+      kind: "jj",
+      probe: async () => ({ available: true }),
+    } as unknown as WorkspacePort,
     loadInstructions: () => ({ system: "", parent: "", child: "" }),
   });
   const notifications: string[] = [];
@@ -235,8 +340,11 @@ test("subagent extension starts standalone and enables parent tools only through
   assert.ok(tools.has("message_child"));
   assert.ok(tools.has("report_to_parent"));
 
-  await commands.get("sub-agents")?.("", ctx);
+  await commands.get("cap:subagents")?.("", ctx);
   assert.deepEqual(active, ["read", ...PARENT_TOOLS]);
+  assert.equal(capabilities.isServiceEnabled("jj-workspaces"), true);
+  assert.equal(capabilities.isToolExposed("jj-workspaces"), false);
+  assert.equal(active.includes("create_jj_workspace"), false);
   assert.match(notifications.at(-1) ?? "", /enabled/);
 
   const directWorkspace = await handlers.get("tool_call")?.[0]({
@@ -319,13 +427,17 @@ test("JJ integration moves the recorded root and all descendants before parent @
     mkdir: async () => undefined,
     rm: async () => undefined,
   });
+  const port = new JjWorkspacePort(service);
 
-  const result = await service.integrateChildWorkspace({
+  const result = await port.integrate({
+    backend: "jj",
+    purpose: "delegation",
     repoRoot: "/repo",
-    parentWorkspace: "default",
-    childWorkspace: "task-one",
-    childWorkspacePath: "/repo/.jj/workspaces/task-one",
-    childRootChangeId: "child-root",
+    sourceWorkspace: "default",
+    baseChangeId: "base",
+    name: "task-one",
+    path: "/repo/.jj/workspaces/task-one",
+    rootChangeId: "child-root",
   });
   assert.equal(result.conflicted, false);
   assert.deepEqual(calls[2], {
@@ -336,18 +448,22 @@ test("JJ integration moves the recorded root and all descendants before parent @
 
 function record(id: string, state: DelegationRecord["state"]): DelegationRecord {
   return {
-    version: 1,
+    version: 2,
     id,
     state,
     task: `task ${id}`,
     modelPreferenceId: "worker",
     parentSessionId: "parent-session",
-    parentWorkspace: "default",
-    repoRoot: "/repo",
-    baseChangeId: "base",
-    childWorkspace: `child-${id}`,
-    childWorkspacePath: `/repo/.jj/workspaces/child-${id}`,
-    childRootChangeId: `root-${id}`,
+    workspace: {
+      backend: "jj",
+      purpose: "delegation",
+      repoRoot: "/repo",
+      sourceWorkspace: "default",
+      baseChangeId: "base",
+      name: `child-${id}`,
+      path: `/repo/.jj/workspaces/child-${id}`,
+      rootChangeId: `root-${id}`,
+    },
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   };
