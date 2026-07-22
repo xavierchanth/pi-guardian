@@ -2,7 +2,7 @@
 
 ## Status
 
-Stage 2 design approved. The proof-first execution plan is defined in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). Production Host and ACP hardening remains gated on review of the architecture proofs.
+Stage 2 design approved. The proof-first execution plan is defined in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md). Production Host and ACP hardening remains gated on review of the architecture proofs. The Zed-facing wire contract is ACP v2 draft-first as recorded in [ADR 0006](adr/0006-target-acp-v2-draft.md) and [ACP_SCOPE.md](ACP_SCOPE.md).
 
 This document defines Pi-Tai's Pi-specific companion architecture. Pi is the only initial agent runtime. Zed, desktop, and mobile are clients of one broker-owned Pi session rather than independent session owners.
 
@@ -25,7 +25,7 @@ The core promise is:
 
 ```mermaid
 flowchart TB
-    Z["Zed ACP client"] -->|"ACP over stdio"| S["pi-tai-acp thin shim"]
+    Z["Zed ACP v2 client"] -->|"ACP v2 JSON-RPC over stdio"| S["pi-tai-acp thin shim"]
     S -->|"Authenticated local IPC"| H["Pi-Tai Host tray app"]
     D["Pi-Tai Desktop\nTauri + React/Vite"] -->|"Local admin IPC"| H
     M["Pi-Tai Mobile\nTauri + React/Vite"] -.->|"HTTPS commands + event stream over Tailscale"| H
@@ -86,11 +86,12 @@ The executable configured as a Zed external agent is deliberately thin.
 
 Responsibilities:
 
-- implement ACP initialization and capability negotiation;
-- translate Zed requests into host IPC commands;
+- implement ACP v2 initialization, required implementation metadata, and capability negotiation;
+- translate Zed requests into Host IPC commands without making prompt requests own foreground work;
 - attach a Zed connection to broker sessions;
-- relay live and replayed host events as semantic ACP updates;
-- expose broker session list/load/resume/close behavior;
+- relay live and replayed Host events as stable-ID ACP v2 item updates, including updates while idle;
+- expose broker `session/new`, list, resume, close, prompt, and cancel behavior;
+- distinguish process disconnect (detach only) from explicit `session/close` (cancel and release activation);
 - report actionable host-not-running and version-mismatch errors.
 
 The shim owns no durable state and does not launch Pi. Zed may terminate it without terminating the broker session.
@@ -115,7 +116,7 @@ Initial session status surface:
 - title and stable broker session ID;
 - workspace;
 - model;
-- working, waiting, completed, interrupted, or failed state;
+- foreground idle, running, or requires-action state, independently from runtime unloaded, ready, interrupted, or failed health;
 - connected client kinds;
 - current active client;
 - last activity.
@@ -136,8 +137,9 @@ The actor owns:
 
 - stable broker session identity;
 - Pi session identity and runtime generation;
-- current session and turn state;
+- session activation, foreground-operation state, and runtime health as independent facts;
 - ordered event sequence and revision;
+- stable message, tool-call, terminal, plan, interaction, and foreground-operation identities;
 - connected client attachments;
 - active-client attribution and control epoch;
 - pending questions or permissions;
@@ -148,7 +150,24 @@ Every authorized client may observe and submit supported interactions. An accept
 
 Concurrent commands based on the same revision do not both win: the first durable command advances the revision and the other receives a conflict with current state. Cancellation and interaction answers target durable IDs and are idempotent.
 
-Only one prompt turn may run per session. Follow-up text may be retained as a local draft, but the host does not silently enqueue a second turn.
+Only one foreground Pi operation may be `Running` or `RequiresAction` per session initially. A second prompt is rejected while foreground work is not idle; follow-up text may be retained as a local draft, but the Host does not silently enqueue it. This does not constrain the event stream: background session-item updates may continue while foreground state is idle.
+
+## ACP v2 lifecycle projection
+
+ACP v2 prompt acceptance and foreground completion are separate transitions:
+
+1. The Host durably accepts a prompt, allocates the foreground-operation ID and canonical user-message ID, and records the user item.
+2. The shim queues the empty `session/prompt` response before releasing updates for that accepted operation.
+3. The Host emits the accepted user message and moves foreground state to `Running`.
+4. Permissions or questions move the same operation to `RequiresAction`; resolution moves it back to `Running`.
+5. Pi completion or cancellation moves foreground state to `Idle` with a stop reason.
+6. Other session updates remain legal before, during, and after those transitions.
+
+The Host does not persist an “active ACP prompt request” because that request has already completed. ACP `session/cancel` is resolved atomically against the current durable foreground-operation ID. Explicit `session/close` cancels foreground work and releases that ACP activation; EOF, broken pipe, or shim termination only removes the attachment.
+
+`session/resume` is the only ACP reattachment method. Resume without `replayFrom` attaches without history. Resume with `replayFrom: { type: "start" }` uses a Host replay high-water mark: history through the mark is emitted once in order, the response is queued, and buffered later events are then released into live delivery without duplication. Pi-Tai does not implement v1 `session/load`.
+
+Wire patch state is not reused as a product model. The ACP adapter explicitly distinguishes missing, clear (`null`), replacement, and append operations, then converts them to validated canonical item updates. Replay prefers complete message/tool/terminal/plan snapshots where the v2 contract permits it.
 
 ## Goal and plan ownership
 
@@ -186,7 +205,7 @@ WorkContextStore
 
 The host uses SQLite in WAL mode as the sole owner of broker product state. Pi session files remain the durable model transcript and are mapped to broker session IDs.
 
-Normalized events are canonical for cross-client replay and presentation. Raw ACP or Pi logs are diagnostic artifacts, not the mobile API contract.
+Normalized events are canonical for cross-client replay and presentation. They retain stable semantic item IDs and explicit upsert/append/state-transition meaning rather than generated ACP structs. Raw ACP or Pi logs are diagnostic artifacts, not persistence records or the mobile API contract.
 
 The UI distinguishes:
 
@@ -208,7 +227,7 @@ apps/
 ├── host/                    # Tauri tray application
 └── mobile/                  # Tauri Mobile + React/Vite, later
 bins/
-└── acp/                     # thin Zed ACP shim
+└── acp/                     # thin experimental ACP v2 Zed shim
 services/
 └── pi-runtime/              # TypeScript, Pi SDK in-process
 packages/
@@ -233,7 +252,7 @@ Desktop and mobile should share API and product semantics, but neither serialize
 1. **Terminal refresh:** complete and manually accept standalone Pi-Tai.
 2. **Architecture proof:** validate Tauri tray lifecycle, bundled TypeScript Pi SDK helper, local IPC, Zed launch, event ordering, disconnection, and recovery.
 3. **Durable host kernel:** one actor, SQLite events, one Pi session, replay, idempotent commands, and diagnostic CLI.
-4. **Zed continuity:** thin ACP shim, session discovery/load, rich output, plans, titles, models, Guardian, and cancellation.
+4. **Zed continuity:** thin ACP v2 shim, session discovery/resume with optional replay, rich output, plans, titles, config options, Guardian, and cancellation.
 5. **Desktop manager:** configuration, health, Zed setup, and session status.
 6. **Remote observer:** Tailscale, device pairing, snapshots, event stream, and Tauri mobile inbox/timeline.
 7. **Remote control:** immediate cross-client handoff, prompts, cancellation, plan edits, questions, and permissions.
@@ -258,7 +277,7 @@ No implementation in slices 2–8 starts before terminal manual acceptance.
 - Host-owned sessions are authoritative for multi-client use.
 - Pi-Tai Host Agent is a macOS-first Tauri tray application rather than an installed daemon, with portable core crates and platform adapters for later Windows and Linux support.
 - Pi-Tai Desktop manages configuration and may start the Host automatically.
-- A thin ACP shim connects Zed to the Host.
+- A thin ACP v2 draft shim connects Zed to the Host; the initial adapter is v2-only and keeps draft wire types out of broker persistence.
 - The Host uses Pi's SDK through a bundled TypeScript runtime helper.
 - Desktop and mobile use Tauri with React and Vite.
 - Mobile uses a product API rather than raw ACP.

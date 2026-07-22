@@ -1,131 +1,215 @@
-# Pi-Tai ACP Scope
+# Pi-Tai ACP v2 Scope
 
-## Status
+## Status and protocol decision
 
-Stage 2 design approved. ACP implementation begins as a thin proof after Host lifecycle, runtime-worker, IPC, and durable broker proofs in [STAGE2_HOST_IMPLEMENTATION_PLAN.md](STAGE2_HOST_IMPLEMENTATION_PLAN.md).
+Stage 2 design targets the ACP v2 draft before any ACP shim exists. The decision and compatibility consequences are recorded in [ADR 0006](adr/0006-target-acp-v2-draft.md).
 
-Pi-Tai ACP will be a new, product-owned thin implementation built against the official ACP SDK contracts.
+Pi-Tai ACP is a product-owned thin Agent implementation built on the official TypeScript SDK's experimental v2 entry point. The current research baseline is `@agentclientprotocol/sdk@1.3.0` with schema release `schema-v2.0.0-alpha.2`; H5 must pin a matched SDK/schema pair, checksum, and upstream revision exactly before implementation.
 
-The ACP process does not own Pi sessions. It connects Zed to the separately running Pi-Tai Host tray application over authenticated local IPC. The Host supervises a bundled TypeScript helper that loads Pi through its SDK in-process. See [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
+The initial shim is v2-only. It does not carry a v1 protocol surface or `session/load` compatibility path. The proof binary requires `--experimental-acp-v2` (or `PI_TAI_ACP_V2_DRAFT=1` in automated harnesses) and still negotiates protocol version 2. If a v1 bridge is later required, it must be an isolated adapter over the same v2-shaped Host model.
+
+The ACP process does not own Pi sessions. It connects Zed to the separately running Pi-Tai Host Agent over authenticated local IPC. The Host supervises a bundled TypeScript helper that loads Pi through its SDK in-process. See [HOST_ARCHITECTURE.md](HOST_ARCHITECTURE.md).
+
+## ACP v2 contract baseline
+
+Advertising `capabilities.session` commits Pi-Tai to all baseline methods:
+
+- `session/new`;
+- `session/list`;
+- `session/resume`;
+- `session/close`;
+- `session/prompt`;
+- `session/cancel`;
+- outbound `session/update`.
+
+The initial capability response advertises no partial baseline. Text and resource links are baseline prompt content. Image support, embedded resources, additional directories, session deletion, and MCP transports are advertised only after their complete Zed → shim → Host → Pi path passes fixtures and integration tests.
+
+ACP v2 lifecycle rules control the design:
+
+1. `session/prompt` ends when the Host durably accepts or rejects the prompt, not when Pi finishes foreground work.
+2. On acceptance, the shim queues the empty prompt response before releasing related updates, then emits the Host-authored `user_message` and `state_update: running`.
+3. Completion is an idle `state_update` with a stop reason. The prompt response never carries completion.
+4. `session/update` may arrive while idle; neither the shim nor Host drops an event because no prompt request is pending.
+5. The initial product rejects a second prompt while foreground Pi work is not idle. Queueing can be added later without changing request ownership.
+6. `session/cancel` has no ACP turn ID. The Host resolves it against the current durable foreground-operation ID and confirms completion with idle/cancelled state.
+7. An ACP process disconnect only detaches. Explicit `session/close` cancels foreground work, resolves pending permissions as cancelled, and releases the ACP activation as v2 requires.
+8. `session/resume` without `replayFrom` reattaches without history. `{ "type": "start" }` replays complete history before the response. There is no `session/load`.
+
+## Product model required by v2
+
+The Host stores one authoritative representation of each fact rather than persisting ACP generated types.
+
+### Orthogonal session state
+
+The session actor models these independently:
+
+- **activation/attachments:** which clients are attached and whether an ACP session activation is open;
+- **foreground work:** `Idle { last_stop_reason? }`, `Running { operation_id }`, or `RequiresAction { operation_id, interaction_id }`;
+- **runtime health:** unloaded, starting, ready, interrupted, or failed;
+- **session item stream:** durable updates that may be appended in any foreground state.
+
+Only one `Running` or `RequiresAction` foreground operation exists at a time initially. Background updates do not imply running foreground work. A session is not globally “completed”; completion is a transition of one foreground operation back to idle.
+
+Actor transitions and persistence validation enforce:
+
+- `Idle` carries no active operation or interaction ID;
+- `Running` carries one existing foreground-operation ID and no pending action;
+- `RequiresAction` carries the same existing operation ID plus one unresolved interaction owned by it;
+- accepting a prompt requires an ACP activation and `Idle` foreground state;
+- runtime interruption atomically resolves pending interaction state, changes non-idle foreground work to `Idle` with custom stop reason `_pi_tai_interrupted`, and marks runtime health interrupted;
+- unloaded or failed runtime health cannot coexist with non-idle foreground work after a transaction commits;
+- zero client attachments may coexist with `Running` because disconnect is not cancellation;
+- session-item updates are valid in every foreground state.
+
+Database constraints protect ID uniqueness and referential ownership; actor command methods enforce cross-field transitions. Corrupt snapshots are rejected and rebuilt from validated events rather than admitted as a new state.
+
+### Stable identity and replay
+
+The Host generates and persists semantic IDs before events are exposed:
+
+- message ID;
+- tool-call ID;
+- terminal ID;
+- plan ID;
+- permission/interaction ID;
+- foreground-operation ID.
+
+The disposable shim must not derive IDs from JSON-RPC request IDs, worker command IDs, array positions, or replay order. Live and replayed forms of one item use the same ID.
+
+Normalized event families include message upsert/chunk, tool-call patch/content chunk, terminal patch/output bytes, plan replacement, foreground state change, config replacement, session-info patch, usage replacement, and interaction lifecycle. Pi and ACP payloads may be retained as redacted diagnostics but are not canonical product state.
+
+### Patch and extension semantics
+
+ACP message, tool-call, terminal, and metadata updates distinguish:
+
+- omitted: leave unchanged;
+- `null`: clear;
+- concrete value: replace;
+- chunk update: append according to the specific item contract.
+
+Wire DTOs must use an explicit `Missing | Clear | Set<T>` representation at conversion points. A single optional/nullable field is not sufficient. Canonical projections may emit full replacement snapshots during replay to avoid reproducing obsolete chunk boundaries.
+
+Known discriminator values are validated strictly. Unknown future or `_`-prefixed variants are preserved only where Pi-Tai stores, replays, or forwards them and has a safe generic fallback. Unsupported inbound prompt variants are rejected even if syntactically open; capability negotiation remains authoritative. Custom fields use `_meta` or `_`-prefixed methods/variants, never new root fields.
+
+### Replay barrier
+
+For `session/resume` with replay from start, the Host supplies a replay high-water mark. The shim:
+
+1. attaches and begins buffering live events after the mark;
+2. emits canonical history through the mark in sequence order;
+3. queues the resume response after the requested history has been sent;
+4. releases buffered later events after the response is queued, then continues live delivery without duplication.
+
+Replay uses terminal output snapshots, complete plans, and complete item replacements where possible. It never invents a synthetic end-turn response.
 
 ## Priority legend
 
-- **P0:** required for the first useful Zed alpha.
+- **P0:** required for the first useful ACP v2/Zed alpha.
 - **P1:** important follow-up for daily use.
 - **P2:** evaluate after the alpha.
-- **Out:** intentionally excluded from current scope.
+- **Out:** excluded or unavailable in ACP v2.
 
-All experimental protocol features must be guarded by negotiated client capabilities.
+All optional and unstable features are guarded by negotiated capabilities in addition to the top-level draft enablement.
 
 ## Feature matrix
 
-| Area | Feature | Priority | Zed value | Future T3 value | Notes |
-|---|---|---:|---:|---:|---|
-| Protocol | JSON-RPC over stdio | P0 | Essential | Essential | Official ACP SDK transport. |
-| Protocol | Version and capability negotiation | P0 | Essential | Essential | Never assume Zed-only support. |
-| Protocol | Agent/client implementation metadata | P0 | Useful | Useful | Include name and version. |
-| Protocol | Structured errors and graceful shutdown | P0 | Essential | Essential | Include broken pipe and cancellation. |
-| Protocol | Custom `_meta` data | P1 | Limited | High | Use only as optional enhancement. |
-| Session | New session | P0 | Essential | Essential | Required ACP method. |
-| Session | Prompt and cancel | P0 | Essential | Essential | Required ACP methods. |
-| Session | Close active session | P0 | Useful | Essential | Ask the Host to release broker and Pi runtime resources. |
-| Session | List sessions | P0 | High | High | Include cwd, title, and update time. |
-| Session | Load with history replay | P0 | High | High | Preserve Pi session compatibility. |
-| Session | Resume without replay | P1 | Medium | High | Useful for clients retaining history. |
-| Session | Delete session | P1 | Medium | Medium | Operate on listed Pi sessions. |
-| Session | Pagination and cwd filtering | P1 | Medium | Medium | Needed when history grows. |
-| Session | Additional workspace directories | P1 | Medium | High | Useful for monorepos. |
-| Session | Fork session | P2 | Medium | High | Experimental ACP operation. |
-| Session | Pi tree navigation | Out | Low | Low | Explicitly excluded. |
-| Prompt | Text | P0 | Essential | Essential | Baseline ACP content. |
-| Prompt | Resource/file links | P0 | High | High | Preserve file references. |
-| Prompt | Images | P0 | Medium | Medium | Pi supports image input. |
-| Prompt | Embedded resources | P1 | Medium | High | Capability-gated. |
-| Prompt | Audio | Out | Low | Low | Explicitly unnecessary. |
-| Prompt | Steering and follow-ups | P1 | Medium | High | Map onto Pi queues. |
-| Output | Streaming assistant text | P0 | Essential | Essential | Stable message IDs. |
-| Output | Separate thought stream | P1 | Medium | Medium | Emit only when client supports useful presentation. |
-| Output | User/history replay | P0 | High | High | Avoid duplicates during load. |
-| Output | Retry and compaction status | P1 | Medium | Medium | Keep concise. |
-| Output | Completion notifications | Out | None | Client-owned | Zed already handles thread completion and attention. |
-| Tools | Start/update/end lifecycle | P0 | Essential | Essential | Preserve parallel tool identity. |
-| Tools | Human-readable titles | P0 | High | High | Major visual requirement. |
-| Tools | Semantic kinds | P0 | High | High | Read, search, execute, edit, delete, move, fetch, think, other. |
-| Tools | Raw input/output | P0 | Medium | Medium | Available when expanded. |
-| Tools | File locations | P0 | High | High | Enable follow-along. |
-| Tools | Accurate line locations | P1 | High | High | Use edit matches when unambiguous. |
-| Tools | Structured diffs | P0 | High | Essential | Cover edit, write, create, and delete. |
-| Tools | Terminal content | P0 | High | Essential | Present bash as terminal activity. |
-| Tools | Streaming terminal output | P1 | High | High | Avoid repeated full snapshots. |
-| Tools | Translation/renderer registry | P1 | Medium | High | Allow Pi-Tai custom tools to add semantics. |
-| Plans | Stable complete plan update | P0 | High | High | Investigate Codex ACP fixtures first. |
-| Plans | Pending/in-progress/completed | P0 | High | High | Mirror work-context state. |
-| Plans | Goal metadata | P0 | Medium | High | Keep goal in Pi and Host state even if a client ignores metadata. |
-| Plans | External plan replacement | P1 | Low | High | Product API command serialized by the Host and guarded by operation ID and expected revision; not assumed to be standard ACP. |
-| Plans | Priorities | P1 | Medium | Medium | Default may be medium. |
-| Plans | Multi-plan operations | P2 | Unknown | Medium | Experimental and capability-gated. |
-| Plans | File/Markdown plan variants | P2 | Low | Medium | Not needed for initial work context. |
-| Config | Main model selector | P0 | Essential | Essential | Separate from title model. |
-| Config | Main effort selector | P0 | Essential | Essential | ACP thought-level category. |
-| Config | Dynamic config updates | P1 | Medium | High | Refresh after model/auth changes. |
-| Config | Boolean options | P1 | Medium | Medium | Capability-gated. |
-| Config | Title provider/model/effort | P0 | Medium | Medium | Initially file-configured; ACP controls may follow. |
-| Config | Guardian reviewer configuration | P1 | Medium | Medium | Do not expose unsafe bypass as normal mode. |
-| Config | Custom access modes | Out | Low | Low | Pi-Tai has one guarded auto workflow. |
-| Metadata | Automatic title | P0 | High | High | Generated with configured Luna model. |
-| Metadata | Live title update | P0 | High | High | ACP `session_info_update`. |
-| Metadata | Context usage and size | P1 | Medium | High | ACP `usage_update`. |
-| Metadata | Cumulative cost | P1 | Medium | High | Useful with expensive work models. |
-| Commands | Prompt templates | P0 | High | High | Advertise as ACP commands. |
-| Commands | Skills | P0 | High | High | Advertise enabled skills. |
-| Commands | Extension commands | P1 | Medium | Medium | Exclude TUI-only commands. |
-| Commands | Argument hints and updates | P1 | Medium | Medium | Refresh after reload. |
-| Permission | ACP permission requests | P0 | High | High | Fallback and extension dialogs. |
-| Permission | Guardian automatic decision | P0 | High | High | Primary Pi-Tai gate. |
-| Permission | Associate decision with tool | P1 | High | High | Avoid unrelated notification clutter. |
-| Permission | Private-data authorization | P0 | Essential | Essential | Preserve Guardian semantics. |
-| Auth | Detect missing Pi auth | P0 | Essential | Essential | Return ACP auth-required errors. |
-| Auth | Terminal authentication | P0 | High | High | Launch normal Pi login/setup. |
-| Auth | Environment auth | P1 | Medium | Medium | Useful in managed environments. |
-| Auth | Logout | P1 | Medium | Medium | Stable ACP operation. |
-| Filesystem | Client read/write delegation | P2 | Medium | High | Valuable for unsaved buffers, but local Pi tools are sufficient initially. |
-| Terminal | Client terminal delegation | P2 | Medium | High | Evaluate against local Pi bash presentation. |
-| MCP | stdio/HTTP/SSE/ACP transports | P2 | Low | Medium | Do not block alpha. |
-| Provider | Client provider management | P2 | Low | High | Experimental. |
-| Elicitation | Form and URL elicitation | P2 | Unknown | High | Client-capability dependent. |
-| Editor | Document open/change/save/focus events | P2 | Medium | High | Useful for editor-aware context. |
-| Editor | Position encoding negotiation | P2 | Medium | High | Needed for advanced editor integration. |
-| NES | Next Edit Suggestions | Out initially | Separate | Potentially high | Treat as a separate product phase. |
-| Extensibility | Custom methods/notifications | P2 | Low | High | Useful if T3 becomes a cooperating client. |
+| Area | Feature | Priority | Notes |
+|---|---|---:|---|
+| Protocol | JSON-RPC 2.0 over newline-delimited stdio | P0 | Use the official SDK; stdout is protocol-only. |
+| Protocol | Single and batch JSON-RPC messages | P0 | Lifecycle-sensitive calls are not emitted in batches. |
+| Protocol | Version/capability negotiation and required `info` | P0 | Initial shim negotiates v2 only. |
+| Protocol | Structured errors, cancellation, and graceful shutdown | P0 | Broken pipe detaches without cancelling Host work. |
+| Protocol | Open enum/union parsing and `_meta` | P0 | Preserve only at audited boundaries with safe fallback. |
+| Session | New, list, resume, close | P0 | Complete ACP v2 session baseline. |
+| Session | Resume without replay | P0 | Omitted/null `replayFrom`. |
+| Session | Resume with full replay | P0 | `replayFrom: { type: "start" }`; replaces v1 load. |
+| Session | Prompt acceptance and cancellation | P0 | Prompt responds immediately after durable acceptance; idle update completes work. |
+| Session | Cursor pagination and cwd filtering | P0 | `session/list` is baseline and must remain bounded. |
+| Session | Additional workspace directories | P1 | Advertise `session.additionalDirectories` only end to end. |
+| Session | Delete session | P1 | Optional `session.delete`; idempotent list removal. |
+| Session | Fork session | P2 | Only if a future v2 extension stabilizes and Zed uses it. |
+| Prompt | Text and resource links | P0 | ACP v2 baseline. |
+| Prompt | Images | P0 | Advertise `session.prompt.image` after Pi translation passes. |
+| Prompt | Embedded resources | P1 | Advertise `session.prompt.embeddedContext`. |
+| Prompt | Audio | Out | Not needed. |
+| Prompt | Steering, follow-ups, and queueing | P1 | Product commands first; never overload prompt-request lifetime. |
+| Output | User message acknowledgement | P0 | Host-generated stable message ID and canonical accepted content. |
+| Output | Streaming assistant text | P0 | Stable message ID; chunks append. |
+| Output | Whole-message replacement/clear | P0 | Exercise omitted/null/value semantics. |
+| Output | Separate thought stream | P1 | Only when presentation and disclosure policy are acceptable. |
+| Output | Background updates while idle | P0 | Core v2 lifecycle requirement. |
+| Output | Retry and compaction status | P1 | Keep concise and state-accurate. |
+| Tools | `tool_call_update` upsert lifecycle | P0 | No v1 `tool_call` create variant. |
+| Tools | Human-readable titles, semantic kinds, status, locations | P0 | Preserve parallel identity. |
+| Tools | Raw input/output content | P0 | Replace snapshots or append complete content chunks. |
+| Tools | Structured v2 diffs | P0 | Authoritative add/delete/modify/move/copy changes plus optional `git_patch`. |
+| Tools | Agent-owned display terminal | P0 | Stable terminal ID, base64 byte chunks, snapshots, and exit status. |
+| Tools | Translation/renderer registry | P1 | Allow custom Pi-Tai tools to add semantics. |
+| Plans | Item `plan_update` with stable plan ID | P0 | Complete replacement entries; no v1 `plan`. |
+| Plans | Pending/in-progress/completed | P0 | Map Pi-Tai work context and default omitted Pi priorities to `medium`; ACP v2 also defines `cancelled`, which Pi-Tai does not emit initially. |
+| Plans | Goal metadata | P0 | Keep canonical goal in Host state; use namespaced `_meta` only if useful. |
+| Plans | External plan replacement | P1 | Product API command, not assumed to be ACP. |
+| Plans | Multiple/other plan variants | P2 | Initial session uses one stable work-context plan ID. |
+| Config | Main model selector | P0 | `configId`, `category: model`; no dedicated model method. |
+| Config | Main effort selector | P0 | `category: thought_level`. |
+| Config | Complete config replacement updates | P1 | `config_option_update` and set response return the full array. |
+| Config | Boolean options | P1 | Only for genuine boolean state; no unsafe bypass mode. |
+| Metadata | Automatic/live title | P0 | `session_info_update` patch semantics. |
+| Metadata | Context usage, size, and cumulative cost | P1 | ACP v2 `usage_update`. |
+| Commands | Prompt templates and skills | P0 | `available_commands_update`; text input carries `type: text`. |
+| Commands | Dynamic argument hints/updates | P1 | Refresh after reload. |
+| Permission | ACP v2 permission requests | P0 | Required title, optional description, extensible subject. |
+| Permission | Guardian automatic decision | P0 | Primary Pi-Tai gate; unknown outcomes never imply approval. |
+| Permission | Tool-call and command subjects | P0 | Command subject requires absolute cwd; associations are optional. |
+| Auth | Detect missing Pi auth | P0 | Return auth-required behavior accurately. |
+| Auth | Agent-managed login and logout | P0 | If any `authMethods` are advertised, both `auth/login` and `auth/logout` are implemented. |
+| Filesystem | Client filesystem delegation | Out | Removed from ACP v2; local tools or MCP instead. |
+| Terminal | Client terminal execution/control | Out | Removed from ACP v2; display terminals are Agent-owned. |
+| MCP | stdio and HTTP server config | P2 | Tagged transports; no deprecated SSE transport. |
+| Provider | Client provider management | P2 | Experimental. |
+| Elicitation | Form and URL elicitation | P2 | Capability-dependent. |
+| Editor | Document events and position encoding | P2 | Separate editor-aware phase. |
+| NES | Next Edit Suggestions | Out initially | Separate product phase. |
+| Extensibility | Custom methods/notifications | P2 | Must use `_` names and negotiated metadata. |
+| Transport | Remote ACP HTTP/WebSocket | Out initially | Mobile uses the product API, not ACP. |
 
-## Initial Zed alpha recommendation
+## Initial ACP v2/Zed alpha
 
-The first ACP alpha should include:
+The first alpha includes:
 
-- protocol negotiation and authenticated Host IPC;
-- actionable Host-not-running and version-mismatch errors;
-- new, close, list, and load broker-session flows;
-- text, resource-link, image, and cancellation support;
-- main model and effort selectors;
-- streaming assistant output;
-- semantic tool lifecycle, titles, kinds, locations, diffs, and terminal content;
-- native execution plans based on Codex ACP research;
-- automatic and live session titles;
-- commands and skills;
-- Guardian enforcement and ACP permission fallback.
+- exact SDK/schema pinning and ACP v2 draft enablement;
+- initialization with required implementation info and complete baseline session capability;
+- actionable Host unavailable, auth-required, and version-mismatch errors;
+- new, list, resume (with and without full replay), close, prompt, and cancel;
+- text, resource-link, image, and stable user-message acknowledgement;
+- `running`/`requires_action`/`idle` state projection and background updates while idle;
+- streaming and replaceable assistant messages with stable IDs;
+- `tool_call_update`, streamed tool content, structured diffs, locations, and display terminals;
+- item-based `plan_update` with one stable plan ID;
+- session titles, model and thought-level config options, commands, and skills;
+- Guardian enforcement and ACP v2 permission presentation;
+- disconnect/reconnect without cancelling the Host-owned session.
 
-## Explicit investigation: Codex plans in Zed
+Stock Zed acceptance requires a Zed build that negotiates ACP v2. Before that exists, H5 uses the official SDK test client and independently authored fixtures; lack of a v2 Zed build does not justify adding v1 semantics to the Host.
 
-Before implementing plan translation:
+## Required fixture suite
 
-1. Pin the current open-source Codex and Codex ACP revisions used for research.
-2. Identify the exact ACP messages used for Zed's visible plan UI.
-3. Determine whether Zed consumes stable `plan` replacement, experimental `plan_update`, or both.
-4. Capture representative protocol payloads as independently authored test fixtures.
-5. Verify priority and status rendering in Zed.
-6. Implement capability fallback to readable tool output.
+Before production hardening, fixtures cover:
 
-The goal is behavioral compatibility with the ACP protocol and Zed, not source compatibility with Codex.
+- initialize success, v1 mismatch, omitted capabilities, and malformed known values;
+- JSON-RPC single messages, mixed batches, notification-only batches, and invalid entries;
+- prompt response ordering, user acknowledgement, running, idle, and background idle updates;
+- prompt rejection before acceptance and second-prompt rejection while busy;
+- cancellation with late tool updates followed by idle/cancelled;
+- resume without replay and replay-from-start with a live-event barrier;
+- stable message IDs, replacement, clear, and append behavior;
+- tool first-seen upsert, patch clear, content replacement, and content chunks;
+- terminal snapshot replacement, independently decoded byte chunks, split/invalid UTF-8, and exit status;
+- structured add/delete/modify/move/copy and patch-less binary diffs;
+- permission request title/description, tool-call subject, command subject, cancelled outcome, and unknown non-approval outcome;
+- complete plan replacement by `planId`, explicit priorities, and the documented non-emission of cancelled entries;
+- complete config option replacement and dependent option changes;
+- unknown future and `_`-prefixed variants at each supported fallback boundary.
 
 ## Host boundary
 
@@ -133,23 +217,22 @@ The ACP shim:
 
 - owns no database or Pi process;
 - may be terminated by Zed without cancelling the broker session;
+- treats explicit `session/close` differently from process disconnection;
 - advertises only capabilities implemented by the complete Zed → shim → Host → Pi pipeline;
-- replays normalized Host events rather than reconstructing history from Zed storage;
+- relays durable Host item identities and normalized events rather than reconstructing history from Zed storage;
 - leaves non-ACP mobile controls, including external plan editing, on the versioned product API.
 
 Supporting arbitrary downstream ACP agents is out of scope. Pi is the initial and only Host runtime.
 
-## Deferred T3 considerations
+## Draft upgrade policy
 
-A future T3 client may benefit more than Zed from:
+For every ACP v2 alpha update:
 
-- custom `_meta` conventions;
-- provider configuration;
-- document synchronization;
-- client filesystem and terminal delegation;
-- elicitation forms;
-- session forking;
-- custom methods and notifications;
-- Next Edit Suggestions.
+1. read the migration notes and schema diff;
+2. update the exact SDK, schema release, checksum, and source revision together;
+3. regenerate or replace independently authored wire fixtures;
+4. run wire-to-domain conversion tests before changing broker code;
+5. document semantic changes in this scope or a new ADR;
+6. rerun the official SDK client proof and available Zed v2 smoke test.
 
-These should remain separate adapters behind protocol interfaces so Zed compatibility does not depend on T3-specific behavior.
+Draft schema churn alone should change the ACP adapter and fixtures. A broker migration is justified only when the semantic product model changes.

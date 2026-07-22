@@ -48,11 +48,11 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Package Pi-Tai Host as a tray-resident Tauri application rather than an installed daemon initially.
 - Keep the configuration/status desktop manager independent from the session-owning Host process.
 - Run Pi through its SDK in a self-contained Bun runtime-worker executable supervised by the Host.
-- Build a thin, product-owned ACP shim against the official ACP SDK contracts.
-- Let Zed disconnect without intentionally terminating a healthy host-owned Pi turn.
+- Build a thin, product-owned ACP v2 draft shim against the official SDK's exact-pinned experimental v2 contracts.
+- Let Zed disconnect without intentionally terminating healthy Host-owned foreground work; treat explicit `session/close` as cancellation and activation release.
 - Optimize semantic rendering for Zed while remaining protocol-correct for other ACP clients.
 - Reuse the same Pi-Tai work-context, naming, Guardian, and session behavior as terminal Pi.
-- Surface native ACP plans, rich tool calls, diffs, locations, model controls, titles, and usage.
+- Surface ACP v2 item plans, upserted tool calls, structured diffs, Agent-owned terminals, locations, config options, titles, and usage.
 - Keep the product API suitable for mobile, web, terminal, chat, and possible future T3 clients.
 
 ## Non-goals
@@ -65,7 +65,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 - Maintaining configurable command taxonomies or compatibility layers outside Pi-Tai's concise risk/authorization policy.
 - Adopting an existing ACP frontend architecture instead of the Host-owned session design.
 - Publishing to the npm registry as a requirement.
-- Implementing MCP, client filesystem delegation, client terminal delegation, NES, or document synchronization in the first ACP release.
+- Implementing MCP, NES, or document synchronization in the first ACP release. ACP v1 Client filesystem and terminal execution surfaces are not implemented because ACP v2 removes them.
 - Supporting arbitrary downstream ACP agents in the initial Host.
 - Sharing or writing Zed's private thread database.
 - Guaranteeing survival of an in-flight tool operation after the complete Host process crashes.
@@ -91,7 +91,7 @@ The detailed terminal design and checkpoint sequence are defined in [TERMINAL_PL
 3. Creates or attaches to a host-owned Pi session.
 4. Selects the main working model and effort independently from the title-naming model.
 5. Sees native plans, useful tool titles, structured diffs, terminal output, and file locations.
-6. Leaves Zed without intentionally terminating the hosted turn, then loads the same named session later.
+6. Leaves Zed without intentionally terminating foreground work, then resumes the same named session later with ACP v2 replay when needed.
 
 ### Desktop manager user
 
@@ -243,14 +243,18 @@ The Host must:
 
 The ACP adapter must:
 
-- use `@agentclientprotocol/sdk` for protocol transport and types;
+- use an exact-pinned `@agentclientprotocol/sdk/experimental/v2` and matched ACP v2 schema alpha for protocol transport and wire types;
+- require explicit draft enablement in addition to negotiating protocol version 2;
 - remain a thin, disposable shim over Host IPC;
 - never own durable session state or terminate a session merely because Zed disconnects;
-- negotiate capabilities instead of assuming a specific client;
-- expose Host-backed new, list, load, resume, close, prompt, and cancellation behavior;
-- emit semantically rich ACP updates rather than flattening events to chat text;
-- validate native plan support against public ACP behavior and negotiated protocol capabilities;
-- omit Pi tree navigation and audio prompting;
+- negotiate capabilities instead of assuming a specific client and advertise `capabilities.session` only with the complete baseline method set;
+- expose Host-backed new, list, resume with optional replay, close, prompt, cancellation, and update behavior; never implement v1 `session/load` in the initial shim;
+- acknowledge accepted prompts immediately and represent foreground work through `running`, `requires_action`, and `idle` state updates;
+- continue emitting semantically rich updates while idle rather than flattening events to request-scoped chat text;
+- preserve Host-authored stable message, tool-call, terminal, plan, interaction, and foreground-operation IDs across live delivery and replay;
+- explicitly convert omitted, `null`, replacement, and append patch semantics at the wire boundary without persisting generated ACP structs;
+- validate item-plan, upserted-tool, structured-diff, and Agent-owned-terminal behavior against public ACP v2 fixtures and negotiated capabilities;
+- omit ACP v1 fallback, Pi tree navigation, audio prompting, and Client filesystem/terminal execution surfaces;
 - rely on Zed's existing thread completion and attention notifications.
 
 ### FR-9: desktop and mobile applications

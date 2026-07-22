@@ -13,6 +13,7 @@ Accepted architecture decisions:
 - [ADR 0003: Unload idle runtimes and recover interrupted turns explicitly](adr/0003-runtime-idle-and-recovery.md)
 - [ADR 0004: macOS-first shell with a portable core](adr/0004-macos-first-portable-core.md)
 - [ADR 0005: Package the runtime worker as a Bun standalone executable](adr/0005-runtime-worker-packaging.md)
+- [ADR 0006: Target the ACP v2 draft before implementing the shim](adr/0006-target-acp-v2-draft.md)
 
 ## Product decisions from the design pass
 
@@ -32,7 +33,7 @@ The implementation uses separate process boundaries:
 Pi-Tai installation
 ├── Pi-Tai Host Agent        Tauri tray process and broker authority
 ├── pi-tai-runtime           one supervised TypeScript/Pi worker per loaded session
-├── pi-tai-acp               disposable Zed adapter
+├── pi-tai-acp               disposable experimental ACP v2 Zed adapter
 └── pi-tai-ctl               diagnostic client
 ```
 
@@ -79,7 +80,7 @@ The broker retains `activeClientId` and `controlEpoch` for attribution, routing,
 
 Cancellation and answers target a specific turn, question, or permission ID and are idempotent. The first valid resolution wins; delayed competing resolutions are reported as already resolved rather than forwarded to Pi.
 
-Only one prompt turn runs per session. The Host does not silently queue a second prompt. Steering and follow-up are separate explicit command types when implemented.
+Only one foreground Pi operation runs per session initially. The Host does not silently queue a second prompt. Steering and follow-up are separate explicit command types when implemented. Foreground `Idle`, `Running`, and `RequiresAction` state is independent from runtime health and from the session-item event stream, which may continue while idle.
 
 This supports the primary handoff workflow:
 
@@ -103,7 +104,7 @@ This supports the primary handoff workflow:
 
 ```mermaid
 flowchart LR
-    Z[Zed] -->|ACP stdio| A[pi-tai-acp]
+    Z[Zed v2 client] -->|ACP v2 JSON-RPC stdio| A[pi-tai-acp]
     C[pi-tai-ctl] -->|authenticated local IPC| H[Pi-Tai Host Agent]
     A -->|authenticated local IPC| H
     H --> B[session actors]
@@ -134,8 +135,9 @@ One actor per broker session owns:
 
 - stable broker session ID;
 - Pi session file/ID and runtime generation;
-- session lifecycle and active turn;
+- session activation, foreground-operation state, and runtime health as independent facts;
 - ordered event sequence and state revision;
+- stable message, tool-call, terminal, plan, interaction, and foreground-operation IDs;
 - authenticated attachments and replay cursors;
 - active-client attribution and control epoch;
 - operation deduplication;
@@ -162,13 +164,14 @@ The worker owns no broker database and does not accept client connections.
 
 `pi-tai-acp` owns only:
 
-- ACP stdio transport and capability negotiation;
+- the exact-pinned official SDK experimental v2 stdio transport, JSON-RPC batch handling, and capability negotiation;
 - Host launch/connect/version handshake;
-- request-to-Host command translation;
-- Host event replay/live translation into ACP updates;
+- short-lived ACP request-to-Host command translation;
+- Host event replay/live translation into stable-ID ACP v2 updates, including updates while idle;
+- explicit missing/null/value patch conversion at the wire boundary;
 - Zed-appropriate errors and shutdown.
 
-Killing the shim detaches Zed and leaves the Host session unchanged.
+The initial shim is ACP v2-only and advertises the session surface only when all baseline methods are available end to end. Killing the shim detaches Zed and leaves the Host session unchanged. Explicit ACP `session/close` instead cancels foreground work and releases the activation.
 
 ## Cross-platform boundaries
 
@@ -285,7 +288,9 @@ Required invariants:
 - state revision advances only inside the durable actor transaction;
 - replay from a cursor is deterministic and duplicate-free;
 - snapshots are disposable accelerators, not the only history;
-- raw Pi/ACP payloads are diagnostic attachments, not product state;
+- canonical items use persisted semantic IDs rather than ACP request IDs, worker command IDs, or replay positions;
+- patch events distinguish clear, replace, and append instead of collapsing them into optional fields;
+- raw Pi/ACP payloads and generated ACP structs are diagnostic attachments, not product state;
 - secrets and private tool content are not copied into general diagnostics.
 
 ## Implementation sequence
@@ -416,7 +421,10 @@ feat(host): preserve turns across client disconnects
 - Immediate active-client transfer on an accepted mutation.
 - Idempotent cancellation and interaction resolution.
 - Snapshot plus event replay equivalence.
-- Host restart after idle, active turn, and worker crash.
+- Stable semantic item IDs across live delivery, snapshot reconstruction, and replay.
+- Orthogonal activation, foreground-work, runtime-health, and background-update state transitions.
+- Replay high-water barrier with no duplicate or interleaved history/live events.
+- Host restart after idle, active foreground work, and worker crash.
 - 30-minute eligibility using an injected clock.
 
 #### Green
@@ -425,6 +433,7 @@ feat(host): preserve turns across client disconnects
 - Persist command acceptance and normalized events transactionally.
 - Implement active-client attribution/control epochs without a takeover policy.
 - Implement runtime unload/reload and honest interruption states.
+- Persist the v2-shaped canonical item model and explicit foreground state without depending on ACP SDK types.
 
 #### Acceptance
 
@@ -438,31 +447,46 @@ feat(host): preserve turns across client disconnects
 feat(broker): add durable sessions and recovery
 ```
 
-### H5: ACP and Zed behavior proof
+### H5: ACP v2 and Zed behavior proof
+
+#### Pin before Red
+
+- Select and lock one matched official TypeScript SDK experimental-v2 release and ACP v2 schema alpha.
+- Record package version, schema release, checksum, and upstream source revision in fixture metadata.
+- Require `--experimental-acp-v2` for manual use and allow `PI_TAI_ACP_V2_DRAFT=1` only for automated harnesses, in addition to protocol negotiation.
 
 #### Red
 
-- ACP initialize/capability fixtures.
-- Host auto-launch, unavailable, timeout, and version-mismatch tests.
-- New/list/load/close/prompt/cancel translation tests.
-- Disconnect/reconnect without session cancellation or duplicate replay.
-- Independently authored native-plan fixtures based on current Zed/Codex behavior research.
+- ACP v2 initialize with required `info`, version mismatch, capability omission, and complete baseline-session fixtures.
+- JSON-RPC single, mixed-batch, notification-only batch, and invalid-entry fixtures.
+- Host auto-launch, unavailable, timeout, auth-required, and version-mismatch tests.
+- `session/new`, list, resume without replay, resume from start, close, prompt, and cancel translation tests; there is no `session/load`.
+- Prompt response ordering before accepted `user_message` and `state_update: running`.
+- Idle completion with stop reason, background updates while idle, and rejection of a second prompt while busy.
+- Cancellation with late updates before final idle/cancelled confirmation.
+- Stable message IDs and omitted/null/value/append fixtures.
+- Disconnect/reconnect without session cancellation or duplicate replay, including replay high-water buffering.
+- `tool_call_update`, content chunk, terminal byte/snapshot, structured diff, permission subject, config replacement, and item `plan_update` fixtures.
+- Independently authored plan and rich-output fixtures based on current Zed v2 behavior research.
 
 #### Green
 
-- Add a minimal official-SDK `pi-tai-acp` proof.
-- Translate only proof-level text, tool lifecycle, plan, title, and errors.
-- Keep all state in the Host Agent.
+- Add a minimal official-SDK `pi-tai-acp` through `@agentclientprotocol/sdk/experimental/v2`.
+- Advertise `capabilities.session` only with every required baseline method wired through the Host.
+- Translate proof-level message, foreground state, tool, terminal, plan, title, config, permission, and error events.
+- Keep all durable IDs and state in the Host Agent; use explicit wire/domain conversion for three-state patches.
+- Do not add an ACP v1 fallback or generated ACP types to broker persistence.
 
 #### Acceptance
 
-- Zed launches the shim, the shim starts/connects Host, and one Host-owned Pi session survives Zed disconnection and reload.
-- Zed renders the selected plan fixture as intended.
+- The official SDK v2 test client launches the shim, the shim starts/connects Host, and one Host-owned Pi session survives shim disconnection and resume-from-start replay.
+- Prompt acknowledgement returns before foreground completion; the same connection continues to receive legal updates while idle.
+- A Zed build that negotiates ACP v2 launches the shim and renders the selected plan/tool fixtures as intended. If no such Zed build is available yet, record that external blocker without changing the Host model or adding v1 fallback.
 
 #### Checkpoint
 
 ```text
-feat(acp): prove Zed continuity through Host
+feat(acp): prove ACP v2 continuity through Host
 ```
 
 ### Gate H: architecture-proof review
@@ -500,18 +524,19 @@ Checkpoint:
 feat(host): ship the macOS Host Agent alpha
 ```
 
-### H8: production thin ACP shim
+### H8: production thin ACP v2 shim
 
-- Implement the accepted P0 Zed flows from [ACP_SCOPE.md](ACP_SCOPE.md).
-- Add rich tools, diffs, locations, terminal output, native plans, titles, models, effort, commands, Guardian presentation, and auth-required behavior in reviewable slices.
+- Implement the accepted P0 ACP v2/Zed flows from [ACP_SCOPE.md](ACP_SCOPE.md).
+- Keep the exact SDK/schema pin and upgrade fixtures reviewable.
+- Add rich upserted tools, structured diffs, locations, Agent-owned terminal output, item plans, titles, model/thought config options, commands, Guardian presentation, and conditional login/logout behavior in reviewable slices.
 
 Suggested checkpoints:
 
 ```text
-feat(acp): add Host-backed session lifecycle
-feat(acp): translate rich Pi tools and output
-feat(acp): add native plans and live titles
-feat(acp): add models commands and Guardian flows
+feat(acp): add Host-backed ACP v2 session lifecycle
+feat(acp): translate v2 Pi tools terminals and output
+feat(acp): add v2 item plans and live titles
+feat(acp): add config commands and Guardian flows
 ```
 
 ### Gate Z: Host and Zed acceptance
@@ -524,7 +549,7 @@ Verify the complete checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md
 - Cross-process tests use fake runtime workers before Pi SDK workers.
 - Pi SDK tests use fake/local providers and isolated agent/settings directories.
 - TypeScript protocol tests consume the same checked-in fixtures as Rust tests.
-- ACP tests use in-memory transports before Zed smoke tests.
+- ACP tests use the exact-pinned official SDK v2 client and in-memory transports before Zed v2 smoke tests.
 - Crash tests kill client, worker, and Host processes independently.
 - No test requires a paid model, global Pi extensions, real Keychain secrets, or the user's session directory.
 - macOS tray behavior and Zed rendering retain explicit manual checks where automation cannot establish presentation quality.

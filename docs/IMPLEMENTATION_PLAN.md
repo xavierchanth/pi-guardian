@@ -256,24 +256,26 @@ Create executable proof tests for:
 - a client disconnect not intentionally cancelling an active Pi turn;
 - process interruption producing an explicit interrupted state;
 - replaying a completed session after Host restart;
-- Zed launching a minimal ACP shim;
-- Zed rendering independently authored native-plan fixtures.
+- the official SDK v2 client launching a minimal ACP v2 shim;
+- a v2-capable Zed build launching the shim and rendering independently authored item-plan fixtures when available.
 
 #### Research questions
 
 - Can a crashed desktop WebView be recreated without terminating the tray process on supported platforms?
 - How should the TypeScript Pi helper be packaged without requiring a user-managed Node installation?
-- Which ACP plan variant does Zed's Codex integration currently emit and render?
-- How are plan IDs, priorities, and complete replacement represented?
-- Which tool kinds and content variants produce the clearest Zed presentation?
-- Which current ACP capabilities are advertised by Zed?
+- Which Zed release/preview channel negotiates ACP v2, and how is draft support enabled?
+- Does Zed render stable v2 `plan_update` item plans keyed by `planId` as specified?
+- Which v2 tool, structured-diff, and Agent-owned terminal updates produce the clearest Zed presentation?
+- Which ACP v2 capabilities and extension flags does the selected Zed build advertise?
+- Which matched official TypeScript SDK and ACP v2 schema alpha should be pinned for H5?
 
 #### Green
 
 - Build disposable Host, runtime-helper, IPC, and ACP-shim spikes.
-- Read the current ACP specification and SDK schemas.
-- Exercise public ACP protocol behavior against pinned specifications and fixtures.
-- Record fixture-based conclusions as product-owned behavioral contracts.
+- Read the ACP v2 draft specification, migration guide, RFDs, and official SDK experimental-v2 API.
+- Pin the exact SDK package, schema alpha, checksum, and upstream revision.
+- Exercise public ACP v2 behavior against independently authored fixtures, including prompt acceptance, idle/background updates, resume replay, three-state patches, JSON-RPC batches, item plans, tools, terminals, diffs, permissions, and config options.
+- Record fixture-based conclusions as product-owned behavioral contracts; never persist generated ACP structs.
 - Write ADRs for process lifecycle, helper packaging, IPC framing, event ordering, and recovery.
 
 #### Acceptance
@@ -281,8 +283,9 @@ Create executable proof tests for:
 - One prompt traverses a test client through the Host into an in-process Pi SDK session and streams back.
 - Disconnecting the client leaves the Host and runtime healthy.
 - Restarting after a forced Host failure recovers history and reports an interrupted turn honestly.
-- A fixture suite describes the exact plan and tool updates Pi-Tai ACP will emit.
-- No generic downstream ACP-agent layer is required.
+- A fixture suite describes the exact ACP v2 lifecycle, item-plan, message, tool, terminal, diff, and permission updates Pi-Tai emits.
+- Prompt acceptance is demonstrably separate from foreground completion, and background updates survive idle state.
+- No generic downstream ACP-agent layer or ACP v1 fallback is required.
 
 ### Phase 9: durable single-session Host
 
@@ -294,10 +297,11 @@ Add tests for:
 - monotonic event sequences and revisions;
 - durable command acknowledgement;
 - operation-ID deduplication;
-- one active prompt turn;
-- reconnect from an event cursor;
+- one active foreground operation represented independently from runtime health and attachment state;
+- stable semantic item IDs across live delivery and replay;
+- reconnect from an event cursor and replay through a high-water barrier;
 - helper crash and restart state transitions;
-- Host restart with load/resume or non-resumable recovery;
+- Host restart with runtime reopen/resume or non-resumable recovery;
 - tray quit warnings while a turn is active.
 
 #### Green
@@ -316,30 +320,33 @@ Add tests for:
 - Closing the client does not stop a healthy turn.
 - Host or helper failure produces a capability-accurate recovered, interrupted, or non-resumable state.
 
-### Phase 10: thin ACP shim and stock Zed continuity
+### Phase 10: thin ACP v2 shim and Zed continuity
 
 #### Red
 
-- Initialization and capability-negotiation tests.
-- Host-unavailable and version-mismatch tests.
-- New, list, load, resume, close, prompt, and cancellation tests.
-- Zed attachment/disconnection tests.
-- Replay-without-duplicate-message tests.
-- Authentication-required tests.
-- Graceful shutdown and malformed-message tests.
+- Protocol-v2 initialization with required `info`, exact capability objects, v1 mismatch, and draft configuration tests.
+- JSON-RPC single/batch, Host-unavailable, auth-required, and version-mismatch tests.
+- Complete baseline `session/new`, list, resume, close, prompt, cancel, and update tests; no `session/load`.
+- Prompt acceptance response queued before canonical `user_message` and running state.
+- Idle completion, requires-action transitions, background updates while idle, and second-prompt rejection.
+- Zed attachment/disconnection versus explicit close tests.
+- Resume without replay and resume-from-start without duplicate or interleaved live messages.
+- Three-state patch, unknown-variant fallback, graceful shutdown, and malformed-known-variant tests.
 
 #### Green
 
-- Add `pi-tai-acp` using the official ACP SDK.
-- Connect it to Host local IPC rather than creating Pi sessions itself.
-- Virtualize supported session capabilities from the broker event store.
-- Keep durable state and Pi process ownership out of the shim.
+- Add `pi-tai-acp` using the exact-pinned `@agentclientprotocol/sdk/experimental/v2` entry point.
+- Connect it to Host local IPC rather than creating Pi sessions or canonical item IDs itself.
+- Advertise the session capability only when the complete ACP v2 baseline is available.
+- Keep durable state, generated ACP types, and Pi process ownership out of the shim.
+- Do not add an ACP v1 compatibility surface.
 
 #### Acceptance
 
-- Start in Zed, disconnect Zed while a turn runs, and restore the same Host-owned session.
-- A shim crash does not intentionally terminate Pi.
-- A session created outside Zed can be discovered and loaded through the supported Zed flow.
+- Start in a v2-capable Zed build, disconnect Zed while foreground work runs, and resume the same Host-owned session with full replay.
+- A shim crash detaches without terminating Pi; explicit `session/close` cancels foreground work and releases activation.
+- A session created outside Zed can be discovered and resumed through the supported v2 flow.
+- If Zed v2 is not yet available, the official SDK v2 client proves the flow and the Zed smoke test remains an explicit external gate.
 
 ### Phase 11: rich messages and tools
 
@@ -347,14 +354,14 @@ Add tests for:
 
 Add translation tests for:
 
-- assistant text and thought chunks with stable message IDs;
+- user, assistant, and thought whole-message upserts and chunks with stable message IDs;
+- message replacement, explicit clear, and append ordering;
 - read, search, execute, edit, delete, move, fetch, and generic tool kinds;
-- concise tool titles;
-- tool status transitions;
+- first-seen `tool_call_update`, concise titles, patch clears, status transitions, and content chunks;
 - file and line locations;
-- structured diffs;
-- terminal output;
-- parallel tool calls without cross-contamination.
+- authoritative structured file operations plus optional `git_patch` text;
+- Agent-owned terminal snapshots, independently base64-decoded byte chunks, and exit status;
+- parallel tool calls and terminals without cross-contamination.
 
 #### Green
 
@@ -364,8 +371,8 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 
 #### Red
 
-- Plan replacement and progress tests using Zed-tested fixtures.
-- Capability fallback tests.
+- Complete item-plan replacement and progress tests keyed by one stable `planId` using Zed-tested fixtures.
+- Explicit priority/defaulting tests and documentation that Pi-Tai does not initially emit ACP's optional cancelled plan-entry state.
 - Session title update tests.
 - Session history title tests.
 - broker-originated plan-update revision and active-client attribution tests.
@@ -373,7 +380,7 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 
 #### Green
 
-- Project Pi-Tai work context into Host events and native ACP plans.
+- Project Pi-Tai work context into Host events and ACP v2 `plan_update` item plans.
 - Forward Pi session-name changes as ACP session metadata updates.
 - Add the broker work-context storage adapter.
 - Define Host-authoritative external plan replacement with active-client attribution without silently hiding the change from Pi.
@@ -382,10 +389,10 @@ Implement a registry-based Host-event-to-ACP translation layer rather than one l
 
 #### Red
 
-- Main model and thought-level selector tests.
-- Dynamic config update tests.
+- Main model and thought-level config-option tests using `configId` and category.
+- Complete config replacement and dependent-option update tests.
 - command/skill advertisement tests.
-- paginated list/load/resume/close tests.
+- paginated list, resume-with/without-replay, and close tests.
 - usage/cost update tests.
 - ACP permission request and Guardian association tests.
 - immediate active-client transfer, conflict, and stale-revision rejection tests.
@@ -401,8 +408,8 @@ Stop and verify:
 - the tray Host starts directly and from the desktop manager spike;
 - closing Zed or the desktop window leaves a healthy turn running;
 - session history recovers after a controlled Host restart;
-- Zed can discover and restore Host-owned sessions;
-- plans, titles, tools, diffs, locations, terminal output, models, and Guardian are useful in Zed.
+- a v2-capable Zed can discover and resume Host-owned sessions;
+- item plans, titles, upserted tools, structured diffs, locations, Agent-owned terminal output, config options, and Guardian are useful in Zed.
 
 ## Stage 3: desktop and remote companion clients
 
@@ -485,8 +492,8 @@ The following do not block the initial Host/Zed release:
 - Pi tree navigation;
 - audio prompts;
 - duplicate Zed completion/attention notifications;
-- client filesystem delegation;
-- client terminal delegation;
+- ACP v1 Client filesystem delegation, which is removed in ACP v2;
+- ACP v1 Client terminal execution/control, which is removed in ACP v2;
 - session fork;
 - MCP transports;
 - provider configuration;

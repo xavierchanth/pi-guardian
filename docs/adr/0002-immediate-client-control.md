@@ -19,5 +19,5 @@ Commands carry an operation ID and expected session revision. The actor serializ
 
 - Handoff requires no separate command.
 - Clients must handle conflict responses and intentional retry.
-- Only one prompt turn runs at a time.
+- Only one foreground Pi operation runs at a time initially; this does not scope background session updates or ACP v2 prompt-request lifetime.
 - Security depends on client authentication, not controller identity.
