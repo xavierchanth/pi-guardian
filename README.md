@@ -80,16 +80,18 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 Workspace capabilities are disabled by default. In a standalone session, `/cap:jj-workspaces new <name>` or `/cap:git-worktrees new <name>` creates an isolated checkout, forks the complete Pi session, and continues the same logical agent there as a standalone successor session. `on`, `off`, `status`, and `create-only` are also available under each namespace.
 
+The shared model profiles are always available, including when subagents are disabled. Use `/model:thinker`, `/model:worker`, or `/model:mechanical` to switch the current session directly to that profile's model and thinking effort.
+
 Subagents are disabled by default. Run `/cap:subagents on` to make the current session a parent, `/cap:subagents status` to inspect it, or `/cap:subagents off` after every child is resolved. New and ordinary forked sessions start standalone.
 
 A parent delegates workspace work with `spawn_child`; direct `jj workspace add`, `git worktree add`, and relocation tools are blocked in parent mode. Every direct child receives:
 
 - an independent persistent Pi session and detached process;
-- a dedicated JJ workspace rooted at the parent's `@-` change when JJ is available, otherwise a dedicated Git branch/worktree;
-- one semantic model preference (`thinker`, `worker`, or `mechanical`);
+- a dedicated JJ workspace always rooted at the parent's `@-` change—without requiring or modifying parent `@`—when JJ is available, otherwise a dedicated Git branch/worktree;
+- one shared model profile (`thinker`, `worker`, or `mechanical`);
 - only `report_to_parent`, with no ability to delegate further.
 
-Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. While a child is active, parent work tools are blocked: the parent can message, inspect, wait for, or abandon the child, but it cannot duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. JJ child stacks preserve all descendants through subtree rebase; Git children report a clean committed branch and preserve commits through reviewed non-squash integration. Dirty Git worktrees are retained for recovery rather than force-removed.
+Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. The child exclusively owns its delegated workspace and performs all repository reading, editing, testing, and VCS work there. While a child is active, parent work tools are blocked: the parent can message, inspect status through child controls, wait for, or abandon the child, but it cannot touch or duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. JJ child stacks preserve all descendants through subtree rebase; Git children report a clean committed branch and preserve commits through reviewed non-squash integration. Dirty Git worktrees are retained for recovery rather than force-removed.
 
 Pi-Tai composes normal Pi context with three intentionally empty, user-authored files: `packages/pi-tai/instructions/system.md`, `parent.md`, and `child.md`. It also adds generated factual role/delegation metadata. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for lifecycle and recovery details.
 

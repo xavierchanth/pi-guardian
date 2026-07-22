@@ -99,9 +99,30 @@ test("instruction composition skips empty authored files and injects factual rol
   assert.match(parent, /subagent_role="parent"/);
   assert.match(parent, /workspace_creation="spawn_child_only"/);
   assert.match(parent, /backend_selection="jj_then_git"/);
+  assert.match(parent, /jj_child_base="parent_@-"/);
+  assert.match(parent, /child_workspace_owner="child_exclusive"/);
+  assert.match(parent, /parent_work_while_child_active="forbidden"/);
   assert.match(parent, /next_action_after_spawn="wait_for_children"/);
   assert.match(parent, /id="thinker"/);
   assert.match(parent, /gpt-5\.6-sol/);
+
+  const child = composePiTaiInstructions({
+    basePrompt: "base",
+    role: "child",
+    systemInstructions: "",
+    roleInstructions: "",
+    delegation: {
+      id: "delegation",
+      parentSessionId: "parent",
+      backend: "jj",
+      workspace: "/repo/.jj/workspaces/child",
+      baseId: "base-change",
+      rootId: "child-root",
+    },
+  });
+  assert.match(child, /workspace_ownership owner="child_exclusive"/);
+  assert.match(child, /repository_reads_edits_tests_and_vcs="delegated_workspace_only"/);
+  assert.match(child, /parent_must_not_duplicate_or_modify="true"/);
 });
 
 test("file delegation store updates records atomically and wait snapshots direct children", async () => {
@@ -378,7 +399,7 @@ test("subagent extension starts standalone and enables parent tools only through
   assert.doesNotMatch(forkPrompt.systemPrompt, /subagent_role=/);
 });
 
-test("JJ workspace creation anchors child root to the parent @- change", async () => {
+test("JJ workspace creation anchors child root to parent @- without inspecting parent changes", async () => {
   const calls: Array<{ cwd: string; args: string[] }> = [];
   const parentRoot = "/repo";
   const childRoot = "/repo/.jj/workspaces/task-one";
@@ -390,7 +411,6 @@ test("JJ workspace creation anchors child root to the parent @- change", async (
     if (command.includes("-r @ --no-graph")) return "parent-working\n";
     if (command.includes("-r @- --no-graph")) return "base-change\n";
     if (command.startsWith("workspace list")) return "default|parent-working\n";
-    if (command === "diff -r @ --summary") return "";
     if (command.startsWith("workspace add")) return "";
     throw new Error(`Unexpected jj call: ${cwd}: ${command}`);
   };
@@ -403,14 +423,51 @@ test("JJ workspace creation anchors child root to the parent @- change", async (
   assert.equal(created.baseChangeId, "base-change");
   assert.equal(created.childRootChangeId, "child-root");
   assert.equal(created.parentWorkspace, "default");
-  assert.deepEqual(
-    calls.find((call) => call.args[0] === "diff")?.args,
-    ["diff", "-r", "@", "--summary"],
-  );
+  assert.equal(calls.some((call) => call.args[0] === "diff"), false);
+  assert.equal(calls.some((call) => ["new", "describe", "squash", "rebase"].includes(call.args[0] ?? "")), false);
   assert.deepEqual(
     calls.find((call) => call.args[0] === "workspace" && call.args[1] === "add")?.args,
     ["workspace", "add", childRoot, "--name", "task-one", "-r", "base-change"],
   );
+});
+
+test("JJ child creation preserves empty and modified parent @ while branching both from @-", async (t) => {
+  try {
+    await execFileAsync("jj", ["--version"]);
+  } catch {
+    t.skip("jj is unavailable");
+    return;
+  }
+
+  for (const parentState of ["empty", "modified"] as const) {
+    await t.test(parentState, async () => {
+      const root = await mkdtemp(join(tmpdir(), `pi-tai-jj-${parentState}-`));
+      const repo = join(root, "repo");
+      await execFileAsync("jj", ["git", "init", repo]);
+      await writeFile(join(repo, "base.txt"), "base\n");
+      await execFileAsync("jj", ["describe", "-m", "base"], { cwd: repo });
+      await execFileAsync("jj", ["new"], { cwd: repo });
+      if (parentState === "modified") await writeFile(join(repo, "parent.txt"), "parent work\n");
+
+      const beforeChange = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
+      const beforeDiff = (await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout;
+      const expectedBase = (await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
+
+      try {
+        const created = await new JjWorkspaceService().createChildWorkspace(repo, `child-${parentState}`);
+        const afterChange = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
+        const afterDiff = (await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout;
+        const actualBase = (await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: created.childWorkspacePath })).stdout;
+
+        assert.equal(created.baseChangeId, expectedBase.trim());
+        assert.equal(actualBase, expectedBase);
+        assert.equal(afterChange, beforeChange);
+        assert.equal(afterDiff, beforeDiff);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 test("JJ integration moves the recorded root and all descendants before parent @", async () => {

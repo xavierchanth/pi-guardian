@@ -25,6 +25,9 @@ test("composition root registers every feature once in order", async () => {
       workspaces: () => {
         calls.push("workspaces");
       },
+      modelProfiles: () => {
+        calls.push("model-profiles");
+      },
       subagents: () => {
         calls.push("subagents");
       },
@@ -63,6 +66,7 @@ test("composition root registers every feature once in order", async () => {
     "work-context",
     "response-editor",
     "workspaces",
+    "model-profiles",
     "subagents",
     "session-title",
     "notifications",

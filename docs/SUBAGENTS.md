@@ -42,9 +42,15 @@ Child tool:
 
 - `report_to_parent`: persist `completed`, `blocked`, `failed`, or `cancelled`, capture the child tip change ID, wake parent waiting, and terminate the child run.
 
-## Semantic model preferences
+## Model profiles
 
-`spawn_child` selects intent rather than an arbitrary provider/model pair:
+The semantic model definitions are always-available Pi-Tai profiles, independent of whether subagents are enabled. Each profile registers an exact slash command that switches the current session's model and thinking effort:
+
+- `/model:thinker`
+- `/model:worker`
+- `/model:mechanical`
+
+`spawn_child` reuses the same profile objects and selects intent rather than maintaining a separate provider/model configuration:
 
 | ID | Intended work | Provider/model | Effort |
 | --- | --- | --- | --- |
@@ -52,13 +58,15 @@ Child tool:
 | `worker` | Planned work requiring trusted engineering judgment | `openai-codex/gpt-5.6-sol` | low |
 | `mechanical` | Explicit repetitive transformations | `openai-codex/gpt-5.6-luna` | high |
 
-The launcher starts a persistent `pi --mode rpc` child with only the Pi-Tai extension, a persistent session, the selected model and effort, and the child workspace as its working directory. A mode-`0600` FIFO carries the initial prompt and later `message_child` steering/follow-up commands, so messaging continues to work after a parent process restart. RPC output is retained beside the delegation records. After `report_to_parent`, the child requests graceful shutdown and removes its control FIFO.
+A profile switch fails without changing thinking effort when its model is not registered or lacks credentials. If a model clamps the requested effort, Pi-Tai reports both requested and applied levels. As with all extension commands, another extension registering the same command name causes Pi to assign numeric conflict suffixes; this distribution registers each unsuffixed profile command exactly once.
+
+The launcher starts a persistent `pi --mode rpc` child with only the Pi-Tai extension, a persistent session, the selected profile's model and effort, and the child workspace as its working directory. A mode-`0600` FIFO carries the initial prompt and later `message_child` steering/follow-up commands, so messaging continues to work after a parent process restart. RPC output is retained beside the delegation records. After `report_to_parent`, the child requests graceful shutdown and removes its control FIFO.
 
 ## Backend topology
 
-In parent mode, `spawn_child` is the only supported way to create a workspace for delegated work. Direct parent `jj workspace add`, `git worktree add`, and standalone relocation tools are blocked. Once a child is active, non-orchestration parent tool calls are blocked until the child resolves; the parent should use `wait_for_children` rather than inspect, edit, or test the child's workspace itself.
+In parent mode, `spawn_child` is the only supported way to create a workspace for delegated work. Direct parent `jj workspace add`, `git worktree add`, and standalone relocation tools are blocked. The child exclusively owns the delegated workspace: all repository inspection, editing, testing, and VCS work for the task happens there. Once a child is active, non-orchestration parent tool calls are blocked until the child resolves; the parent must use child controls rather than inspect, modify, test, or duplicate the child's work.
 
-For JJ delegation, the parent working copy `@` must have no file changes. Pi-Tai captures:
+For JJ delegation, `spawn_child` always branches from parent `@-`, whether parent `@` is empty or modified. It never checkpoints, moves, rewrites, or cleans parent `@`. Pi-Tai captures:
 
 - the current parent workspace name;
 - parent `@-` as `baseChangeId`;
@@ -70,7 +78,7 @@ It creates the workspace with:
 jj workspace add <path> --name <name> -r <baseChangeId>
 ```
 
-This creates the child's initial working-copy change above the base. Durable linkage uses change IDs, never commit IDs.
+This creates the child's initial working-copy change above the stable base. Independently spawned children therefore begin as sibling changes instead of stacking on parent work or one another. Durable linkage uses change IDs, never commit IDs.
 
 Before integration, Pi-Tai updates a stale child workspace and verifies that child `@` still descends from the recorded root. It then runs from the parent workspace:
 

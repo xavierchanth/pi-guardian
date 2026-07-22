@@ -12,6 +12,7 @@ import {
 } from "./src/config/register.ts";
 import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
+import { registerModelProfiles } from "./src/model-profiles/register.ts";
 import {
   registerNotifications,
   sendNativeTerminalNotification,
@@ -49,6 +50,7 @@ export interface PiTaiRegistrars {
   workContext: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
   workspaces: PiTaiRegistrar;
+  modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
@@ -71,6 +73,9 @@ const productionRegistrars: PiTaiRegistrars = {
       capabilities: runtime.capabilities,
       stateRoot: runtime.agentDir,
     });
+  },
+  modelProfiles: (pi) => {
+    registerModelProfiles(pi);
   },
   subagents: (pi, runtime) => {
     registerSubagents(pi, {
@@ -118,6 +123,7 @@ export function createPiTaiExtension(
     await registrars.workContext(pi, runtime);
     await registrars.responseEditor(pi, runtime);
     await registrars.workspaces(pi, runtime);
+    await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
     await registrars.notifications(pi, runtime);

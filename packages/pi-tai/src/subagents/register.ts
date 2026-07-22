@@ -254,8 +254,9 @@ export function registerSubagents(
     promptSnippet: "Create an isolated workspace and delegate all work in it to a direct child",
     promptGuidelines: [
       "Use spawn_child whenever the user asks a parent session to create an isolated workspace for work; include the complete task and acceptance criteria so the child performs all workspace work.",
-      "Never run jj workspace add or git worktree add directly in a parent session; spawn_child owns workspace creation.",
-      "After spawning requested children, call wait_for_children immediately instead of reading, editing, testing, or otherwise doing their work in the parent thread.",
+      "spawn_child always roots a JJ child at the parent's @-, whether parent @ is empty or modified; never checkpoint, move, rewrite, or clean parent @ before delegation.",
+      "Never run jj workspace add or git worktree add directly in a parent session; spawn_child owns workspace creation and the child exclusively owns the resulting workspace.",
+      "After spawning requested children, call wait_for_children immediately. The parent must not read, edit, test, run VCS operations for, or otherwise duplicate the child's repository work while it is active.",
     ],
     parameters: Type.Object({
       task: Type.String({ description: "Complete bounded task and acceptance criteria for the child" }),

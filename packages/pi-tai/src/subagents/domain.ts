@@ -1,43 +1,21 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import {
+  MODEL_PROFILES,
+  MODEL_PROFILE_IDS,
+  type ModelProfile,
+  type ModelProfileId,
+  type ThinkingEffort,
+} from "../model-profiles/domain.ts";
 
 export const SUBAGENT_ROLES = ["standalone", "parent", "child"] as const;
 export type SubagentRole = (typeof SUBAGENT_ROLES)[number];
 
-export const MODEL_PREFERENCE_IDS = ["thinker", "worker", "mechanical"] as const;
-export type ModelPreferenceId = (typeof MODEL_PREFERENCE_IDS)[number];
-export type ThinkingEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export interface ModelPreference {
-  id: ModelPreferenceId | string;
-  description: string;
-  provider: string;
-  model: string;
-  effort: ThinkingEffort;
-}
-
-export const DEFAULT_MODEL_PREFERENCES: readonly ModelPreference[] = Object.freeze([
-  Object.freeze({
-    id: "thinker",
-    description: "Work requiring investigation, planning, architecture, or substantial judgment.",
-    provider: "openai-codex",
-    model: "gpt-5.6-sol",
-    effort: "high",
-  }),
-  Object.freeze({
-    id: "worker",
-    description: "Clearly planned work that still requires trusted engineering judgment.",
-    provider: "openai-codex",
-    model: "gpt-5.6-sol",
-    effort: "low",
-  }),
-  Object.freeze({
-    id: "mechanical",
-    description: "Explicit repetitive transformations requiring minimal discretionary judgment.",
-    provider: "openai-codex",
-    model: "gpt-5.6-luna",
-    effort: "high",
-  }),
-]);
+// Backward-compatible subagent names backed by the shared profile definitions.
+export const MODEL_PREFERENCE_IDS = MODEL_PROFILE_IDS;
+export type ModelPreferenceId = ModelProfileId;
+export type ModelPreference = ModelProfile;
+export type { ThinkingEffort };
+export const DEFAULT_MODEL_PREFERENCES = MODEL_PROFILES;
 
 export const PARENT_TOOL_NAMES = [
   "spawn_child",
@@ -118,7 +96,7 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
     const facts = [`<pi_tai_subagents subagent_role="${options.role}">`];
     if (options.role === "parent") {
       facts.push(
-        '<delegation_policy workspace_creation="spawn_child_only" backend_selection="jj_then_git" parent_work_while_child_active="forbidden" next_action_after_spawn="wait_for_children" />',
+        '<delegation_policy workspace_creation="spawn_child_only" backend_selection="jj_then_git" jj_child_base="parent_@-" child_workspace_owner="child_exclusive" parent_work_while_child_active="forbidden" next_action_after_spawn="wait_for_children" />',
       );
       for (const preference of options.modelPreferences ?? []) {
         facts.push(
@@ -129,6 +107,9 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
     if (options.delegation) {
       facts.push(
         `<delegation id="${escapeAttribute(options.delegation.id)}" parent_session_id="${escapeAttribute(options.delegation.parentSessionId)}" backend="${options.delegation.backend}" workspace="${escapeAttribute(options.delegation.workspace)}" base_id="${escapeAttribute(options.delegation.baseId)}" root_id="${escapeAttribute(options.delegation.rootId)}" />`,
+      );
+      facts.push(
+        '<workspace_ownership owner="child_exclusive" repository_reads_edits_tests_and_vcs="delegated_workspace_only" parent_must_not_duplicate_or_modify="true" />',
       );
     }
     facts.push("</pi_tai_subagents>");
