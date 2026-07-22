@@ -13,6 +13,7 @@ import {
   sendNativeTerminalNotification,
   type NotificationSender,
 } from "./src/notifications/index.ts";
+import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerSubagents } from "./src/subagents/register.ts";
@@ -38,6 +39,7 @@ export type PiTaiRegistrar = (
 export interface PiTaiRegistrars {
   config: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
+  responseEditor: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
@@ -50,6 +52,9 @@ const productionRegistrars: PiTaiRegistrars = {
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   workContext: (pi, runtime) => {
     registerWorkContext(pi, runtime.workContext);
+  },
+  responseEditor: (pi) => {
+    registerResponseEditor(pi);
   },
   subagents: (pi) => {
     registerSubagents(pi);
@@ -89,6 +94,7 @@ export function createPiTaiExtension(
     const runtime = createRuntime();
     await registrars.config(pi, runtime);
     await registrars.workContext(pi, runtime);
+    await registrars.responseEditor(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
     await registrars.notifications(pi, runtime);

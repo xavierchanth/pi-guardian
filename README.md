@@ -66,6 +66,12 @@ Long goal and active-step text is truncated to the available terminal width. Run
 
 Use `/continue` after interrupting the agent. It expands to the visible prompt `Continue what you were doing.` and starts a normal turn.
 
+### Contextual external editor
+
+In the interactive TUI, Ctrl-G opens the external editor with a non-submitted preview of the last assistant message followed by an empty `<response>` block. Only text inside that block returns to Pi; if the closing tag is removed, the response continues to end-of-file. Removing the opening tag safely leaves the original draft unchanged. Existing editor text is placed inside the response block, while sessions without an assistant message retain Pi's normal plain-document behavior.
+
+When the effective editor command launches NeoVim (`nvim`, an executable path, or an `env`-wrapped command), Pi-Tai adds a startup command that places the cursor on the response line. Other editors receive no extra arguments.
+
 ### Independent session naming
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.

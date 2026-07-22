@@ -15,6 +15,9 @@ test("composition root registers every feature once in order", async () => {
       workContext: () => {
         calls.push("work-context");
       },
+      responseEditor: () => {
+        calls.push("response-editor");
+      },
       subagents: () => {
         calls.push("subagents");
       },
@@ -48,6 +51,7 @@ test("composition root registers every feature once in order", async () => {
   assert.deepEqual(calls, [
     "config",
     "work-context",
+    "response-editor",
     "subagents",
     "session-title",
     "notifications",
