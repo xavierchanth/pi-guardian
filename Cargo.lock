@@ -2382,6 +2382,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-tai-broker"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
 name = "pi-tai-host-agent"
 version = "0.1.0"
 dependencies = [
