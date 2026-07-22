@@ -60,6 +60,8 @@ fn commits_projection_event_and_operation_atomically_then_reopens() {
         store.load_projection("session-1").unwrap(),
         Some(projection(1))
     );
+    assert_eq!(store.list_projections().unwrap(), vec![projection(1)]);
+    assert_eq!(store.last_sequence("session-1").unwrap(), 1);
     assert_eq!(
         store.events_after("session-1", 0, 10).unwrap(),
         vec![event(1, 1, "foreground.running")]

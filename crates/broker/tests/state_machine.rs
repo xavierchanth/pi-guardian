@@ -164,6 +164,52 @@ fn cancellation_transfers_control_but_waits_for_runtime_completion() {
 }
 
 #[test]
+fn recovery_reconstructs_only_valid_unloaded_or_interrupted_states() {
+    let binding = PiSessionBinding::new("pi-1", "/tmp/pi.jsonl", "/repo").unwrap();
+    let active_client = ClientId::parse("client-1").unwrap();
+    let mut recovered = BrokerSession::recover(
+        BrokerSessionId::parse("broker-1").unwrap(),
+        12,
+        4,
+        binding.clone(),
+        true,
+        None,
+        Some(active_client.clone()),
+        2,
+    )
+    .unwrap();
+    assert_eq!(recovered.runtime_health(), RuntimeHealth::Interrupted { generation: 4 });
+    assert_eq!(
+        recovered.foreground(),
+        &ForegroundState::Idle { last_stop_reason: Some(StopReason::Interrupted) }
+    );
+    assert_eq!(recovered.begin_runtime_start().unwrap(), 5);
+
+    assert!(BrokerSession::recover(
+        BrokerSessionId::parse("broker-2").unwrap(),
+        0,
+        0,
+        binding.clone(),
+        false,
+        None,
+        None,
+        0,
+    )
+    .is_err());
+    assert!(BrokerSession::recover(
+        BrokerSessionId::parse("broker-3").unwrap(),
+        1,
+        1,
+        binding,
+        false,
+        None,
+        Some(active_client),
+        0,
+    )
+    .is_err());
+}
+
+#[test]
 fn relocation_keeps_broker_identity_and_advances_revision() {
     let (mut session, generation) = ready_session();
     let broker_id = session.id().clone();

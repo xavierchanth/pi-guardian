@@ -204,6 +204,41 @@ impl EventStore {
             .transpose()
     }
 
+    pub fn list_projections(&self) -> Result<Vec<SessionProjection>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT session_id, revision, runtime_generation, snapshot_json
+             FROM broker_sessions ORDER BY updated_at DESC, session_id ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (session_id, revision, runtime_generation, snapshot_json) = row?;
+            Ok(SessionProjection {
+                session_id,
+                revision,
+                runtime_generation,
+                snapshot: serde_json::from_str(&snapshot_json)?,
+            })
+        })
+        .collect()
+    }
+
+    pub fn last_sequence(&self, session_id: &str) -> Result<u64, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT COALESCE(MAX(sequence), 0) FROM session_events WHERE session_id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Sqlite)
+    }
+
     pub fn events_after(
         &self,
         session_id: &str,

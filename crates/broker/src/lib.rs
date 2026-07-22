@@ -156,6 +156,47 @@ impl BrokerSession {
         }
     }
 
+    pub fn recover(
+        id: BrokerSessionId,
+        revision: u64,
+        runtime_generation: u64,
+        pi_session: PiSessionBinding,
+        interrupted_foreground: bool,
+        last_stop_reason: Option<StopReason>,
+        active_client: Option<ClientId>,
+        control_epoch: u64,
+    ) -> Result<Self, BrokerError> {
+        if runtime_generation == 0
+            || (active_client.is_some() && control_epoch == 0)
+            || (active_client.is_none() && control_epoch > 0)
+        {
+            return Err(BrokerError::InvalidRecoveryState);
+        }
+        Ok(Self {
+            id,
+            revision,
+            runtime_generation,
+            runtime_health: if interrupted_foreground {
+                RuntimeHealth::Interrupted {
+                    generation: runtime_generation,
+                }
+            } else {
+                RuntimeHealth::Unloaded
+            },
+            foreground: ForegroundState::Idle {
+                last_stop_reason: if interrupted_foreground {
+                    Some(StopReason::Interrupted)
+                } else {
+                    last_stop_reason
+                },
+            },
+            pi_session: Some(pi_session),
+            attachments: BTreeSet::new(),
+            active_client,
+            control_epoch,
+        })
+    }
+
     pub fn id(&self) -> &BrokerSessionId {
         &self.id
     }
@@ -450,6 +491,8 @@ pub enum BrokerError {
     RuntimeNotReady,
     #[error("invalid runtime state transition")]
     InvalidRuntimeTransition,
+    #[error("persisted broker session violates recovery invariants")]
+    InvalidRecoveryState,
     #[error("stale runtime generation {received}; current generation is {current}")]
     StaleRuntimeGeneration { received: u64, current: u64 },
     #[error("revision conflict: expected {expected}, current revision is {actual}")]
