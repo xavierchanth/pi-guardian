@@ -192,6 +192,10 @@ impl BrokerSession {
         self.attachments.len()
     }
 
+    pub fn is_attached(&self, client_id: &ClientId) -> bool {
+        self.attachments.contains(client_id)
+    }
+
     pub fn attach(&mut self, client_id: ClientId) {
         if self.attachments.insert(client_id) {
             self.advance_revision();
@@ -270,13 +274,35 @@ impl BrokerSession {
             return Err(BrokerError::ForegroundBusy);
         }
         self.foreground = ForegroundState::Running { operation_id };
-        if self.active_client.as_ref() != Some(client_id) {
-            self.active_client = Some(client_id.clone());
-            self.control_epoch = self
-                .control_epoch
-                .checked_add(1)
-                .ok_or(BrokerError::CounterOverflow("control epoch"))?;
+        self.transfer_control(client_id)?;
+        self.advance_revision();
+        Ok(())
+    }
+
+    pub fn accept_cancel(
+        &mut self,
+        client_id: &ClientId,
+        expected_revision: u64,
+        operation_id: &OperationId,
+    ) -> Result<(), BrokerError> {
+        self.require_revision(expected_revision)?;
+        if !self.attachments.contains(client_id) {
+            return Err(BrokerError::ClientNotAttached);
         }
+        let is_active = match &self.foreground {
+            ForegroundState::Running {
+                operation_id: active,
+            }
+            | ForegroundState::RequiresAction {
+                operation_id: active,
+                ..
+            } => active == operation_id,
+            ForegroundState::Idle { .. } => false,
+        };
+        if !is_active {
+            return Err(BrokerError::OperationNotActive);
+        }
+        self.transfer_control(client_id)?;
         self.advance_revision();
         Ok(())
     }
@@ -394,6 +420,17 @@ impl BrokerSession {
         } else {
             Err(BrokerError::RuntimeNotReady)
         }
+    }
+
+    fn transfer_control(&mut self, client_id: &ClientId) -> Result<(), BrokerError> {
+        if self.active_client.as_ref() != Some(client_id) {
+            self.active_client = Some(client_id.clone());
+            self.control_epoch = self
+                .control_epoch
+                .checked_add(1)
+                .ok_or(BrokerError::CounterOverflow("control epoch"))?;
+        }
+        Ok(())
     }
 
     fn advance_revision(&mut self) {

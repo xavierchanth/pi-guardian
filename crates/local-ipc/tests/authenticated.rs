@@ -19,9 +19,7 @@ async fn authenticates_before_exposing_application_frames() {
     let temporary = tempfile::tempdir().unwrap();
     let socket = temporary.path().join("host.sock");
     let token = AuthToken::generate();
-    let listener = IpcListener::bind(&socket, token.clone(), implementation("host"))
-        .await
-        .unwrap();
+    let listener = IpcListener::bind(&socket, token.clone(), implementation("host")).unwrap();
 
     let server = tokio::spawn(async move {
         let mut connection = listener.accept().await.unwrap();
@@ -74,9 +72,7 @@ async fn rejects_an_incorrect_token_without_reading_commands() {
     let socket = temporary.path().join("host.sock");
     let token = AuthToken::generate();
     let wrong = AuthToken::generate();
-    let listener = IpcListener::bind(&socket, token, implementation("host"))
-        .await
-        .unwrap();
+    let listener = IpcListener::bind(&socket, token, implementation("host")).unwrap();
     let server = tokio::spawn(async move { listener.accept().await });
 
     let result = IpcClient::connect(

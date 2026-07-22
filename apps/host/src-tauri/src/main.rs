@@ -1,7 +1,12 @@
-use std::{sync::Mutex, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, sync::Mutex, time::Duration};
 
+use pi_tai_host_kernel::{HostKernel, HostKernelConfig};
 use pi_tai_host_lifecycle::{HostLifecycle, QuitRequest, WindowCloseAction};
 use pi_tai_host_platform::{ReadinessEndpoint, ReadinessStatus, UnixReadinessEndpoint};
+use pi_tai_host_protocol::ImplementationInfo;
+use pi_tai_host_server::HostIpcServer;
+use pi_tai_local_ipc::{AuthToken, IpcListener};
+use pi_tai_runtime_supervisor::RuntimeProcessSpec;
 use tauri::{
     Manager, WindowEvent,
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -11,6 +16,7 @@ use tauri::{
 struct HostAgentState {
     lifecycle: Mutex<HostLifecycle>,
     readiness: Mutex<Option<UnixReadinessEndpoint>>,
+    kernel: HostKernel,
 }
 
 fn show_diagnostics(app: &tauri::AppHandle) {
@@ -52,8 +58,48 @@ fn confirm_quit(app: &tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+async fn list_sessions(
+    state: tauri::State<'_, HostAgentState>,
+) -> Result<Vec<pi_tai_host_kernel::SessionSnapshot>, String> {
+    state
+        .kernel
+        .list_sessions()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn runtime_process_spec() -> RuntimeProcessSpec {
+    if let Ok(executable) = std::env::var("PI_TAI_RUNTIME_EXECUTABLE") {
+        let args = std::env::var("PI_TAI_RUNTIME_ARGS_JSON")
+            .ok()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default();
+        return RuntimeProcessSpec {
+            executable: PathBuf::from(executable),
+            args,
+            cwd: None,
+            env: BTreeMap::new(),
+        };
+    }
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    RuntimeProcessSpec {
+        executable: PathBuf::from("node"),
+        args: vec![
+            "--experimental-strip-types".into(),
+            repository
+                .join("services/pi-runtime/src/bootstrap.ts")
+                .to_string_lossy()
+                .into_owned(),
+        ],
+        cwd: Some(repository),
+        env: BTreeMap::new(),
+    }
+}
+
 fn main() {
     let result = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![list_sessions])
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if args.iter().any(|arg| arg == "--proof-request-quit") {
                 request_quit(app);
@@ -69,6 +115,7 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let data_dir = app.path().app_local_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
             let readiness = UnixReadinessEndpoint::bind(
                 data_dir.join("proof-readiness.sock"),
                 ReadinessStatus {
@@ -89,9 +136,40 @@ fn main() {
                 .unwrap_or(0);
             lifecycle.set_active_turns(proof_active_turns);
             lifecycle.mark_ready();
+
+            let token_path = data_dir.join("host.token");
+            let socket_path = data_dir.join("host.sock");
+            let token = AuthToken::load_or_create(&token_path)?;
+            let listener = IpcListener::bind(
+                &socket_path,
+                token,
+                ImplementationInfo {
+                    name: "pi-tai-host-agent".into(),
+                    version: env!("CARGO_PKG_VERSION").into(),
+                },
+            )?;
+            let kernel = HostKernel::start(HostKernelConfig {
+                runtime: runtime_process_spec(),
+                agent_dir: data_dir.join("pi-agent"),
+                session_dir: data_dir.join("pi-sessions"),
+                faux: std::env::var("PI_TAI_RUNTIME_FAKE_PORT").as_deref() == Ok("1"),
+            });
+            let server = HostIpcServer::new(listener, kernel.clone());
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = server.run().await {
+                    eprintln!(r#"{{"event":"host.ipc_failed","message":"{error}"}}"#);
+                }
+            });
+            eprintln!(
+                r#"{{"event":"host.ipc_ready","socket":"{}","tokenFile":"{}"}}"#,
+                socket_path.display(),
+                token_path.display()
+            );
+
             app.manage(HostAgentState {
                 lifecycle: Mutex::new(lifecycle),
                 readiness: Mutex::new(Some(readiness)),
+                kernel,
             });
 
             let health = MenuItem::with_id(

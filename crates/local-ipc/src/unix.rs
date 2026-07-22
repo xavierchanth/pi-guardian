@@ -1,7 +1,10 @@
 use std::{
     fs::{OpenOptions, read_to_string, set_permissions},
     io::Write,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::{
+        fs::{OpenOptionsExt, PermissionsExt},
+        net::UnixStream as StdUnixStream,
+    },
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -46,6 +49,14 @@ impl AuthToken {
         Ok(Self(value.to_ascii_lowercase()))
     }
 
+    pub fn load(path: &Path) -> Result<Self, IpcError> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.permissions().mode() & 0o777 != 0o600 {
+            return Err(IpcError::InsecureTokenPermissions);
+        }
+        Self::parse(read_to_string(path)?.trim())
+    }
+
     pub fn load_or_create(path: &Path) -> Result<Self, IpcError> {
         match OpenOptions::new()
             .write(true)
@@ -60,13 +71,7 @@ impl AuthToken {
                 file.sync_all()?;
                 Ok(token)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let metadata = std::fs::metadata(path)?;
-                if metadata.permissions().mode() & 0o777 != 0o600 {
-                    return Err(IpcError::InsecureTokenPermissions);
-                }
-                Self::parse(read_to_string(path)?.trim())
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Self::load(path),
             Err(error) => Err(error.into()),
         }
     }
@@ -93,13 +98,23 @@ pub struct IpcListener {
 }
 
 impl IpcListener {
-    pub async fn bind(
+    pub fn bind(
         socket_path: impl AsRef<Path>,
         token: AuthToken,
         host: ImplementationInfo,
     ) -> Result<Self, IpcError> {
         let socket_path = socket_path.as_ref().to_path_buf();
-        let listener = UnixListener::bind(&socket_path)?;
+        let listener = match UnixListener::bind(&socket_path) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                if StdUnixStream::connect(&socket_path).is_ok() {
+                    return Err(error.into());
+                }
+                std::fs::remove_file(&socket_path)?;
+                UnixListener::bind(&socket_path)?
+            }
+            Err(error) => return Err(error.into()),
+        };
         set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
         Ok(Self {
             listener,

@@ -136,6 +136,34 @@ fn a_second_prompt_and_a_stale_revision_are_rejected() {
 }
 
 #[test]
+fn cancellation_transfers_control_but_waits_for_runtime_completion() {
+    let (mut session, generation) = ready_session();
+    let first = ClientId::parse("client-1").unwrap();
+    let second = ClientId::parse("client-2").unwrap();
+    let operation = OperationId::parse("operation-1").unwrap();
+    session.attach(first.clone());
+    session.attach(second.clone());
+    session
+        .accept_prompt(&first, session.revision(), operation.clone())
+        .unwrap();
+
+    session
+        .accept_cancel(&second, session.revision(), &operation)
+        .unwrap();
+
+    assert_eq!(session.active_client(), Some(&second));
+    assert_eq!(
+        session.foreground(),
+        &ForegroundState::Running {
+            operation_id: operation.clone()
+        }
+    );
+    session
+        .complete_foreground(generation, &operation, StopReason::Cancelled)
+        .unwrap();
+}
+
+#[test]
 fn relocation_keeps_broker_identity_and_advances_revision() {
     let (mut session, generation) = ready_session();
     let broker_id = session.id().clone();
