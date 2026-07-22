@@ -466,10 +466,12 @@ Use Tauri Mobile with React and Vite.
 
 ### Phase 17: remote creation, workspaces, and review
 
+Detailed terminal/backend slices and ownership contracts: [WORKSPACE_CAPABILITIES_PLAN.md](WORKSPACE_CAPABILITIES_PLAN.md).
+
 - Add allowed repository configuration.
 - Add capability-gated JJ-workspace and Git-worktree backends behind a shared workspace port.
 - Prefer JJ for mobile- or Host-created sessions when the repository and executable support it; fall back to Git worktrees only when JJ is unavailable before creation begins.
-- Create a new broker session/runtime with the managed workspace as cwd rather than changing an existing session cwd in place.
+- Model direct create-and-enter as a successor Pi session/runtime in the managed workspace while preserving the stable broker session ID; model delegated work as a separately identified child broker/Pi session with parent messaging and report semantics.
 - Add attached-workspace writer exclusion.
 - Add changed-file and paginated diff projections.
 - Add Zed discovery of mobile-created sessions.
