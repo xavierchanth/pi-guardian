@@ -65,7 +65,7 @@ export class JjWorkspaceService {
       await this.run(parentCwd, ["workspace", "list", "-T", WORKSPACE_TEMPLATE]),
       parentChangeId,
     );
-    const parentDiff = await this.run(parentCwd, ["diff", "--stat"]);
+    const parentDiff = await this.run(parentCwd, ["diff", "-r", "@", "--summary"]);
     if (parentDiff.trim()) {
       throw new Error("Subagents require a fresh empty parent @. Checkpoint the current work and create a new change first.");
     }

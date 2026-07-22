@@ -208,7 +208,7 @@ test("JJ workspace creation anchors child root to the parent @- change", async (
     if (command.includes("-r @ --no-graph")) return "parent-working\n";
     if (command.includes("-r @- --no-graph")) return "base-change\n";
     if (command.startsWith("workspace list")) return "default|parent-working\n";
-    if (command === "diff --stat") return "";
+    if (command === "diff -r @ --summary") return "";
     if (command.startsWith("workspace add")) return "";
     throw new Error(`Unexpected jj call: ${cwd}: ${command}`);
   };
@@ -221,6 +221,10 @@ test("JJ workspace creation anchors child root to the parent @- change", async (
   assert.equal(created.baseChangeId, "base-change");
   assert.equal(created.childRootChangeId, "child-root");
   assert.equal(created.parentWorkspace, "default");
+  assert.deepEqual(
+    calls.find((call) => call.args[0] === "diff")?.args,
+    ["diff", "-r", "@", "--summary"],
+  );
   assert.deepEqual(
     calls.find((call) => call.args[0] === "workspace" && call.args[1] === "add")?.args,
     ["workspace", "add", childRoot, "--name", "task-one", "-r", "base-change"],
