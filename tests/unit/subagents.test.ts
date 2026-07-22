@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { constants } from "node:fs";
+import { mkdtemp, mkdir, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import {
   DEFAULT_MODEL_PREFERENCES,
   ROLE_TOOL_NAMES,
@@ -21,12 +24,16 @@ import {
   type JjCommandRunner,
 } from "../../packages/pi-tai/src/subagents/jj.ts";
 import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
+import { PiChildProcessLauncher } from "../../packages/pi-tai/src/subagents/launcher.ts";
 import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
 import type { DelegationStore } from "../../packages/pi-tai/src/subagents/store.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+const execFileAsync = promisify(execFile);
+
 const PARENT_TOOLS = [
   "spawn_child",
+  "message_child",
   "wait_for_children",
   "child_status",
   "integrate_child",
@@ -85,6 +92,8 @@ test("instruction composition skips empty authored files and injects factual rol
   assert.match(parent, /Omakase/);
   assert.match(parent, /Parent taste/);
   assert.match(parent, /subagent_role="parent"/);
+  assert.match(parent, /jj_workspace_creation="spawn_child_only"/);
+  assert.match(parent, /next_action_after_spawn="wait_for_children"/);
   assert.match(parent, /id="thinker"/);
   assert.match(parent, /gpt-5\.6-sol/);
 });
@@ -119,8 +128,17 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
     }),
     currentChangeId: async () => "child-tip",
   } as unknown as JjWorkspaceService;
+  const childMessages: Array<{ message: string; delivery: string }> = [];
   const launcher = {
-    launch: async () => ({ pid: process.pid, logPath: "/tmp/child.log" }),
+    launch: async () => ({
+      pid: process.pid,
+      logPath: "/tmp/child.log",
+      controlPath: "/tmp/child.fifo",
+    }),
+    message: async (_record: DelegationRecord, message: string, delivery: string) => {
+      childMessages.push({ message, delivery });
+    },
+    cleanup: async () => undefined,
   };
   const orchestrator = new SubagentOrchestrator({ store, jj, launcher });
   const spawned = await orchestrator.spawnChild({
@@ -131,6 +149,11 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
   });
   assert.equal(spawned.state, "running");
   assert.equal(spawned.childRootChangeId, "child-root");
+  assert.equal(spawned.childControlPath, "/tmp/child.fifo");
+
+  const messaged = await orchestrator.message(spawned.id, "Focus on the failing test", "steer");
+  assert.deepEqual(childMessages, [{ message: "Focus on the failing test", delivery: "steer" }]);
+  assert.equal(messaged.parentMessages?.[0]?.message, "Focus on the failing test");
 
   const waiting = orchestrator.wait("parent-session");
   const reported = await orchestrator.report(spawned.id, {
@@ -140,6 +163,32 @@ test("orchestrator persists child launch, wakes parent wait from report, and cap
   });
   assert.equal(reported.report?.childTipChangeId, "child-tip");
   assert.deepEqual((await waiting).map((record) => record.state), ["completed"]);
+});
+
+test("persistent child control channel writes RPC steering commands", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-control-"));
+  const storeRoot = join(stateRoot, "delegations");
+  const controlDir = join(stateRoot, "control");
+  const controlPath = join(controlDir, "one.fifo");
+  await mkdir(controlDir);
+  await execFileAsync("mkfifo", [controlPath]);
+  const reader = await open(controlPath, constants.O_RDWR | constants.O_NONBLOCK);
+  const launcher = new PiChildProcessLauncher({ root: storeRoot } as DelegationStore);
+  const child = { ...record("one", "running"), childControlPath: controlPath };
+  try {
+    await launcher.message(child, "Prioritize the regression test", "followUp");
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await reader.read(buffer);
+    assert.deepEqual(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").trim()), {
+      type: "prompt",
+      message: "Prioritize the regression test",
+      streamingBehavior: "followUp",
+    });
+  } finally {
+    await reader.close();
+    await launcher.cleanup(child);
+    await rm(stateRoot, { recursive: true, force: true });
+  }
 });
 
 test("subagent extension starts standalone and enables parent tools only through command", async () => {
@@ -169,10 +218,12 @@ test("subagent extension starts standalone and enables parent tools only through
     loadInstructions: () => ({ system: "", parent: "", child: "" }),
   });
   const notifications: string[] = [];
+  let leafEntry: unknown;
   const ctx = {
     cwd: "/repo",
     sessionManager: {
       getEntries: () => entries,
+      getLeafEntry: () => leafEntry,
       getSessionId: () => "parent",
       getSessionFile: () => "/session.jsonl",
     },
@@ -181,11 +232,34 @@ test("subagent extension starts standalone and enables parent tools only through
   await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
   assert.deepEqual(active, ["read"]);
   assert.ok(tools.has("spawn_child"));
+  assert.ok(tools.has("message_child"));
   assert.ok(tools.has("report_to_parent"));
 
   await commands.get("sub-agents")?.("", ctx);
   assert.deepEqual(active, ["read", ...PARENT_TOOLS]);
   assert.match(notifications.at(-1) ?? "", /enabled/);
+
+  const directWorkspace = await handlers.get("tool_call")?.[0]({
+    toolName: "bash",
+    input: { command: "jj workspace add .jj/workspaces/task" },
+  }, ctx);
+  assert.match(directWorkspace.reason, /must use spawn_child/);
+
+  await handlers.get("turn_start")?.[0]({}, ctx);
+  leafEntry = {
+    type: "message",
+    message: {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "spawn_child" }, { type: "toolCall", name: "read" }],
+    },
+  };
+  const earlierSiblingWork = await handlers.get("tool_call")?.[0]({ toolName: "read", input: {} }, ctx);
+  assert.match(earlierSiblingWork.reason, /same turn as spawn_child/);
+
+  await handlers.get("tool_call")?.[0]({ toolName: "spawn_child", input: {} }, ctx);
+  const laterSiblingWork = await handlers.get("tool_call")?.[0]({ toolName: "read", input: {} }, ctx);
+  assert.match(laterSiblingWork.reason, /same turn as spawn_child/);
+  leafEntry = undefined;
 
   const prompt = await handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, ctx);
   assert.match(prompt.systemPrompt, /subagent_role="parent"/);

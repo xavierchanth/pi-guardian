@@ -6,6 +6,7 @@ import type { JjWorkspaceService } from "./jj.ts";
 import {
   isResolvedDelegation,
   waitForChildren,
+  type ChildMessageDelivery,
   type ChildReport,
   type DelegationRecord,
   type DelegationStore,
@@ -70,6 +71,7 @@ export class SubagentOrchestrator {
         ...(isResolvedDelegation(current) ? {} : { state: "running" as const }),
         childPid: launched.pid,
         childLogPath: launched.logPath,
+        childControlPath: launched.controlPath,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -105,6 +107,26 @@ export class SubagentOrchestrator {
     });
   }
 
+  async message(id: string, message: string, delivery: ChildMessageDelivery): Promise<DelegationRecord> {
+    const text = message.trim();
+    if (!text) throw new Error("Child message must not be empty.");
+    const record = await this.child(id);
+    if (record.state !== "running") {
+      throw new Error(`Messages can be sent only to a running child; current state is ${record.state}.`);
+    }
+    if (!record.childPid || !isProcessAlive(record.childPid)) {
+      throw new Error("Child process is not running.");
+    }
+    await this.launcher.message(record, text, delivery);
+    return this.store.update(id, (current) => ({
+      ...current,
+      parentMessages: [
+        ...(current.parentMessages ?? []),
+        { message: text, delivery, sentAt: new Date().toISOString() },
+      ],
+    }));
+  }
+
   async attachChildSession(id: string, session: { id: string; file?: string }): Promise<DelegationRecord> {
     return this.store.update(id, (record) => ({
       ...record,
@@ -138,6 +160,7 @@ export class SubagentOrchestrator {
         throw new Error("Child integration can be finalized only after integration, conflict resolution, and parent verification.");
       }
       await this.jj.finalizeChildWorkspace(record);
+      await this.launcher.cleanup(record);
       return this.store.update(id, (current) => ({ ...current, state: "integrated" }));
     }
     if (record.state !== "completed") {
@@ -164,11 +187,18 @@ export class SubagentOrchestrator {
       }
     }
     await this.jj.abandonChildWorkspace(record);
+    await this.launcher.cleanup(record);
     return this.store.update(id, (current) => ({ ...current, state: "abandoned" }));
+  }
+
+  async cleanupChildControl(id: string): Promise<void> {
+    const record = await this.store.get(id);
+    if (record) await this.launcher.cleanup(record);
   }
 
   private async reconcileExitedChild(record: DelegationRecord): Promise<DelegationRecord> {
     if (isResolvedDelegation(record) || !record.childPid || isProcessAlive(record.childPid)) return record;
+    await this.launcher.cleanup(record);
     return this.store.update(record.id, (current) => isResolvedDelegation(current)
       ? current
       : {

@@ -10,6 +10,7 @@ import { Type } from "typebox";
 import {
   DEFAULT_MODEL_PREFERENCES,
   MODEL_PREFERENCE_IDS,
+  PARENT_TOOL_NAMES,
   activeToolsForRole,
   composePiTaiInstructions,
   parseSubagentsCommand,
@@ -54,6 +55,8 @@ export function registerSubagents(
   let childDelegationId = processChildDelegationId;
   let role: SubagentRole = "standalone";
   let childDelegation: DelegationRecord | undefined;
+  let spawnSeenThisTurn = false;
+  const parentTools = new Set<string>(PARENT_TOOL_NAMES);
 
   const applyRoleTools = () => {
     pi.setActiveTools(activeToolsForRole(pi.getActiveTools(), role));
@@ -111,6 +114,45 @@ export function registerSubagents(
     };
   });
 
+  pi.on("turn_start", () => {
+    spawnSeenThisTurn = false;
+  });
+
+  pi.on("tool_call", async (event, ctx) => {
+    if (role !== "parent") return;
+    if (event.toolName === "spawn_child") {
+      spawnSeenThisTurn = true;
+      return;
+    }
+    if (event.toolName === "bash" && requestsJjWorkspaceCreation(event.input)) {
+      return {
+        block: true,
+        reason: "Parent sessions must use spawn_child to create a JJ workspace and delegate its task; do not run jj workspace add directly.",
+      };
+    }
+    if (parentTools.has(event.toolName)) return;
+    if (spawnSeenThisTurn || entrySpawnsChild(ctx.sessionManager.getLeafEntry?.())) {
+      return {
+        block: true,
+        reason: "Parent work cannot run in the same turn as spawn_child. Delegate the complete task, then wait_for_children.",
+      };
+    }
+    const activeChildren = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+      .filter((record) => !isResolvedDelegation(record));
+    if (activeChildren.length > 0) {
+      return {
+        block: true,
+        reason: `Parent work is paused while ${activeChildren.length} child delegation(s) are active. Use message_child, child_status, wait_for_children, or abandon_child.`,
+      };
+    }
+  });
+
+  pi.on("session_shutdown", async (event) => {
+    if (event.reason === "quit" && role === "child" && childDelegationId) {
+      await orchestrator.cleanupChildControl(childDelegationId);
+    }
+  });
+
   pi.registerCommand("sub-agents", {
     description: "Enable, inspect, or disable direct-child subagents",
     handler: async (args, ctx) => {
@@ -154,11 +196,12 @@ export function registerSubagents(
   pi.registerTool({
     name: "spawn_child",
     label: "Spawn Child",
-    description: "Create a linked JJ workspace and persistent direct-child Pi session for a delegated task. Parent sessions only.",
-    promptSnippet: "Delegate a bounded task to a direct child in its own JJ workspace",
+    description: "Create a linked JJ workspace and persistent direct-child Pi session that exclusively performs the delegated task. Parent sessions only.",
+    promptSnippet: "Create a JJ workspace and delegate all work in it to a direct child",
     promptGuidelines: [
-      "Use spawn_child only for bounded work with explicit acceptance criteria.",
-      "After spawning related children, use wait_for_children instead of churning on overlapping parent work.",
+      "Use spawn_child whenever the user asks a parent session to create a JJ workspace for work; include the complete task and acceptance criteria so the child performs all workspace work.",
+      "Never run jj workspace add directly in a parent session; spawn_child owns workspace creation.",
+      "After spawning requested children, call wait_for_children immediately instead of reading, editing, testing, or otherwise doing their work in the parent thread.",
     ],
     parameters: Type.Object({
       task: Type.String({ description: "Complete bounded task and acceptance criteria for the child" }),
@@ -175,7 +218,35 @@ export function registerSubagents(
         parentSessionId: ctx.sessionManager.getSessionId(),
         parentSessionFile: ctx.sessionManager.getSessionFile(),
       });
-      return result(`Spawned child ${record.id} (${record.modelPreferenceId}) in ${record.childWorkspacePath}.`, record);
+      return result(`Spawned child ${record.id} (${record.modelPreferenceId}) in ${record.childWorkspacePath}. Parent work is paused; wait for the child or message it.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "message_child",
+    label: "Message Child",
+    description: "Send updated instructions to a running direct child through its persistent control channel.",
+    promptSnippet: "Steer a running child or queue a follow-up instruction",
+    promptGuidelines: [
+      "Use message_child to correct or extend a running child's delegated instructions without doing the work in the parent thread.",
+    ],
+    parameters: Type.Object({
+      delegationId: Type.String(),
+      message: Type.String({ minLength: 1, maxLength: 16_000 }),
+      delivery: Type.Optional(StringEnum(["steer", "followUp"] as const, {
+        description: "steer applies after the current child turn; followUp waits until its current run settles",
+      })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireRole(role, "parent");
+      const existing = await orchestrator.child(params.delegationId);
+      assertParent(existing, ctx.sessionManager.getSessionId());
+      const record = await orchestrator.message(
+        params.delegationId,
+        params.message,
+        params.delivery ?? "steer",
+      );
+      return result(`Sent ${params.delivery ?? "steer"} message to child ${record.id}.`, record);
     },
   });
 
@@ -270,7 +341,7 @@ export function registerSubagents(
       changedFiles: Type.Optional(Type.Array(Type.String())),
       concerns: Type.Optional(Type.Array(Type.String())),
     }),
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _onUpdate, ctx) {
       requireRole(role, "child");
       if (!childDelegationId) throw new Error("Child delegation identity is unavailable.");
       const record = await orchestrator.report(childDelegationId, {
@@ -280,6 +351,7 @@ export function registerSubagents(
         ...(params.changedFiles ? { changedFiles: params.changedFiles } : {}),
         ...(params.concerns ? { concerns: params.concerns } : {}),
       });
+      ctx.shutdown();
       return {
         ...result(`Reported ${record.state} to parent for ${record.id}.`, record),
         terminate: true,
@@ -316,6 +388,30 @@ function requireRole(actual: SubagentRole, expected: SubagentRole): void {
 
 function assertParent(record: DelegationRecord, sessionId: string): void {
   if (record.parentSessionId !== sessionId) throw new Error(`Delegation ${record.id} does not belong to this parent session.`);
+}
+
+function requestsJjWorkspaceCreation(input: unknown): boolean {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const command = (input as { command?: unknown }).command;
+  return typeof command === "string" && /(?:^|[;&|()\s])jj\b[^\n;&|]*\bworkspace\s+add(?:\s|$)/i.test(command);
+}
+
+function entrySpawnsChild(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const candidate = entry as {
+    type?: unknown;
+    message?: { role?: unknown; content?: unknown };
+  };
+  return candidate.type === "message"
+    && candidate.message?.role === "assistant"
+    && Array.isArray(candidate.message.content)
+    && candidate.message.content.some((part) => Boolean(
+      part
+      && typeof part === "object"
+      && !Array.isArray(part)
+      && (part as { type?: unknown }).type === "toolCall"
+      && (part as { name?: unknown }).name === "spawn_child",
+    ));
 }
 
 function formatReports(records: readonly DelegationRecord[]): string {

@@ -80,14 +80,14 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 Subagents are disabled by default. Run `/sub-agents` to make the current session a parent, `/sub-agents status` to inspect it, or `/sub-agents off` after every child is resolved. New and forked sessions start standalone.
 
-A parent can delegate bounded tasks with `spawn_child`. Every direct child receives:
+A parent delegates workspace work with `spawn_child`; direct `jj workspace add` calls are blocked in parent mode. Every direct child receives:
 
 - an independent persistent Pi session and detached process;
 - a dedicated JJ workspace rooted at the parent's `@-` change;
 - one semantic model preference (`thinker`, `worker`, or `mechanical`);
 - only `report_to_parent`, with no ability to delegate further.
 
-Parents receive `spawn_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. `wait_for_children` waits without parent model calls until its snapshot reports. Completed child stacks are integrated with `jj rebase -s <childRootChangeId> -B <parentWorkspace>@`; all descendants are preserved. Integration cleanup is a separate finalization step after parent validation, and abandonment removes only the workspace—not the child's JJ changes.
+Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. While a child is active, parent work tools are blocked: the parent can message, inspect, wait for, or abandon the child, but it cannot duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. Completed child stacks are integrated with `jj rebase -s <childRootChangeId> -B <parentWorkspace>@`; all descendants are preserved. Integration cleanup is a separate finalization step after parent validation, and abandonment removes only the workspace—not the child's JJ changes. There is no generic cleanup tool because reported workspaces must remain available for integration or explicit abandonment.
 
 Pi-Tai composes normal Pi context with three intentionally empty, user-authored files: `packages/pi-tai/instructions/system.md`, `parent.md`, and `child.md`. It also adds generated factual role/delegation metadata. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for lifecycle and recovery details.
 

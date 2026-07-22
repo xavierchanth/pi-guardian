@@ -39,6 +39,7 @@ export const DEFAULT_MODEL_PREFERENCES: readonly ModelPreference[] = Object.free
 
 export const PARENT_TOOL_NAMES = [
   "spawn_child",
+  "message_child",
   "wait_for_children",
   "child_status",
   "integrate_child",
@@ -95,6 +96,9 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
   if (options.role !== "standalone") {
     const facts = [`<pi_tai_subagents subagent_role="${options.role}">`];
     if (options.role === "parent") {
+      facts.push(
+        '<delegation_policy jj_workspace_creation="spawn_child_only" parent_work_while_child_active="forbidden" next_action_after_spawn="wait_for_children" />',
+      );
       for (const preference of options.modelPreferences ?? []) {
         facts.push(
           `<model_preference id="${escapeAttribute(preference.id)}" provider="${escapeAttribute(preference.provider)}" model="${escapeAttribute(preference.model)}" effort="${preference.effort}">${escapeText(preference.description)}</model_preference>`,

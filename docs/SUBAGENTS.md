@@ -30,7 +30,8 @@ Commands:
 
 Parent tools:
 
-- `spawn_child`: create and launch one bounded child task;
+- `spawn_child`: create a JJ workspace and launch one bounded child that exclusively owns the work in it;
+- `message_child`: steer a running child or queue a follow-up instruction through its persistent control channel;
 - `wait_for_children`: block without parent LLM calls until the uncollected child snapshot resolves;
 - `child_status`: inspect one or all direct children;
 - `integrate_child`: rebase a completed child subtree, then separately finalize after verification;
@@ -50,9 +51,11 @@ Child tool:
 | `worker` | Planned work requiring trusted engineering judgment | `openai-codex/gpt-5.6-sol` | low |
 | `mechanical` | Explicit repetitive transformations | `openai-codex/gpt-5.6-luna` | high |
 
-The launcher starts `pi --mode json` with only the Pi-Tai extension, a persistent session, the selected model and effort, and the child workspace as its working directory. Output is retained beside the delegation records.
+The launcher starts a persistent `pi --mode rpc` child with only the Pi-Tai extension, a persistent session, the selected model and effort, and the child workspace as its working directory. A mode-`0600` FIFO carries the initial prompt and later `message_child` steering/follow-up commands, so messaging continues to work after a parent process restart. RPC output is retained beside the delegation records. After `report_to_parent`, the child requests graceful shutdown and removes its control FIFO.
 
 ## JJ topology
+
+In parent mode, `spawn_child` is the only supported way to create a JJ workspace for delegated work. Direct parent `jj workspace add` calls are blocked. Once a child is active, non-orchestration parent tool calls are blocked until the child resolves; the parent should use `wait_for_children` rather than inspect, edit, or test the child's workspace itself.
 
 Before spawning, the parent working copy `@` must have no file changes. Pi-Tai captures:
 
@@ -78,18 +81,21 @@ jj rebase -s <childRootChangeId> -B <parentWorkspace>@
 
 `abandon_child` may terminate the process and forget/remove the workspace, but it never runs `jj abandon` or squashes the child's changes.
 
+There is intentionally no generic `cleanup_child` operation. A reported child process cleans up its own control channel, but its JJ workspace must remain available for integration and parent verification. Workspace cleanup is therefore explicit and disposition-specific: `integrate_child` with `finalize: true` after successful verification, or `abandon_child` when the parent chooses not to integrate.
+
 ## Durable state and recovery
 
 Durable child state lives under:
 
 ```text
 ~/.pi/agent/pi-tai/subagents/
+├── control/
 ├── delegations/
 ├── sessions/
 └── logs/
 ```
 
-Delegation records are atomically replaced under a per-delegation lock and include parent/child session IDs, process/log metadata, workspace names and paths, base/root/tip change IDs, reports, conflicts, and lifecycle state.
+Delegation records are atomically replaced under a per-delegation lock and include parent/child session IDs, process/log/control metadata, parent message history, workspace names and paths, base/root/tip change IDs, reports, conflicts, and lifecycle state.
 
 If a process exits without `report_to_parent`, the launcher or later status reconciliation marks it failed. Child changes and workspace state remain available for diagnosis. `jj workspace update-stale` handles operation-ID drift before integration; missing or mismatched recorded roots fail rather than guessing at a replacement subtree.
 
@@ -135,12 +141,17 @@ Git records need backend-appropriate durable linkage: repository identity, base 
 
 A standalone agent may create a JJ workspace or Git worktree for inspection, staging, or a future session. Creation always returns and records the absolute path. It does **not** change the current Pi session's cwd.
 
-Pi's tools, resource discovery, project trust, and extension context are bound to the cwd used to construct `AgentSessionRuntime`. Running `cd` in one shell command or calling `process.chdir()` would not safely rebind those services. Work intended to execute inside the new workspace therefore uses one of these flows:
+Pi's tools, resource discovery, project trust, and extension context are bound to the cwd used to construct `AgentSessionRuntime`. Running `cd` in one shell command or calling `process.chdir()` would not safely rebind those services.
 
+Pi already exposes the primitives for a real transition. `SessionManager.forkFrom(sourceSessionFile, targetCwd)` creates a new persistent session with a new ID and target-cwd header, links the old file as `parentSession`, and copies the old session entries. An extension command can then call `ctx.switchSession(newSessionFile)`; `AgentSessionRuntime` shuts down the old session, rebuilds cwd-bound services and resources, rebinds extensions, and starts the copied session in the workspace. Code after replacement must use only the fresh `withSession` context.
+
+The future capability may therefore offer these distinct flows:
+
+- create the workspace and return its path without moving the agent;
 - spawn a child whose new Pi session starts with the workspace path as cwd;
-- start a separate terminal Pi session from the returned path;
-- in hosted operation, ask the Host to create a new broker session/runtime attached to that path.
+- fork the current session into the workspace and switch to it through a `/cap:` extension command;
+- in hosted operation, ask the Host either to transition the broker session to the new Pi session file/cwd or create a separate broker session attached to it.
 
-A future explicit workspace/session transition may replace the active runtime, but it should be modeled as session replacement rather than an ordinary tool changing cwd in place.
+Model-callable tools cannot directly perform session replacement because they receive `ExtensionContext`, not `ExtensionCommandContext`. They may prepare a workspace, but the actual transition belongs to an extension command or typed Host operation. The transition must be rejected while unresolved child delegations or other feature state cannot be safely rebound. Copied work context and extension entries reconstruct normally; features keyed by the old Pi session ID need explicit migration or reset policy.
 
 JJ workspaces continue to live under `<repo>/.jj/workspaces/<name>`. The provisional standalone Git location is the Pi-Tai managed data root, such as `~/.pi/agent/pi-tai/workspaces/git/<repo-key>/<workspace-id>`; the Host uses its platform application-data equivalent. The final path policy must avoid untracked nested worktrees, record every path durably, and return it in capability and subagent results.

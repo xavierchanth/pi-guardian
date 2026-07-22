@@ -27,6 +27,14 @@ export interface ChildReport {
   reportedAt: string;
 }
 
+export type ChildMessageDelivery = "steer" | "followUp";
+
+export interface ParentMessage {
+  message: string;
+  delivery: ChildMessageDelivery;
+  sentAt: string;
+}
+
 export interface DelegationRecord {
   version: 1;
   id: string;
@@ -45,6 +53,8 @@ export interface DelegationRecord {
   childSessionFile?: string;
   childPid?: number;
   childLogPath?: string;
+  childControlPath?: string;
+  parentMessages?: ParentMessage[];
   parentCollectedAt?: string;
   report?: ChildReport;
   conflictFiles?: string[];
