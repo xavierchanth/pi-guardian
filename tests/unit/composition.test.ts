@@ -27,6 +27,9 @@ test("composition root registers every feature once in order", async () => {
       guardian: async () => {
         calls.push("guardian");
       },
+      footer: () => {
+        calls.push("footer");
+      },
       ansiTheme: () => {
         calls.push("ansi-theme");
       },
@@ -49,6 +52,7 @@ test("composition root registers every feature once in order", async () => {
     "session-title",
     "notifications",
     "guardian",
+    "footer",
     "ansi-theme",
   ]);
 });

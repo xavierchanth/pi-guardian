@@ -4,7 +4,7 @@ import type {
   ExtensionContext,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import {
   PLAN_PRIORITIES,
@@ -23,10 +23,7 @@ import {
 import {
   collapsedWorkContextText,
   fullWorkContextText,
-  workContextStatusLines,
 } from "./presentation.ts";
-
-const WORK_CONTEXT_WIDGET_ID = "pi-tai-work-context";
 
 const PlanItemSchema = Type.Object({
   content: Type.String({ description: "Concise plan step" }),
@@ -43,34 +40,6 @@ export const UpdatePlanSchema = Type.Object({
 });
 
 export type UpdatePlanInput = Static<typeof UpdatePlanSchema>;
-
-class WorkContextWidget {
-  private readonly snapshot: WorkContextSnapshot;
-  private readonly theme: Theme;
-
-  constructor(snapshot: WorkContextSnapshot, theme: Theme) {
-    this.snapshot = snapshot;
-    this.theme = theme;
-  }
-
-  render(width: number): string[] {
-    const [goalLine, planLine] = workContextStatusLines(this.snapshot);
-    return [
-      truncateToWidth(
-        this.theme.fg("accent", this.theme.bold("Goal:")) +
-          this.theme.fg("muted", goalLine.slice("Goal:".length)),
-        Math.max(1, width),
-      ),
-      truncateToWidth(
-        this.theme.fg("accent", this.theme.bold("Plan:")) +
-          this.theme.fg("muted", planLine.slice("Plan:".length)),
-        Math.max(1, width),
-      ),
-    ];
-  }
-
-  invalidate(): void {}
-}
 
 class PlanStatusView {
   private readonly text: Text;
@@ -118,29 +87,11 @@ export function registerWorkContext(
   pi: ExtensionAPI,
   store: WorkContextStore = createPiSessionWorkContextStore(),
 ): WorkContextStore {
-  const refreshWidget = (ctx: ExtensionContext): void => {
-    if (ctx.mode !== "tui") return;
-    const snapshot = store.current();
-    if (!snapshot) {
-      ctx.ui.setWidget(WORK_CONTEXT_WIDGET_ID, undefined);
-      return;
-    }
-    ctx.ui.setWidget(
-      WORK_CONTEXT_WIDGET_ID,
-      (_tui, theme) => new WorkContextWidget(snapshot, theme),
-      { placement: "belowEditor" },
-    );
-  };
-
   const reconstruct = (_event: unknown, ctx: ExtensionContext): void => {
     store.reconstruct(ctx);
-    refreshWidget(ctx);
   };
   pi.on("session_start", reconstruct);
   pi.on("session_tree", reconstruct);
-  pi.on("session_shutdown", (_event, ctx) => {
-    ctx.ui.setWidget(WORK_CONTEXT_WIDGET_ID, undefined);
-  });
 
   pi.registerCommand("plan-status", {
     description: "Show the current goal and complete plan",
@@ -173,10 +124,9 @@ export function registerWorkContext(
       "Do not use update_plan for simple one-step requests that can be completed immediately.",
     ],
     parameters: UpdatePlanSchema,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params) {
       const snapshot = validateWorkContextUpdate(params, store.current());
       store.replace(snapshot);
-      refreshWidget(ctx);
       return {
         content: [{ type: "text" as const, text: formatWorkContext(snapshot) }],
         details: workContextDetails(snapshot),

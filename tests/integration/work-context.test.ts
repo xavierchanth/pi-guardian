@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   validateWorkContextUpdate,
   workContextDetails,
@@ -10,10 +9,9 @@ import { registerWorkContext } from "../../packages/pi-tai/src/work-context/regi
 
 type Handler = (event: unknown, ctx: any) => unknown;
 
-test("registered update_plan reconstructs state and maintains its TUI presentation", async () => {
+test("registered update_plan reconstructs state and supports on-demand TUI presentation", async () => {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, any>();
-  const widgetUpdates: Array<{ id: string; value: any; options?: any }> = [];
   let customViews = 0;
   let tool: any;
   const pi = {
@@ -45,9 +43,6 @@ test("registered update_plan reconstructs state and maintains its TUI presentati
     mode: "tui",
     sessionManager: { getBranch: () => branch },
     ui: {
-      setWidget(id: string, value: any, options?: any) {
-        widgetUpdates.push({ id, value, options });
-      },
       notify() {},
       async custom(factory: any) {
         customViews++;
@@ -56,16 +51,6 @@ test("registered update_plan reconstructs state and maintains its TUI presentati
     },
   };
   await emit(handlers, "session_start", ctx);
-
-  const initialWidget = widgetUpdates.at(-1);
-  assert.equal(initialWidget?.id, "pi-tai-work-context");
-  assert.equal(initialWidget?.options?.placement, "belowEditor");
-  const component = initialWidget?.value({}, fakeTheme());
-  const lines = component.render(32);
-  assert.equal(lines.length, 2);
-  assert.match(lines[0], /^Goal:/);
-  assert.match(lines[1], /^Plan: 0\/1 \| Now:/);
-  assert.ok(lines.every((line: string) => visibleWidth(line) <= 32));
 
   const result = await tool.execute(
     "call",
@@ -79,7 +64,6 @@ test("registered update_plan reconstructs state and maintains its TUI presentati
   );
   assert.equal(result.details.plan[0].status, "completed");
   assert.match(result.content[0].text, /Goal: Ship/);
-  assert.ok(widgetUpdates.length >= 2);
   const collapsed = tool
     .renderResult(result, { expanded: false }, fakeTheme(), {})
     .render(100)
@@ -111,8 +95,6 @@ test("registered update_plan reconstructs state and maintains its TUI presentati
     ctx,
   ), /must be in_progress/);
 
-  await emit(handlers, "session_shutdown", ctx);
-  assert.equal(widgetUpdates.at(-1)?.value, undefined);
 });
 
 test("plan-status reports when no work context exists", async () => {

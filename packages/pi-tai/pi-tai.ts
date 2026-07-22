@@ -6,6 +6,7 @@ import {
   registerPiTaiConfig,
   type PiTaiConfigService,
 } from "./src/config/register.ts";
+import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
 import {
   registerNotifications,
@@ -41,6 +42,7 @@ export interface PiTaiRegistrars {
   sessionTitle: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
+  footer: PiTaiRegistrar;
   ansiTheme: PiTaiRegistrar;
 }
 
@@ -61,6 +63,9 @@ const productionRegistrars: PiTaiRegistrars = {
   guardian: (pi, runtime) => registerApprovalGuardian(pi, {
     workContext: () => runtime.workContext.current(),
   }),
+  footer: (pi, runtime) => {
+    registerFooter(pi, runtime.workContext);
+  },
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
   },
@@ -88,6 +93,7 @@ export function createPiTaiExtension(
     await registrars.sessionTitle(pi, runtime);
     await registrars.notifications(pi, runtime);
     await registrars.guardian(pi, runtime);
+    await registrars.footer(pi, runtime);
     await registrars.ansiTheme(pi, runtime);
   };
 }
