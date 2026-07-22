@@ -1,6 +1,6 @@
 # Pi-Tai subagents
 
-Pi-Tai provides opt-in, two-tier delegation backed by persistent Pi sessions and Jujutsu workspaces. It is disabled by default and has no configuration UX in this pass.
+Pi-Tai provides opt-in, two-tier delegation backed by persistent Pi sessions and isolated workspaces. JJ is preferred; Git worktrees are selected before creation when JJ is unavailable. Delegation is disabled by default.
 
 ## Roles and instructions
 
@@ -24,13 +24,14 @@ All three Markdown files are intentionally empty and remain user-authored. Gener
 
 Commands:
 
-- `/sub-agents` or `/sub-agents on`: enable the parent role for this session;
-- `/sub-agents status`: show role and child counts;
-- `/sub-agents off`: return to standalone after every child is resolved.
+- `/cap:subagents on`: enable the parent role for this session;
+- `/cap:subagents status`: show role and child counts;
+- `/cap:subagents off`: return to standalone after every child is resolved.
+- `/cap:jj-workspaces ...` and `/cap:git-worktrees ...`: manage direct standalone workspace transitions without entering parent mode.
 
 Parent tools:
 
-- `spawn_child`: create a JJ workspace and launch one bounded child that exclusively owns the work in it;
+- `spawn_child`: create a JJ workspace, or a Git worktree fallback, and launch one bounded child that exclusively owns the work in it;
 - `message_child`: steer a running child or queue a follow-up instruction through its persistent control channel;
 - `wait_for_children`: block without parent LLM calls until the uncollected child snapshot resolves;
 - `child_status`: inspect one or all direct children;
@@ -53,11 +54,11 @@ Child tool:
 
 The launcher starts a persistent `pi --mode rpc` child with only the Pi-Tai extension, a persistent session, the selected model and effort, and the child workspace as its working directory. A mode-`0600` FIFO carries the initial prompt and later `message_child` steering/follow-up commands, so messaging continues to work after a parent process restart. RPC output is retained beside the delegation records. After `report_to_parent`, the child requests graceful shutdown and removes its control FIFO.
 
-## JJ topology
+## Backend topology
 
-In parent mode, `spawn_child` is the only supported way to create a JJ workspace for delegated work. Direct parent `jj workspace add` calls are blocked. Once a child is active, non-orchestration parent tool calls are blocked until the child resolves; the parent should use `wait_for_children` rather than inspect, edit, or test the child's workspace itself.
+In parent mode, `spawn_child` is the only supported way to create a workspace for delegated work. Direct parent `jj workspace add`, `git worktree add`, and standalone relocation tools are blocked. Once a child is active, non-orchestration parent tool calls are blocked until the child resolves; the parent should use `wait_for_children` rather than inspect, edit, or test the child's workspace itself.
 
-Before spawning, the parent working copy `@` must have no file changes. Pi-Tai captures:
+For JJ delegation, the parent working copy `@` must have no file changes. Pi-Tai captures:
 
 - the current parent workspace name;
 - parent `@-` as `baseChangeId`;
@@ -79,7 +80,9 @@ jj rebase -s <childRootChangeId> -B <parentWorkspace>@
 
 `-s` moves the root and every descendant. Conflicts are reported to the parent and remain in the JJ stack for normal resolution. After parent checks pass, calling `integrate_child` with `finalize: true` verifies no conflicts remain, forgets the child workspace, and removes its directory.
 
-`abandon_child` may terminate the process and forget/remove the workspace, but it never runs `jj abandon` or squashes the child's changes.
+For Git delegation, Pi-Tai creates a managed worktree on `pi-tai/delegation/<name>` from parent `HEAD`. The child must commit intended changes and leave the worktree clean before reporting. Integration stages a non-squash merge with `--no-ff --no-commit`; conflicts remain visible for parent resolution, and finalization creates the merge commit only after verification.
+
+`abandon_child` may terminate the process and forget/remove a clean workspace, but it never runs `jj abandon`, squashes history, deletes a Git child branch, or force-removes a dirty Git worktree. Dirty Git worktrees remain at their recorded recovery path.
 
 There is intentionally no generic `cleanup_child` operation. A reported child process cleans up its own control channel, but its JJ workspace must remain available for integration and parent verification. Workspace cleanup is therefore explicit and disposition-specific: `integrate_child` with `finalize: true` after successful verification, or `abandon_child` when the parent chooses not to integrate.
 
@@ -99,16 +102,16 @@ Delegation records are atomically replaced under a per-delegation lock and inclu
 
 If a process exits without `report_to_parent`, the launcher or later status reconciliation marks it failed. Child changes and workspace state remain available for diagnosis. `jj workspace update-stale` handles operation-ID drift before integration; missing or mismatched recorded roots fail rather than guessing at a replacement subtree.
 
-## Roadmap: capability-gated workspace backends
+## Capability-gated workspace backends
 
-The implemented subagent system remains JJ-only. A future workspace capability separates repository isolation from child orchestration so standalone agents can also create and inspect isolated checkouts without automatically spawning another agent. The test-first delivery sequence is defined in [WORKSPACE_CAPABILITIES_PLAN.md](WORKSPACE_CAPABILITIES_PLAN.md).
+Workspace capabilities separate repository isolation from child orchestration so standalone agents can create or enter isolated checkouts without automatically spawning another agent. The test-first delivery record is defined in [WORKSPACE_CAPABILITIES_PLAN.md](WORKSPACE_CAPABILITIES_PLAN.md).
 
 Product terminology distinguishes a generic Pi-Tai **workspace** from its backend-specific forms:
 
 - a **JJ workspace**, managed by `jj workspace`;
 - a **Git worktree**, managed by `git worktree`.
 
-The extension-facing `SubagentPort` should depend on a generic `WorkspacePort` rather than directly on `JjWorkspaceService`. Backend implementations remain separate:
+`SubagentOrchestrator` depends on a generic `WorkspacePort` rather than directly on `JjWorkspaceService`. Backend implementations remain separate:
 
 ```text
 WorkspacePort
@@ -132,7 +135,7 @@ The direct path must not create a `DelegationRecord`, expose `report_to_parent`,
 
 The delegated path keeps the behavior enforced by the current implementation: `spawn_child` is the only parent operation that allocates a workspace, the child starts a distinct persistent RPC session in that path, parent messages travel through the durable child control channel, and the child reports back before terminating. Parent mode must reject direct workspace-transition tools and commands.
 
-The corresponding session capabilities and model-facing tool families also remain separate; the first pass should not expose one ambiguous `create_workspace` tool. Draft tools include `create_jj_workspace`/`jj_workspace_status` and `create_git_worktree`/`git_worktree_status`, with backend-specific cleanup and integration operations added only after their safety contracts are defined. Draft terminal commands use the reserved capability namespace:
+The corresponding session capabilities and model-facing tool families remain separate; Pi-Tai does not expose one ambiguous `create_workspace` tool. Tools are `create_jj_workspace`/`jj_workspace_status` and `create_git_worktree`/`git_worktree_status`. Terminal commands use the reserved capability namespace:
 
 ```text
 /cap:jj-workspaces on|off|status
@@ -148,9 +151,9 @@ Enabling subagents acquires one workspace backend as an internal dependency:
 
 An internal dependency lease makes the backend service available to `SubagentPort` but does **not** expose direct workspace-transition tools to the parent model. Direct user enablement in a standalone session acquires a separate tool-exposure lease. This distinction preserves the latest parent invariant: every parent-created workspace belongs to a child through `spawn_child`.
 
-Fallback is decided before creating anything. A failed or partially completed JJ operation must not silently retry through Git and leave mixed repository state. Explicit backend selection may be added later. Capability dependency ownership must also be tracked: disabling subagents releases its internal backend lease, but must not disable a workspace capability the user enabled independently.
+Fallback is decided before creating anything. A failed or partially completed JJ operation must not silently retry through Git and leave mixed repository state. Direct standalone commands select their explicit namespace; subagents use automatic JJ-first selection. Capability dependency ownership must also be tracked: disabling subagents releases its internal backend lease, but must not disable a workspace capability the user enabled independently.
 
-Git records need backend-appropriate durable linkage: repository identity, base commit, branch/ref, worktree path, and reported tip commits. Cleanup must preserve branches, commits, and uncommitted files unless an explicit destructive operation is separately authorized. Git integration policy—merge, rebase, or cherry-pick—remains a later design decision and must not imitate JJ change-ID semantics.
+Git records use backend-appropriate durable linkage: repository identity, base commit, branch/ref, worktree path, and reported tip commits. Cleanup preserves branches, commits, and uncommitted files unless an explicit destructive operation is separately authorized. Integration uses a reviewed non-squash merge and never imitates JJ change-ID semantics.
 
 ### Standalone workspace behavior
 
@@ -160,7 +163,7 @@ Pi's tools, resource discovery, project trust, and extension context are bound t
 
 Pi already exposes the primitives for a real transition. `SessionManager.forkFrom(sourceSessionFile, targetCwd)` creates a new persistent session with a new ID and target-cwd header, links the old file as `parentSession`, and copies the old session entries. An extension command can then call `ctx.switchSession(newSessionFile)`; `AgentSessionRuntime` shuts down the old session, rebuilds cwd-bound services and resources, rebinds extensions, and starts the copied session in the workspace. Code after replacement must use only the fresh `withSession` context.
 
-The future capability may therefore offer these distinct flows:
+The capability offers these distinct flows:
 
 - create the workspace and return its path without moving the standalone agent;
 - create-and-enter by forking the standalone session into the workspace and switching through a `/cap:` extension command;
@@ -169,4 +172,4 @@ The future capability may therefore offer these distinct flows:
 
 Model-callable tools cannot directly perform session replacement because they receive `ExtensionContext`, not `ExtensionCommandContext`. They may prepare a workspace, but the actual transition belongs to an extension command or typed Host operation. The transition must be rejected while unresolved child delegations or other feature state cannot be safely rebound. Copied work context and extension entries reconstruct normally; features keyed by the old Pi session ID need explicit migration or reset policy.
 
-JJ workspaces continue to live under `<repo>/.jj/workspaces/<name>`. The provisional standalone Git location is the Pi-Tai managed data root, such as `~/.pi/agent/pi-tai/workspaces/git/<repo-key>/<workspace-id>`; the Host uses its platform application-data equivalent. The final path policy must avoid untracked nested worktrees, record every path durably, and return it in capability and subagent results.
+JJ workspaces live under `<repo>/.jj/workspaces/<name>`. Git worktrees live under `~/.pi/agent/pi-tai/workspaces/git/<repo-key>/<workspace-id>` or the injected hosted agent-data root. This avoids untracked nested worktrees; every path is recorded durably and returned in capability and subagent results.

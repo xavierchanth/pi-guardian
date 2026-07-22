@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed for review. This plan does not change the implemented JJ-only subagent behavior until each migration slice is accepted.
+Implemented for terminal Pi and the SDK runtime protocol. W0–W5 and the runtime-facing portion of W6 are complete; durable Host broker ownership remains part of the H3/H4 Host implementation.
 
 The latest subagent checkpoint establishes the invariant this plan preserves: a parent may create a delegated workspace only through `spawn_child`; the child exclusively owns that workspace, the parent pauses non-orchestration work, parent messages use the durable child RPC channel, and the child reports before terminating.
 
@@ -183,12 +183,12 @@ Preserve the implemented topology:
 
 ### Git delegation
 
-The Git fallback proof must settle these semantics before enabling it by default:
+The Git fallback implements these semantics:
 
 - create a dedicated child branch and worktree from parent `HEAD`;
 - require the child to report a clean worktree and capture its branch tip;
 - preserve child commits without squashing;
-- integrate through an explicit non-squash merge or reviewed rebase selected by the proof;
+- stage an explicit `--no-ff --no-commit` merge, then create the merge commit during post-verification finalization;
 - surface conflicts without force-resetting either checkout;
 - never delete a branch or dirty worktree during generic cleanup;
 - if abandonment encounters uncommitted files, leave the worktree in place and report the recovery path.
@@ -353,7 +353,7 @@ feat(broker): add workspace relocation and delegation ownership
 ### W7 — Acceptance and migration
 
 - Update README, product, Host, ACP, and subagent documentation.
-- Remove the old unnamespaced `/sub-agents` command after migration acceptance rather than carrying two permanent command surfaces.
+- Keep the old unnamespaced `/sub-agents` command removed rather than carrying two permanent command surfaces.
 - Run isolated real-repository smoke tests in temporary JJ and Git repositories.
 - Verify package contents and terminal Pi load.
 

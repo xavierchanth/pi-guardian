@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, opt-in JJ-isolated subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, capability-gated isolated workspaces and subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -76,18 +76,20 @@ When the effective editor command launches NeoVim (`nvim`, an executable path, o
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.
 
-### Persistent JJ subagents
+### Isolated workspaces and persistent subagents
 
-Subagents are disabled by default. Run `/sub-agents` to make the current session a parent, `/sub-agents status` to inspect it, or `/sub-agents off` after every child is resolved. New and forked sessions start standalone.
+Workspace capabilities are disabled by default. In a standalone session, `/cap:jj-workspaces new <name>` or `/cap:git-worktrees new <name>` creates an isolated checkout, forks the complete Pi session, and continues the same logical agent there as a standalone successor session. `on`, `off`, `status`, and `create-only` are also available under each namespace.
 
-A parent delegates workspace work with `spawn_child`; direct `jj workspace add` calls are blocked in parent mode. Every direct child receives:
+Subagents are disabled by default. Run `/cap:subagents on` to make the current session a parent, `/cap:subagents status` to inspect it, or `/cap:subagents off` after every child is resolved. New and ordinary forked sessions start standalone.
+
+A parent delegates workspace work with `spawn_child`; direct `jj workspace add`, `git worktree add`, and relocation tools are blocked in parent mode. Every direct child receives:
 
 - an independent persistent Pi session and detached process;
-- a dedicated JJ workspace rooted at the parent's `@-` change;
+- a dedicated JJ workspace rooted at the parent's `@-` change when JJ is available, otherwise a dedicated Git branch/worktree;
 - one semantic model preference (`thinker`, `worker`, or `mechanical`);
 - only `report_to_parent`, with no ability to delegate further.
 
-Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. While a child is active, parent work tools are blocked: the parent can message, inspect, wait for, or abandon the child, but it cannot duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. Completed child stacks are integrated with `jj rebase -s <childRootChangeId> -B <parentWorkspace>@`; all descendants are preserved. Integration cleanup is a separate finalization step after parent validation, and abandonment removes only the workspace—not the child's JJ changes. There is no generic cleanup tool because reported workspaces must remain available for integration or explicit abandonment.
+Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. While a child is active, parent work tools are blocked: the parent can message, inspect, wait for, or abandon the child, but it cannot duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. JJ child stacks preserve all descendants through subtree rebase; Git children report a clean committed branch and preserve commits through reviewed non-squash integration. Dirty Git worktrees are retained for recovery rather than force-removed.
 
 Pi-Tai composes normal Pi context with three intentionally empty, user-authored files: `packages/pi-tai/instructions/system.md`, `parent.md`, and `child.md`. It also adds generated factual role/delegation metadata. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for lifecycle and recovery details.
 
