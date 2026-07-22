@@ -1,0 +1,8 @@
+{
+  "protocolVersion": 1,
+  "kind": "command",
+  "id": "command-invalid",
+  "method": "runtime.initialize",
+  "params": {},
+  "unexpected": true
+}

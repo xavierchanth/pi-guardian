@@ -32,6 +32,10 @@ check:
 rust-check:
     cargo test --workspace
 
+# Regenerate Rust-first TypeScript runtime protocol DTOs.
+protocol-generate:
+    npm run protocol:generate
+
 # Verify package contents without publishing.
 package-check:
     npm run package:check

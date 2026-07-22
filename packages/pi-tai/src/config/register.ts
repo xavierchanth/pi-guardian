@@ -7,7 +7,7 @@ export interface PiTaiConfigService {
   reload(ctx: ExtensionContext): LoadedPiTaiConfig;
 }
 
-export function createPiTaiConfigService(): PiTaiConfigService {
+export function createPiTaiConfigService(agentDir?: string): PiTaiConfigService {
   let current = DEFAULT_PI_TAI_CONFIG;
   return {
     current: () => current,
@@ -15,6 +15,7 @@ export function createPiTaiConfigService(): PiTaiConfigService {
       const loaded = loadPiTaiConfig({
         cwd: ctx.cwd,
         projectTrusted: ctx.isProjectTrusted(),
+        agentDir,
       });
       current = loaded.config;
       return loaded;

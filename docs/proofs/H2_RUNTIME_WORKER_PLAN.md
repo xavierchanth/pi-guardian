@@ -54,8 +54,8 @@ crates/runtime-protocol/
 packages/runtime-protocol/
 ├── package.json
 └── src/
-    ├── generated.ts          checked-in Specta-generated Zod schemas and inferred types
-    └── *.ts                  framing, dispatch registries, refinements, and stable errors
+    ├── generated.ts          checked-in Specta-generated TypeScript DTOs
+    └── *.ts                  Zod schemas, framing, dispatch registries, and stable errors
 services/pi-runtime/
 ├── package.json
 └── src/
@@ -126,9 +126,9 @@ The faux path is enabled only by a proof/test launch option. It is not a Host pr
 
 ## Runtime protocol v1 proof
 
-`crates/runtime-protocol` is the structural source of truth. Rust DTOs derive Serde and Specta; an exact-pinned `specta-zod` exporter generates checked-in Zod schemas plus inferred TypeScript types under `packages/runtime-protocol/src/generated.ts`. A drift check regenerates in memory and fails when the checked-in output differs. The packaged worker depends on Zod, not Rust or Specta.
+`crates/runtime-protocol` is the structural source of truth. Rust DTOs derive Serde and Specta; exact-pinned `specta-typescript` generates checked-in TypeScript DTOs under `packages/runtime-protocol/src/generated.ts`. A drift check regenerates in memory and fails when the checked-in output differs. Handwritten Zod schemas are statically checked against those generated DTOs. The packaged worker depends on Zod, not Rust or Specta.
 
-The first H2.1 gate must prove that the current pre-stable Specta/Zod exporter correctly handles camel-case Serde fields, tagged enums, optional fields, empty objects, JSON values, strict object parsing, and representative command/event payloads. Generated output is never manually patched. If that gate fails, stop for review and fall back to `specta-typescript` with explicitly compatible handwritten Zod schemas.
+The initial H2.1 exporter gate rejected `specta-zod` 0.0.3: it modeled `serde_json::Value` as Specta's internal Rust enum representation instead of JSON data and did not preserve `deny_unknown_fields` as strict non-empty object schemas. Generated output would have required manual patching. Per the approved fallback, H2 uses `specta-typescript` plus compatible handwritten Zod schemas; generated files are never manually patched.
 
 Zod validates only TypeScript process boundaries: the generic frame after `JSON.parse`, recognized method parameters, and outbound response/event frames. State transitions, duplicate IDs, path semantics, framing limits, and cancellation remain handwritten. Zod issue objects are mapped to stable bounded Pi-Tai protocol errors and never become the wire contract.
 
@@ -268,7 +268,7 @@ Red:
 Green:
 
 - `crates/runtime-protocol` with canonical Serde + Specta DTOs;
-- exact-pinned Specta/Zod generation into `packages/runtime-protocol`;
+- exact-pinned Specta TypeScript generation plus compatible handwritten Zod schemas in `packages/runtime-protocol`;
 - stable boundary errors and method/event schema registries;
 - JSONL reader/writer;
 - worker state machine with fake runtime port;

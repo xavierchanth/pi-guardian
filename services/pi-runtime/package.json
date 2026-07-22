@@ -1,0 +1,11 @@
+{
+  "name": "@pi-tai/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.80.10",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@pi-tai/runtime-protocol": "0.1.0"
+  }
+}

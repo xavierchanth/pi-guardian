@@ -1,0 +1,15 @@
+[package]
+name = "pi-tai-runtime-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+specta.workspace = true
+specta-serde.workspace = true
+specta-typescript.workspace = true
+thiserror.workspace = true

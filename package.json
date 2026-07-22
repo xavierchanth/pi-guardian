@@ -25,13 +25,16 @@
     "bins/*"
   ],
   "scripts": {
-    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts tests/repository/*.test.ts",
+    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts tests/runtime/*.test.ts tests/repository/*.test.ts",
     "test:unit": "node --test tests/unit/*.test.ts",
     "test:integration": "node --test tests/integration/*.test.ts",
+    "test:runtime": "node --test tests/runtime/*.test.ts",
     "test:repository": "node --test tests/repository/*.test.ts",
     "test:rust": "cargo test --workspace",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "npm run typecheck && npm test && npm run test:rust",
+    "protocol:generate": "cargo run -p pi-tai-runtime-protocol --bin export-bindings",
+    "protocol:check": "cargo run -p pi-tai-runtime-protocol --bin export-bindings -- --check",
+    "check": "npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs"
   },

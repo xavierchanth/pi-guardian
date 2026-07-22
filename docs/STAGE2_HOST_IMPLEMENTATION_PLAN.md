@@ -350,7 +350,7 @@ feat(host): prove tray-owned lifecycle
 
 #### Red
 
-- Rust-first Serde/Specta runtime DTOs generate drift-checked Zod schemas that share fixtures with Rust.
+- Rust-first Serde/Specta runtime DTOs generate drift-checked TypeScript contracts paired with Zod schemas that share fixtures with Rust.
 - Fake-model prompt streams ordered text and lifecycle events.
 - Pi-Tai extension tools and commands load through SDK resources.
 - Persistent session create/open works.
