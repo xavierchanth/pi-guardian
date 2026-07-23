@@ -56,6 +56,25 @@ test("trusted project values override valid global values", () => {
   });
 });
 
+test("model profile arrays replace defaults by trusted scope and preserve declaration order", () => {
+  const paths = fixture();
+  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
+    modelProfiles: [
+      { name: "global-low", provider: "openai-codex", model: "global", effort: "low" },
+    ],
+  }));
+  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
+    modelProfiles: [
+      { name: "project-high", provider: "openai-codex", model: "project", effort: "high" },
+      { name: "project-low", provider: "openai-codex", model: "project", effort: "low" },
+    ],
+  }));
+  const trusted = loadPiTaiConfig({ ...paths, projectTrusted: true });
+  assert.deepEqual(trusted.config.modelProfiles.map((profile) => profile.name), ["project-high", "project-low"]);
+  const untrusted = loadPiTaiConfig({ ...paths, projectTrusted: false });
+  assert.deepEqual(untrusted.config.modelProfiles.map((profile) => profile.name), ["global-low"]);
+});
+
 test("untrusted project configuration is ignored", () => {
   const paths = fixture();
   writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({ sessionTitle: { model: "global" } }));

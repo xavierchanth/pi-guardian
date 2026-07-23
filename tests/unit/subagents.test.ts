@@ -1,276 +1,191 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdtemp, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
+import type { AgentCatalog, AgentDefinition } from "../../packages/pi-tai/src/subagents/agents.ts";
 import {
-  DEFAULT_MODEL_PREFERENCES,
-  ROLE_TOOL_NAMES,
-  activeToolsForRole,
+  PARENT_TOOL_NAMES,
+  activeToolsForMode,
   composePiTaiInstructions,
   parseSubagentsCommand,
-  type SubagentRole,
 } from "../../packages/pi-tai/src/subagents/domain.ts";
+import { PiChildProcessLauncher } from "../../packages/pi-tai/src/subagents/launcher.ts";
+import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
+import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
 import {
   FileDelegationStore,
   waitForChildren,
   type DelegationRecord,
+  type DelegationStore,
 } from "../../packages/pi-tai/src/subagents/store.ts";
-import {
-  JjWorkspaceService,
-  type JjCommandRunner,
-} from "../../packages/pi-tai/src/subagents/jj.ts";
-import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
-import { GitWorktreePort } from "../../packages/pi-tai/src/workspaces/git.ts";
-import { JjWorkspacePort } from "../../packages/pi-tai/src/workspaces/jj.ts";
-import { PreferredWorkspacePort } from "../../packages/pi-tai/src/workspaces/preferred.ts";
-import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
-import { PiChildProcessLauncher } from "../../packages/pi-tai/src/subagents/launcher.ts";
-import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
-import type { DelegationStore } from "../../packages/pi-tai/src/subagents/store.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { normalizeTaskPacket, renderTaskPacket } from "../../packages/pi-tai/src/subagents/task.ts";
 
 const execFileAsync = promisify(execFile);
-
-const PARENT_TOOLS = [
-  "spawn_child",
-  "message_child",
-  "wait_for_children",
-  "child_status",
-  "integrate_child",
-  "abandon_child",
+const TOOL_NAMES = [
+  "read", "write", "edit", "grep", "find", "ls", "bash", "update_plan",
+  ...PARENT_TOOL_NAMES, "report_to_parent", "ask_parent",
 ];
 
-test("default semantic model preferences include unique designer, thinker, worker, and mechanical choices", () => {
-  assert.deepEqual(DEFAULT_MODEL_PREFERENCES.map((entry) => entry.id), [
-    "designer",
-    "thinker",
-    "worker",
-    "mechanical",
-  ]);
-  assert.equal(new Set(DEFAULT_MODEL_PREFERENCES.map((entry) => entry.id)).size, 4);
-  assert.deepEqual(
-    DEFAULT_MODEL_PREFERENCES.map((entry) => `${entry.model}:${entry.effort}`),
-    ["kimi-k3:max", "gpt-5.6-sol:high", "gpt-5.6-sol:low", "gpt-5.6-luna:high"],
-  );
-});
-
-test("subagent roles expose only their own tools", () => {
-  const base = ["read", "bash", ...ROLE_TOOL_NAMES];
-  const expected: Record<SubagentRole, string[]> = {
-    standalone: ["read", "bash"],
-    parent: ["read", "bash", ...PARENT_TOOLS],
-    child: ["read", "bash", "report_to_parent"],
-  };
-  for (const role of ["standalone", "parent", "child"] as const) {
-    assert.deepEqual(activeToolsForRole(base, role), expected[role]);
-  }
-});
-
-test("cap:subagents command defaults to on and accepts explicit status/off", () => {
+test("subagent mode tools are exact and capability command parsing remains stable", () => {
   assert.equal(parseSubagentsCommand(""), "on");
-  assert.equal(parseSubagentsCommand("on"), "on");
   assert.equal(parseSubagentsCommand("status"), "status");
   assert.equal(parseSubagentsCommand("off"), "off");
-  assert.equal(parseSubagentsCommand("unexpected"), undefined);
+  assert.equal(parseSubagentsCommand("bad"), undefined);
+  assert.deepEqual(activeToolsForMode(["read", ...PARENT_TOOL_NAMES], "standalone"), ["read"]);
+  assert.deepEqual(activeToolsForMode(["read"], "root", ["read", "subagent"]), ["read", "subagent"]);
 });
 
-test("instruction composition skips empty authored files and injects factual role context", () => {
-  const standalone = composePiTaiInstructions({
+test("instruction composition describes sparse shared-cwd delegation without workspace policy", () => {
+  const prompt = composePiTaiInstructions({
     basePrompt: "base",
-    role: "standalone",
-    systemInstructions: "",
-    roleInstructions: "",
+    mode: "root",
+    agentName: "thinker",
+    systemInstructions: "system",
+    roleInstructions: "think carefully",
+    availableChildren: [{ name: "worker", description: "implements" }],
   });
-  assert.equal(standalone, "base");
-
-  const parent = composePiTaiInstructions({
-    basePrompt: "base",
-    role: "parent",
-    systemInstructions: "Omakase",
-    roleInstructions: "Parent taste",
-    modelPreferences: DEFAULT_MODEL_PREFERENCES,
-  });
-  assert.match(parent, /Omakase/);
-  assert.match(parent, /Parent taste/);
-  assert.match(parent, /subagent_role="parent"/);
-  assert.match(parent, /workspace_creation="spawn_child_only"/);
-  assert.match(parent, /backend_selection="jj_then_git"/);
-  assert.match(parent, /jj_child_base="parent_@-"/);
-  assert.match(parent, /child_workspace_owner="child_exclusive"/);
-  assert.match(parent, /parent_work_while_child_active="forbidden"/);
-  assert.match(parent, /next_action_after_spawn="wait_for_children"/);
-  assert.match(parent, /id="designer"/);
-  assert.match(parent, /provider="opencode-go" model="kimi-k3" effort="max"/);
-
-  const child = composePiTaiInstructions({
-    basePrompt: "base",
-    role: "child",
-    systemInstructions: "",
-    roleInstructions: "",
-    delegation: {
-      id: "delegation",
-      parentSessionId: "parent",
-      backend: "jj",
-      workspace: "/repo/.jj/workspaces/child",
-      baseId: "base-change",
-      rootId: "child-root",
-    },
-  });
-  assert.match(child, /workspace_ownership owner="child_exclusive"/);
-  assert.match(child, /repository_reads_edits_tests_and_vcs="delegated_workspace_only"/);
-  assert.match(child, /parent_must_not_duplicate_or_modify="true"/);
+  assert.match(prompt, /agent="thinker"/);
+  assert.match(prompt, /conversation_history="none"/);
+  assert.match(prompt, /cwd="shared"/);
+  assert.match(prompt, /allowed_child name="worker"/);
+  assert.doesNotMatch(prompt, /workspace_creation|jj_then_git|child_workspace/);
 });
 
-test("file delegation store updates records atomically and wait snapshots direct children", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-tai-delegations-"));
-  const store = new FileDelegationStore(root);
-  await store.create(record("one", "running"));
-  await store.create(record("two", "running"));
-
-  const waiting = waitForChildren(store, "parent-session", { pollIntervalMs: 5 });
-  await store.update("one", (current) => ({ ...current, state: "completed" }));
-  await store.update("two", (current) => ({ ...current, state: "failed" }));
-  const result = await waiting;
-  assert.deepEqual(result.map((entry) => entry.id).sort(), ["one", "two"]);
-
-  const persisted = JSON.parse(await readFile(join(root, "one.json"), "utf8")) as DelegationRecord;
-  assert.equal(persisted.state, "completed");
+test("structured task packets normalize defaults and render deterministic sections", () => {
+  const packet = normalizeTaskPacket({
+    objective: " Fix auth ",
+    context: ["Users are logged out"],
+    resources: [{ type: "file", value: "src/auth.ts", reason: "entry point" }],
+    constraints: ["No API change"],
+    acceptanceCriteria: ["Tests pass"],
+    expectedOutput: "Implement and summarize",
+  }, "ask-parent");
+  assert.equal(packet.uncertaintyHandling, "ask-parent");
+  assert.equal(renderTaskPacket(packet), [
+    "OBJECTIVE\n- Fix auth",
+    "CONTEXT\n- Users are logged out",
+    "RESOURCES\n- [file] src/auth.ts — entry point",
+    "CONSTRAINTS\n- No API change",
+    "ACCEPTANCE CRITERIA\n- Tests pass",
+    "EXPECTED OUTPUT\n- Implement and summarize",
+    "UNCERTAINTY HANDLING\n- For material ambiguity, call ask_parent and wait for a correlated response before continuing.",
+  ].join("\n\n"));
 });
 
-test("version-1 JJ delegation records migrate to tagged version-2 workspaces", async () => {
+test("legacy workspace records migrate to v3 recovery metadata without workspace actions", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-delegation-migration-"));
-  await mkdir(root, { recursive: true });
   await writeFile(join(root, "legacy.json"), JSON.stringify({
-    version: 1,
+    version: 2,
     id: "legacy",
     state: "completed",
     task: "legacy task",
     modelPreferenceId: "worker",
-    parentSessionId: "parent-session",
-    parentWorkspace: "default",
-    repoRoot: "/repo",
-    baseChangeId: "base",
-    childWorkspace: "legacy-child",
-    childWorkspacePath: "/repo/.jj/workspaces/legacy-child",
-    childRootChangeId: "root",
-    report: {
-      outcome: "completed",
-      summary: "done",
-      childTipChangeId: "tip",
-      reportedAt: new Date(0).toISOString(),
-    },
-    createdAt: new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
-  }));
-  const migrated = await new FileDelegationStore(root).get("legacy");
-  assert.equal(migrated?.version, 2);
-  assert.deepEqual(migrated?.workspace, {
-    backend: "jj",
-    purpose: "delegation",
-    repoRoot: "/repo",
-    sourceWorkspace: "default",
-    baseChangeId: "base",
-    name: "legacy-child",
-    path: "/repo/.jj/workspaces/legacy-child",
-    rootChangeId: "root",
-  });
-  assert.equal(migrated?.report?.childTipId, "tip");
-});
-
-test("orchestrator persists child launch, wakes parent wait from report, and captures child tip", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-tai-orchestrator-"));
-  const store = new FileDelegationStore(root);
-  const workspace = {
-    kind: "jj",
-    create: async ({ name }: { name: string }) => ({
+    parentSessionId: "parent",
+    workspace: {
       backend: "jj",
       purpose: "delegation",
       repoRoot: "/repo",
       sourceWorkspace: "default",
       baseChangeId: "base",
-      name,
-      path: `/repo/.jj/workspaces/${name}`,
-      rootChangeId: "child-root",
-    }),
-    captureTip: async () => ({ id: "child-tip", clean: true }),
-  } as unknown as WorkspacePort;
-  const childMessages: Array<{ message: string; delivery: string }> = [];
-  const launcher = {
-    launch: async () => ({
-      pid: process.pid,
-      logPath: "/tmp/child.log",
-      controlPath: "/tmp/child.fifo",
-    }),
-    message: async (_record: DelegationRecord, message: string, delivery: string) => {
-      childMessages.push({ message, delivery });
+      name: "legacy-child",
+      path: "/repo/.jj/workspaces/legacy-child",
+      rootChangeId: "root",
     },
+    report: { outcome: "completed", summary: "done", reportedAt: new Date(0).toISOString() },
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  }));
+  const migrated = await new FileDelegationStore(root).get("legacy");
+  assert.equal(migrated?.version, 3);
+  assert.equal(migrated?.cwd, "/repo/.jj/workspaces/legacy-child");
+  assert.equal(migrated?.legacyWorkspace?.backend, "jj");
+  assert.equal(migrated?.execution.phase, "completed");
+});
+
+test("orchestrator launches in the parent cwd and enforces the caller child allowlist", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-orchestrator-"));
+  const store = new FileDelegationStore(root);
+  const launches: DelegationRecord[] = [];
+  const launcher = {
+    launch: async (record: DelegationRecord) => {
+      launches.push(record);
+      return { pid: process.pid, logPath: "/tmp/child.log", controlPath: "/tmp/child.fifo", promptPath: "/tmp/child.md" };
+    },
+    message: async () => undefined,
     cleanup: async () => undefined,
   };
-  const orchestrator = new SubagentOrchestrator({ store, workspace, launcher });
-  const spawned = await orchestrator.spawnChild({
-    task: "Implement the bounded change",
-    modelPreferenceId: "worker",
+  const orchestrator = new SubagentOrchestrator({ store, launcher });
+  const worker = agent("worker", ["scout", "researcher"], true);
+  const scout = agent("scout", [], false);
+  const record = await orchestrator.spawnChild({
+    task: { objective: "Inspect auth" },
+    agent: scout,
+    caller: worker,
     parentCwd: "/repo",
-    parentSessionId: "parent-session",
-  });
-  assert.equal(spawned.state, "running");
-  assert.equal(spawned.workspace.backend, "jj");
-  assert.equal(spawned.workspace.backend === "jj" && spawned.workspace.rootChangeId, "child-root");
-  assert.equal(spawned.childControlPath, "/tmp/child.fifo");
-
-  const messaged = await orchestrator.message(spawned.id, "Focus on the failing test", "steer");
-  assert.deepEqual(childMessages, [{ message: "Focus on the failing test", delivery: "steer" }]);
-  assert.equal(messaged.parentMessages?.[0]?.message, "Focus on the failing test");
-
-  const waiting = orchestrator.wait("parent-session");
-  const reported = await orchestrator.report(spawned.id, {
-    outcome: "completed",
-    summary: "done",
-    validation: ["tests pass"],
-  });
-  assert.equal(reported.report?.childTipId, "child-tip");
-  assert.deepEqual((await waiting).map((record) => record.state), ["completed"]);
-});
-
-test("subagent workspace selection falls back to Git before child launch", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-tai-git-child-"));
-  const repo = join(root, "repo");
-  await mkdir(repo);
-  await execFileAsync("git", ["init", "-q"], { cwd: repo });
-  await writeFile(join(repo, "file.txt"), "base\n");
-  await execFileAsync("git", ["add", "file.txt"], { cwd: repo });
-  await execFileAsync("git", ["-c", "user.name=Pi Tai", "-c", "user.email=pi@example.invalid", "commit", "-qm", "base"], { cwd: repo });
-  const jjUnavailable = {
-    kind: "jj",
-    probe: async () => ({ available: false, reason: "not jj" }),
-  } as unknown as WorkspacePort;
-  const git = new GitWorktreePort(join(root, "managed"));
-  const workspace = new PreferredWorkspacePort(jjUnavailable, git);
-  const store = new FileDelegationStore(join(root, "delegations"));
-  const launcher = {
-    launch: async () => ({ pid: 999_999_999, logPath: "/tmp/child.log", controlPath: "/tmp/child.fifo" }),
-    message: async () => {},
-    cleanup: async () => {},
-  };
-  const orchestrator = new SubagentOrchestrator({ store, workspace, launcher });
-  const spawned = await orchestrator.spawnChild({
-    task: "Git fallback task",
-    modelPreferenceId: "worker",
-    parentCwd: repo,
     parentSessionId: "parent",
   });
-  assert.equal(spawned.workspace.backend, "git");
-  assert.equal(spawned.workspace.purpose, "delegation");
-  assert.equal(spawned.workspace.backend === "git" && spawned.workspace.branch.startsWith("pi-tai/delegation/"), true);
-  await git.abandon(spawned.workspace);
+  assert.equal(record.cwd, "/repo");
+  assert.equal(record.agent.name, "scout");
+  assert.equal(record.execution.phase, "running");
+  assert.equal(launches[0]?.legacyWorkspace, undefined);
+  await assert.rejects(
+    orchestrator.spawnChild({
+      task: { objective: "Spawn worker" },
+      agent: worker,
+      caller: worker,
+      parentCwd: "/repo",
+      parentSessionId: "parent",
+    }),
+    /cannot create/,
+  );
 });
 
-test("persistent child control channel writes RPC steering commands", async () => {
+test("wait next consumes one completion while status and later waits preserve the rest", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-wait-"));
+  const store = new FileDelegationStore(root);
+  await store.create(record("one", "completed"));
+  await store.create(record("two", "completed"));
+  const first = await waitForChildren(store, "parent", { until: "next", pollIntervalMs: 1 });
+  assert.equal(first.length, 1);
+  const second = await waitForChildren(store, "parent", { until: "next", pollIntervalMs: 1 });
+  assert.equal(second.length, 1);
+  assert.notEqual(first[0]?.id, second[0]?.id);
+});
+
+test("questions wake waiters and require a correlated parent response", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-question-"));
+  const store = new FileDelegationStore(root);
+  const sent: string[] = [];
+  const orchestrator = new SubagentOrchestrator({
+    store,
+    launcher: {
+      launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+      message: async (_record, message) => { sent.push(message); },
+      cleanup: async () => undefined,
+    },
+  });
+  await store.create(record("question", "running", process.pid));
+  const waiting = waitForChildren(store, "parent", { until: "all", pollIntervalMs: 1 });
+  const asked = await orchestrator.askParent("question", {
+    question: "Which API?",
+    options: ["v1", "v2"],
+    recommendation: "v2",
+  });
+  assert.equal((await waiting)[0]?.execution.phase, "awaiting_parent");
+  const questionId = asked.execution.phase === "awaiting_parent" ? asked.execution.question.id : "";
+  await assert.rejects(orchestrator.respond("question", "stale", "v2"), /Stale/);
+  const resumed = await orchestrator.respond("question", questionId, "v2");
+  assert.equal(resumed.execution.phase, "running");
+  assert.match(sent[0] ?? "", /Parent response/);
+});
+
+test("persistent child control channel writes RPC follow-up commands", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-control-"));
   const storeRoot = join(stateRoot, "delegations");
   const controlDir = join(stateRoot, "control");
@@ -281,27 +196,27 @@ test("persistent child control channel writes RPC steering commands", async () =
   const launcher = new PiChildProcessLauncher({ root: storeRoot } as DelegationStore);
   const child = { ...record("one", "running"), childControlPath: controlPath };
   try {
-    await launcher.message(child, "Prioritize the regression test", "followUp");
+    await launcher.message(child, "Prioritize the regression", "followUp");
     const buffer = Buffer.alloc(4096);
     const { bytesRead } = await reader.read(buffer);
     assert.deepEqual(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").trim()), {
       type: "prompt",
-      message: "Prioritize the regression test",
+      message: "Prioritize the regression",
       streamingBehavior: "followUp",
     });
   } finally {
     await reader.close();
-    await launcher.cleanup(child);
-    await rm(stateRoot, { recursive: true, force: true });
   }
 });
 
-test("subagent extension starts standalone and enables parent tools only through command", async () => {
+test("cap:subagents applies the thinker definition without workspace capability leases", async () => {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const tools = new Map<string, any>();
   const entries: any[] = [];
-  let active = ["read", ...ROLE_TOOL_NAMES];
+  let active = ["read"];
+  let effort = "low";
+  let selectedModel = "gpt-5.6-luna";
   const pi = {
     on(name: string, handler: (event: any, ctx: any) => any) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
@@ -311,217 +226,102 @@ test("subagent extension starts standalone and enables parent tools only through
     },
     registerTool(tool: { name: string }) { tools.set(tool.name, tool); },
     getActiveTools: () => [...active],
+    getAllTools: () => TOOL_NAMES.map((name) => ({ name })),
     setActiveTools(next: string[]) { active = [...next]; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
+    getThinkingLevel: () => effort,
+    setThinkingLevel(next: string) { effort = next; },
+    setModel: async (model: { id: string }) => { selectedModel = model.id; return true; },
   } as unknown as ExtensionAPI;
-  const orchestrator = {
-    children: async () => [],
-  } as unknown as SubagentOrchestrator;
   const capabilities = new SessionCapabilityController();
-  capabilities.bindTools({
-    getActiveTools: () => [...active],
-    setActiveTools: (next) => { active = [...next]; },
-  });
-  capabilities.register({
-    id: "jj-workspaces",
-    label: "JJ Workspaces",
-    description: "JJ",
-    toolNames: ["create_jj_workspace"],
-  });
-  capabilities.register({
-    id: "git-worktrees",
-    label: "Git Worktrees",
-    description: "Git",
-    toolNames: ["create_git_worktree"],
-  });
+  capabilities.bindTools({ getActiveTools: () => active, setActiveTools: (next) => { active = next; } });
+  const catalog = agentCatalog();
   registerSubagents(pi, {
     store: {} as DelegationStore,
-    orchestrator,
+    orchestrator: { children: async () => [] } as unknown as SubagentOrchestrator,
     capabilities,
-    workspace: {
-      kind: "jj",
-      probe: async () => ({ available: true }),
-    } as unknown as WorkspacePort,
-    loadInstructions: () => ({ system: "", parent: "", child: "" }),
+    discoverAgents: () => catalog,
+    loadInstructions: () => ({ system: "" }),
   });
   const notifications: string[] = [];
-  let leafEntry: unknown;
   const ctx = {
     cwd: "/repo",
+    model: { provider: "openai-codex", id: selectedModel },
+    modelRegistry: {
+      find: (_provider: string, model: string) => ({ provider: "openai-codex", id: model }),
+    },
+    isProjectTrusted: () => true,
     sessionManager: {
       getEntries: () => entries,
-      getLeafEntry: () => leafEntry,
       getSessionId: () => "parent",
       getSessionFile: () => "/session.jsonl",
     },
     ui: { notify(message: string) { notifications.push(message); } },
   };
   await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
-  assert.deepEqual(active, ["read"]);
-  assert.ok(tools.has("spawn_child"));
-  assert.ok(tools.has("message_child"));
-  assert.ok(tools.has("report_to_parent"));
-
-  await commands.get("cap:subagents")?.("", ctx);
-  assert.deepEqual(active, ["read", ...PARENT_TOOLS]);
-  assert.equal(capabilities.isServiceEnabled("jj-workspaces"), true);
-  assert.equal(capabilities.isToolExposed("jj-workspaces"), false);
-  assert.equal(active.includes("create_jj_workspace"), false);
-  assert.match(notifications.at(-1) ?? "", /enabled/);
-
-  const directWorkspace = await handlers.get("tool_call")?.[0]({
-    toolName: "bash",
-    input: { command: "jj workspace add .jj/workspaces/task" },
-  }, ctx);
-  assert.match(directWorkspace.reason, /must use spawn_child/);
-
-  await handlers.get("turn_start")?.[0]({}, ctx);
-  leafEntry = {
-    type: "message",
-    message: {
-      role: "assistant",
-      content: [{ type: "toolCall", name: "spawn_child" }, { type: "toolCall", name: "read" }],
-    },
-  };
-  const earlierSiblingWork = await handlers.get("tool_call")?.[0]({ toolName: "read", input: {} }, ctx);
-  assert.match(earlierSiblingWork.reason, /same turn as spawn_child/);
-
-  await handlers.get("tool_call")?.[0]({ toolName: "spawn_child", input: {} }, ctx);
-  const laterSiblingWork = await handlers.get("tool_call")?.[0]({ toolName: "read", input: {} }, ctx);
-  assert.match(laterSiblingWork.reason, /same turn as spawn_child/);
-  leafEntry = undefined;
-
-  const prompt = await handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, ctx);
-  assert.match(prompt.systemPrompt, /subagent_role="parent"/);
-
-  await handlers.get("session_start")?.[0]({ reason: "fork" }, ctx);
-  assert.deepEqual(active, ["read"]);
-  const forkPrompt = await handlers.get("before_agent_start")?.[0]({ systemPrompt: "base" }, ctx);
-  assert.doesNotMatch(forkPrompt.systemPrompt, /subagent_role=/);
-});
-
-test("JJ workspace creation anchors child root to parent @- without inspecting parent changes", async () => {
-  const calls: Array<{ cwd: string; args: string[] }> = [];
-  const parentRoot = "/repo";
-  const childRoot = "/repo/.jj/workspaces/task-one";
-  const runner: JjCommandRunner = async (cwd, args) => {
-    calls.push({ cwd, args });
-    const command = args.join(" ");
-    if (command === "root") return `${parentRoot}\n`;
-    if (command.includes("-r @ --no-graph") && cwd === childRoot) return "child-root\n";
-    if (command.includes("-r @ --no-graph")) return "parent-working\n";
-    if (command.includes("-r @- --no-graph")) return "base-change\n";
-    if (command.startsWith("workspace list")) return "default|parent-working\n";
-    if (command.startsWith("workspace add")) return "";
-    throw new Error(`Unexpected jj call: ${cwd}: ${command}`);
-  };
-  const service = new JjWorkspaceService(runner, {
-    mkdir: async () => undefined,
-    rm: async () => undefined,
-  });
-
-  const created = await service.createChildWorkspace(parentRoot, "task-one");
-  assert.equal(created.baseChangeId, "base-change");
-  assert.equal(created.childRootChangeId, "child-root");
-  assert.equal(created.parentWorkspace, "default");
-  assert.equal(calls.some((call) => call.args[0] === "diff"), false);
-  assert.equal(calls.some((call) => ["new", "describe", "squash", "rebase"].includes(call.args[0] ?? "")), false);
+  await commands.get("cap:subagents")?.("on", ctx);
+  assert.equal(selectedModel, "gpt-5.6-sol");
+  assert.equal(effort, "high");
+  assert.deepEqual(active, catalog.root.tools);
   assert.deepEqual(
-    calls.find((call) => call.args[0] === "workspace" && call.args[1] === "add")?.args,
-    ["workspace", "add", childRoot, "--name", "task-one", "-r", "base-change"],
+    capabilities.snapshot().capabilities.map((capability) => capability.id),
+    ["subagents"],
   );
+  assert.match(notifications.at(-1) ?? "", /thinker/);
 });
 
-test("JJ child creation preserves empty and modified parent @ while branching both from @-", async (t) => {
-  try {
-    await execFileAsync("jj", ["--version"]);
-  } catch {
-    t.skip("jj is unavailable");
-    return;
-  }
-
-  for (const parentState of ["empty", "modified"] as const) {
-    await t.test(parentState, async () => {
-      const root = await mkdtemp(join(tmpdir(), `pi-tai-jj-${parentState}-`));
-      const repo = join(root, "repo");
-      await execFileAsync("jj", ["git", "init", repo]);
-      await writeFile(join(repo, "base.txt"), "base\n");
-      await execFileAsync("jj", ["describe", "-m", "base"], { cwd: repo });
-      await execFileAsync("jj", ["new"], { cwd: repo });
-      if (parentState === "modified") await writeFile(join(repo, "parent.txt"), "parent work\n");
-
-      const beforeChange = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
-      const beforeDiff = (await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout;
-      const expectedBase = (await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
-
-      try {
-        const created = await new JjWorkspaceService().createChildWorkspace(repo, `child-${parentState}`);
-        const afterChange = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout;
-        const afterDiff = (await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout;
-        const actualBase = (await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: created.childWorkspacePath })).stdout;
-
-        assert.equal(created.baseChangeId, expectedBase.trim());
-        assert.equal(actualBase, expectedBase);
-        assert.equal(afterChange, beforeChange);
-        assert.equal(afterDiff, beforeDiff);
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    });
-  }
-});
-
-test("JJ integration moves the recorded root and all descendants before parent @", async () => {
-  const calls: Array<{ cwd: string; args: string[] }> = [];
-  const runner: JjCommandRunner = async (cwd, args) => {
-    calls.push({ cwd, args });
-    if (args[0] === "workspace" && args[1] === "update-stale") return "";
-    if (args[0] === "log") return "child-root\n";
-    if (args[0] === "rebase") return "";
-    if (args[0] === "resolve") return "";
-    throw new Error(`Unexpected jj call: ${cwd}: ${args.join(" ")}`);
-  };
-  const service = new JjWorkspaceService(runner, {
-    mkdir: async () => undefined,
-    rm: async () => undefined,
-  });
-  const port = new JjWorkspacePort(service);
-
-  const result = await port.integrate({
-    backend: "jj",
-    purpose: "delegation",
-    repoRoot: "/repo",
-    sourceWorkspace: "default",
-    baseChangeId: "base",
-    name: "task-one",
-    path: "/repo/.jj/workspaces/task-one",
-    rootChangeId: "child-root",
-  });
-  assert.equal(result.conflicted, false);
-  assert.deepEqual(calls[2], {
-    cwd: "/repo",
-    args: ["rebase", "-s", "child-root", "-B", "default@"],
-  });
-});
-
-function record(id: string, state: DelegationRecord["state"]): DelegationRecord {
+function agent(name: string, children: string[], canSpawn: boolean): AgentDefinition {
   return {
-    version: 2,
+    name,
+    description: `${name} role`,
+    root: name === "thinker",
+    provider: "openai-codex",
+    model: `model-${name}`,
+    effort: "low",
+    tools: canSpawn ? ["read", "subagent"] : ["read"],
+    allowedChildren: children,
+    uncertaintyHandling: name === "worker" ? "ask-parent" : "best-effort",
+    systemPrompt: `${name} prompt`,
+    source: "packaged",
+    filePath: `/agents/${name}.md`,
+    contentHash: `hash-${name}`,
+  };
+}
+
+function agentCatalog(): AgentCatalog {
+  const thinker: AgentDefinition = {
+    ...agent("thinker", ["worker", "scout", "researcher"], true),
+    tools: TOOL_NAMES.filter((name) => name !== "report_to_parent" && name !== "ask_parent"),
+    effort: "high",
+    model: "gpt-5.6-sol",
+  };
+  const worker = agent("worker", ["scout", "researcher"], true);
+  const scout = agent("scout", [], false);
+  const researcher = agent("researcher", [], false);
+  const agents = [thinker, worker, scout, researcher];
+  return { root: thinker, agents, byName: new Map(agents.map((value) => [value.name, value])) };
+}
+
+function record(
+  id: string,
+  phase: "running" | "completed",
+  pid?: number,
+): DelegationRecord {
+  const definition = agent("scout", [], false);
+  return {
+    version: 3,
     id,
-    state,
-    task: `task ${id}`,
-    modelPreferenceId: "worker",
-    parentSessionId: "parent-session",
-    workspace: {
-      backend: "jj",
-      purpose: "delegation",
-      repoRoot: "/repo",
-      sourceWorkspace: "default",
-      baseChangeId: "base",
-      name: `child-${id}`,
-      path: `/repo/.jj/workspaces/child-${id}`,
-      rootChangeId: `root-${id}`,
-    },
+    parentSessionId: "parent",
+    cwd: "/repo",
+    task: { objective: `task ${id}`, uncertaintyHandling: "best-effort" },
+    agent: { ...definition, tools: [...definition.tools], allowedChildren: [...definition.allowedChildren] },
+    execution: phase === "running"
+      ? { phase }
+      : {
+          phase,
+          report: { outcome: "completed", summary: "done", reportedAt: new Date(0).toISOString() },
+        },
+    ...(pid ? { childPid: pid } : {}),
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   };

@@ -8,41 +8,50 @@ import {
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import {
-  DEFAULT_MODEL_PREFERENCES,
-  MODEL_PREFERENCE_IDS,
+  discoverAgentDefinitions,
+  validateAgentTools,
+  type AgentCatalog,
+  type AgentDefinition,
+} from "./agents.ts";
+import {
+  CHILD_PROTOCOL_TOOL_NAMES,
   PARENT_TOOL_NAMES,
-  activeToolsForRole,
+  activeToolsForMode,
   composePiTaiInstructions,
   parseSubagentsCommand,
-  reconstructSubagentRole,
-  type SubagentRole,
+  reconstructSubagentState,
+  type PersistedSubagentState,
+  type SubagentMode,
 } from "./domain.ts";
-import { loadPackagedInstructions, roleInstructions, type InstructionLoader } from "./instructions.ts";
-import type { WorkspacePort } from "../workspaces/domain.ts";
-import { GitWorktreePort } from "../workspaces/git.ts";
-import { JjWorkspacePort } from "../workspaces/jj.ts";
-import { PreferredWorkspacePort } from "../workspaces/preferred.ts";
+import { loadPackagedInstructions, type InstructionLoader } from "./instructions.ts";
 import { PiChildProcessLauncher } from "./launcher.ts";
 import { SubagentOrchestrator } from "./orchestrator.ts";
 import {
   FileDelegationStore,
+  childReport,
   isResolvedDelegation,
+  type AgentDefinitionSnapshot,
   type DelegationRecord,
   type DelegationStore,
 } from "./store.ts";
+import { TASK_RESOURCE_TYPES } from "./task.ts";
+import type { AgentRoleState } from "./state.ts";
 
 const ROLE_ENTRY = "pi-tai-subagent-role";
 const CHILD_ENV = "PI_TAI_DELEGATION_ID";
 const STORE_ENV = "PI_TAI_DELEGATION_STORE";
+const AGENT_ENV = "PI_TAI_AGENT_NAME";
+const ALLOWED_ENV = "PI_TAI_ALLOWED_CHILDREN";
 
 export interface SubagentDependencies {
   store?: DelegationStore;
   orchestrator?: SubagentOrchestrator;
   loadInstructions?: InstructionLoader;
+  discoverAgents?: (ctx: ExtensionContext) => AgentCatalog;
   childDelegationId?: string;
   capabilities?: SessionCapabilityController;
-  workspace?: WorkspacePort;
   agentDir?: string;
+  roleState?: AgentRoleState;
 }
 
 export function registerSubagents(
@@ -53,105 +62,156 @@ export function registerSubagents(
   const storeRoot = process.env[STORE_ENV]
     || join(agentDir, "pi-tai", "subagents", "delegations");
   const store = dependencies.store ?? new FileDelegationStore(storeRoot);
-  const workspace = dependencies.workspace ?? new PreferredWorkspacePort(
-    new JjWorkspacePort(),
-    new GitWorktreePort(join(agentDir, "pi-tai", "workspaces", "git")),
-  );
   const orchestrator = dependencies.orchestrator ?? new SubagentOrchestrator({
     store,
-    workspace,
     launcher: new PiChildProcessLauncher(store),
   });
   const capabilities = dependencies.capabilities;
+  const roleState = dependencies.roleState;
   capabilities?.register({
     id: "subagents",
     label: "Subagents",
-    description: "Delegate work to direct child sessions in isolated workspaces",
-    toolNames: PARENT_TOOL_NAMES,
+    description: "Delegate sparse task packets to declarative child agents",
+    toolNames: [...PARENT_TOOL_NAMES],
   });
   const loadInstructions = dependencies.loadInstructions ?? loadPackagedInstructions;
+  const discover = dependencies.discoverAgents ?? ((ctx: ExtensionContext) =>
+    discoverAgentDefinitions({
+      cwd: ctx.cwd,
+      projectTrusted: ctx.isProjectTrusted(),
+      agentDir,
+    }));
   const processChildDelegationId = dependencies.childDelegationId ?? process.env[CHILD_ENV];
-  let childDelegationId = processChildDelegationId;
-  let role: SubagentRole = "standalone";
+  let mode: SubagentMode = "standalone";
+  let state: PersistedSubagentState = { mode: "standalone" };
+  let catalog: AgentCatalog | undefined;
+  let currentAgent: AgentDefinition | undefined;
   let childDelegation: DelegationRecord | undefined;
   let spawnSeenThisTurn = false;
   const parentTools = new Set<string>(PARENT_TOOL_NAMES);
 
-  const acquireSubagentBackend = async (cwd: string): Promise<void> => {
-    if (!capabilities) return;
-    const selected = workspace.kind === "preferred"
-      ? await (workspace as PreferredWorkspacePort).select(cwd)
-      : workspace;
-    const capabilityId = selected.kind === "jj" ? "jj-workspaces" : "git-worktrees";
-    await capabilities.enable(capabilityId, {
-      owner: "feature:subagents",
-      exposure: "service-only",
-    });
+  const loadCatalog = (ctx: ExtensionContext): AgentCatalog => {
+    catalog = discover(ctx);
+    return catalog;
   };
 
-  const releaseSubagentBackends = () => {
-    capabilities?.disable("jj-workspaces", "feature:subagents");
-    capabilities?.disable("git-worktrees", "feature:subagents");
+  const availableToolNames = () => new Set(pi.getAllTools().map((tool) => tool.name));
+
+  const configuredTools = (agent: AgentDefinition, child: boolean): string[] => [
+    ...agent.tools,
+    ...(child ? CHILD_PROTOCOL_TOOL_NAMES : []),
+  ];
+
+  const applyTools = (agent?: AgentDefinition) => {
+    if (!agent) {
+      pi.setActiveTools(activeToolsForMode(pi.getActiveTools(), "standalone"));
+      return;
+    }
+    pi.setActiveTools(configuredTools(agent, mode === "child"));
   };
 
-  const applyRoleTools = () => {
-    capabilities?.suppressTools(["jj-workspaces", "git-worktrees"], role !== "standalone");
-    pi.setActiveTools(activeToolsForRole(pi.getActiveTools(), role));
+  const applyAgentModel = async (agent: AgentDefinition, ctx: ExtensionContext): Promise<boolean> => {
+    const model = ctx.modelRegistry.find(agent.provider, agent.model);
+    if (!model) {
+      ctx.ui.notify(`Agent "${agent.name}" model is unavailable: ${agent.provider}/${agent.model}.`, "error");
+      return false;
+    }
+    if (!await pi.setModel(model)) {
+      ctx.ui.notify(`Agent "${agent.name}" has no credentials for ${agent.provider}/${agent.model}.`, "error");
+      return false;
+    }
+    pi.setThinkingLevel(agent.effort);
+    if (pi.getThinkingLevel() !== agent.effort) {
+      ctx.ui.notify(
+        `Agent "${agent.name}" requested ${agent.effort} effort; applied ${pi.getThinkingLevel()}.`,
+        "warning",
+      );
+    }
+    return true;
+  };
+
+  const activateAgent = async (agent: AgentDefinition, ctx: ExtensionContext): Promise<boolean> => {
+    try {
+      validateAgentTools(agent, availableToolNames());
+    } catch (error) {
+      ctx.ui.notify(errorMessage(error), "error");
+      return false;
+    }
+    if (!await applyAgentModel(agent, ctx)) return false;
+    currentAgent = agent;
+    roleState?.set(agent.name);
+    applyTools(agent);
+    return true;
   };
 
   pi.on("session_start", async (event, ctx) => {
-    const persisted = reconstructSubagentRole(ctx.sessionManager.getEntries());
-    role = processChildDelegationId
-      ? "child"
-      : event.reason === "new" || event.reason === "fork"
-        ? "standalone"
-        : persisted.role;
-    childDelegationId = role === "child"
-      ? processChildDelegationId ?? persisted.delegationId
-      : undefined;
-    if (!processChildDelegationId && (event.reason === "new" || event.reason === "fork")) {
-      pi.appendEntry(ROLE_ENTRY, { role: "standalone" });
-    }
-    if (role === "parent") await acquireSubagentBackend(ctx.cwd);
-    else releaseSubagentBackends();
-    if (role === "child") {
-      if (!childDelegationId) throw new Error("Child session is missing its durable delegation identity.");
-      childDelegation = await orchestrator.child(childDelegationId);
-      if (!hasRoleEntry(ctx.sessionManager.getEntries(), "child")) {
-        pi.appendEntry(ROLE_ENTRY, { role: "child", delegationId: childDelegationId });
+    const persisted = reconstructSubagentState(ctx.sessionManager.getEntries());
+    const fresh = event.reason === "new" || event.reason === "fork";
+    state = processChildDelegationId
+      ? { mode: "child", delegationId: processChildDelegationId }
+      : fresh
+        ? { mode: "standalone" }
+        : persisted;
+    mode = state.mode;
+    if (fresh && !processChildDelegationId) pi.appendEntry(ROLE_ENTRY, state);
+    const effectiveCatalog = loadCatalog(ctx);
+    if (mode === "child") {
+      const delegationId = processChildDelegationId ?? state.delegationId;
+      if (!delegationId) throw new Error("Child session is missing its durable delegation identity.");
+      childDelegation = await orchestrator.child(delegationId);
+      currentAgent = definitionFromSnapshot(childDelegation.agent);
+      roleState?.set(currentAgent.name);
+      verifyChildEnvironment(childDelegation);
+      if (reconstructSubagentState(ctx.sessionManager.getEntries()).mode !== "child") {
+        state = { mode: "child", agentName: currentAgent.name, delegationId };
+        pi.appendEntry(ROLE_ENTRY, state);
       }
-      await orchestrator.attachChildSession(childDelegationId, {
+      await orchestrator.attachChildSession(delegationId, {
         id: ctx.sessionManager.getSessionId(),
         file: ctx.sessionManager.getSessionFile(),
       });
+      applyTools(currentAgent);
+      return;
     }
-    applyRoleTools();
+    if (mode === "root") {
+      const root = state.agentName
+        ? effectiveCatalog.byName.get(state.agentName)
+        : effectiveCatalog.root;
+      if (!root || !root.root || !await activateAgent(root, ctx)) {
+        mode = "standalone";
+        roleState?.set();
+        state = { mode: "standalone" };
+        capabilities?.disable("subagents", "user");
+        pi.appendEntry(ROLE_ENTRY, state);
+      }
+      return;
+    }
+    currentAgent = undefined;
+    roleState?.set();
+    applyTools();
   });
 
   pi.on("before_agent_start", async (event) => {
     const instructions = loadInstructions();
-    if (role === "child" && childDelegationId) {
-      childDelegation = await orchestrator.child(childDelegationId);
+    if (mode === "child" && childDelegation?.id) {
+      childDelegation = await orchestrator.child(childDelegation.id);
     }
+    const children = currentAgent && catalog
+      ? currentAgent.allowedChildren.map((name) => catalog!.byName.get(name)).filter(isDefinition)
+      : [];
     return {
       systemPrompt: composePiTaiInstructions({
         basePrompt: event.systemPrompt,
-        role,
+        mode,
+        agentName: currentAgent?.name,
         systemInstructions: instructions.system,
-        roleInstructions: roleInstructions(instructions, role),
-        ...(role === "parent" ? { modelPreferences: DEFAULT_MODEL_PREFERENCES } : {}),
+        ...(mode === "root" && currentAgent ? { roleInstructions: currentAgent.systemPrompt } : {}),
+        availableChildren: children.map(({ name, description }) => ({ name, description })),
         ...(childDelegation ? {
           delegation: {
             id: childDelegation.id,
             parentSessionId: childDelegation.parentSessionId,
-            backend: childDelegation.workspace.backend,
-            workspace: childDelegation.workspace.path,
-            baseId: childDelegation.workspace.backend === "jj"
-              ? childDelegation.workspace.baseChangeId
-              : childDelegation.workspace.baseCommit,
-            rootId: childDelegation.workspace.backend === "jj"
-              ? childDelegation.workspace.rootChangeId
-              : childDelegation.workspace.branch,
+            cwd: childDelegation.cwd,
           },
         } : {}),
       }),
@@ -163,28 +223,16 @@ export function registerSubagents(
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (role !== "parent") return;
-    if (event.toolName === "spawn_child") {
+    if (!currentAgent?.tools.includes("subagent")) return;
+    if (event.toolName === "subagent") {
       spawnSeenThisTurn = true;
       return;
     }
-    if (event.toolName === "create_jj_workspace" || event.toolName === "create_git_worktree") {
-      return {
-        block: true,
-        reason: "Parent sessions must use spawn_child; direct workspace relocation is standalone-only.",
-      };
-    }
-    if (event.toolName === "bash" && requestsWorkspaceCreation(event.input)) {
-      return {
-        block: true,
-        reason: "Parent sessions must use spawn_child to create a workspace and delegate its task; do not run workspace creation commands directly.",
-      };
-    }
-    if (parentTools.has(event.toolName)) return;
+    if (parentTools.has(event.toolName) || CHILD_PROTOCOL_TOOL_NAMES.includes(event.toolName as never)) return;
     if (spawnSeenThisTurn || entrySpawnsChild(ctx.sessionManager.getLeafEntry?.())) {
       return {
         block: true,
-        reason: "Parent work cannot run in the same turn as spawn_child. Delegate the complete task, then wait_for_children.",
+        reason: "Parent work cannot run in the same turn as subagent. Delegate the complete task, then wait or inspect child status.",
       };
     }
     const activeChildren = (await orchestrator.children(ctx.sessionManager.getSessionId()))
@@ -192,19 +240,19 @@ export function registerSubagents(
     if (activeChildren.length > 0) {
       return {
         block: true,
-        reason: `Parent work is paused while ${activeChildren.length} child delegation(s) are active. Use message_child, child_status, wait_for_children, or abandon_child.`,
+        reason: `Parent work is paused while ${activeChildren.length} child delegation(s) are active. Use child controls instead of duplicating their work.`,
       };
     }
   });
 
   pi.on("session_shutdown", async (event) => {
-    if (event.reason === "quit" && role === "child" && childDelegationId) {
-      await orchestrator.cleanupChildControl(childDelegationId);
+    if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
+      await orchestrator.cleanupChildControl(childDelegation.id);
     }
   });
 
   pi.registerCommand("cap:subagents", {
-    description: "Enable, inspect, or disable direct-child subagents",
+    description: "Enable, inspect, or disable declarative subagents",
     handler: async (args, ctx) => {
       const command = parseSubagentsCommand(args);
       if (!command) {
@@ -214,175 +262,200 @@ export function registerSubagents(
       if (command === "status") {
         const children = await orchestrator.children(ctx.sessionManager.getSessionId());
         const unresolved = children.filter((record) => !isResolvedDelegation(record)).length;
-        ctx.ui.notify(`Subagents: ${role}; ${children.length} children, ${unresolved} unresolved.`, "info");
+        ctx.ui.notify(
+          `Subagents: ${mode}${currentAgent ? ` (${currentAgent.name})` : ""}; ${children.length} children, ${unresolved} unresolved.`,
+          "info",
+        );
         return;
       }
-      if (role === "child") {
-        ctx.ui.notify("Child sessions cannot change subagent role.", "error");
+      if (mode === "child") {
+        ctx.ui.notify("Delegated children cannot change their root role.", "error");
         return;
       }
       if (command === "on") {
-        await acquireSubagentBackend(ctx.cwd);
-        await capabilities?.enable("subagents", { owner: "user", exposure: "model-tools" });
-        if (role !== "parent") {
-          role = "parent";
-          pi.appendEntry(ROLE_ENTRY, { role });
-          applyRoleTools();
+        if (mode === "root") {
+          ctx.ui.notify(`Subagents already enabled as ${currentAgent?.name ?? "root"}.`, "info");
+          return;
         }
-        ctx.ui.notify("Subagents enabled for this parent session.", "info");
+        const root = loadCatalog(ctx).root;
+        const previous: PersistedSubagentState["previous"] = {
+          ...(ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {}),
+          effort: pi.getThinkingLevel(),
+          tools: pi.getActiveTools(),
+        };
+        if (!await activateAgent(root, ctx)) return;
+        await capabilities?.enable("subagents", { owner: "user", exposure: "model-tools" });
+        mode = "root";
+        state = { mode, agentName: root.name, previous };
+        pi.appendEntry(ROLE_ENTRY, state);
+        applyTools(root);
+        ctx.ui.notify(`Subagents enabled with root agent "${root.name}".`, "info");
         return;
       }
-      const children = await orchestrator.children(ctx.sessionManager.getSessionId());
-      const unresolved = children.filter((record) => !isResolvedDelegation(record));
+      const unresolved = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+        .filter((record) => !isResolvedDelegation(record));
       if (unresolved.length > 0) {
         ctx.ui.notify(`Cannot disable subagents with ${unresolved.length} unresolved children.`, "error");
         return;
       }
-      role = "standalone";
+      const previous = state.previous;
+      if (previous?.provider && previous.model) {
+        const model = ctx.modelRegistry.find(previous.provider, previous.model);
+        if (model) await pi.setModel(model);
+      }
+      if (previous) {
+        pi.setThinkingLevel(previous.effort as Parameters<typeof pi.setThinkingLevel>[0]);
+        pi.setActiveTools(previous.tools);
+      } else {
+        applyTools();
+      }
+      mode = "standalone";
+      currentAgent = undefined;
+      roleState?.set();
+      state = { mode };
       capabilities?.disable("subagents", "user");
-      releaseSubagentBackends();
-      pi.appendEntry(ROLE_ENTRY, { role });
-      applyRoleTools();
+      pi.appendEntry(ROLE_ENTRY, state);
       ctx.ui.notify("Subagents disabled for this session.", "info");
     },
   });
 
   pi.registerTool({
-    name: "spawn_child",
-    label: "Spawn Child",
-    description: "Create an isolated workspace and persistent direct-child Pi session that exclusively performs the delegated task. Prefers JJ and falls back to Git before creation. Parent sessions only.",
-    promptSnippet: "Create an isolated workspace and delegate all work in it to a direct child",
+    name: "subagent",
+    label: "Subagent",
+    description: "Spawn one isolated declarative child with no parent conversation history. The task packet must be self-contained.",
+    promptSnippet: "Delegate a self-contained task packet to an allowed specialized child",
     promptGuidelines: [
-      "Use spawn_child whenever the user asks a parent session to create an isolated workspace for work; include the complete task and acceptance criteria so the child performs all workspace work.",
-      "spawn_child always roots a JJ child at the parent's @-, whether parent @ is empty or modified; never checkpoint, move, rewrite, or clean parent @ before delegation.",
-      "Never run jj workspace add or git worktree add directly in a parent session; spawn_child owns workspace creation and the child exclusively owns the resulting workspace.",
-      "After spawning requested children, call wait_for_children immediately. The parent must not read, edit, test, run VCS operations for, or otherwise duplicate the child's repository work while it is active.",
+      "Use subagent only with a self-contained task packet; children share cwd but receive no conversation history.",
+      "After spawning children, use wait_for_children or child_status instead of duplicating their assignments.",
     ],
     parameters: Type.Object({
-      task: Type.String({ description: "Complete bounded task and acceptance criteria for the child" }),
-      modelPreferenceId: StringEnum(MODEL_PREFERENCE_IDS, {
-        description: "Semantic model preference selected from the parent prompt",
-      }),
+      agent: Type.String({ description: "Allowed child agent name" }),
+      task: taskPacketSchema(),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "parent");
+      const caller = requireOrchestrator(currentAgent);
+      const effectiveCatalog = loadCatalog(ctx);
+      const target = effectiveCatalog.byName.get(params.agent);
+      if (!target) throw new Error(`Unknown agent: ${params.agent}`);
+      if (!caller.allowedChildren.includes(target.name)) {
+        throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
+      }
+      validateAgentTools(target, availableToolNames());
       const record = await orchestrator.spawnChild({
         task: params.task,
-        modelPreferenceId: params.modelPreferenceId,
+        agent: target,
+        caller,
         parentCwd: ctx.cwd,
         parentSessionId: ctx.sessionManager.getSessionId(),
-        parentSessionFile: ctx.sessionManager.getSessionFile(),
+        ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
       });
-      return result(`Spawned child ${record.id} (${record.modelPreferenceId}) in ${record.workspace.path}. Parent work is paused; wait for the child or message it.`, record);
+      return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
     },
   });
 
   pi.registerTool({
     name: "message_child",
     label: "Message Child",
-    description: "Send updated instructions to a running direct child through its persistent control channel.",
-    promptSnippet: "Steer a running child or queue a follow-up instruction",
-    promptGuidelines: [
-      "Use message_child to correct or extend a running child's delegated instructions without doing the work in the parent thread.",
-    ],
+    description: "Steer a running direct child or queue a follow-up instruction.",
     parameters: Type.Object({
       delegationId: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 16_000 }),
-      delivery: Type.Optional(StringEnum(["steer", "followUp"] as const, {
-        description: "steer applies after the current child turn; followUp waits until its current run settles",
-      })),
+      delivery: Type.Optional(StringEnum(["steer", "followUp"] as const)),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "parent");
-      const existing = await orchestrator.child(params.delegationId);
-      assertParent(existing, ctx.sessionManager.getSessionId());
-      const record = await orchestrator.message(
-        params.delegationId,
-        params.message,
-        params.delivery ?? "steer",
-      );
-      return result(`Sent ${params.delivery ?? "steer"} message to child ${record.id}.`, record);
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      const record = await orchestrator.message(params.delegationId, params.message, params.delivery ?? "steer");
+      return result(`Sent ${params.delivery ?? "steer"} message to ${record.id}.`, record);
     },
   });
 
   pi.registerTool({
     name: "wait_for_children",
     label: "Wait for Children",
-    description: "Wait without parent LLM calls until every currently active direct child reports a terminal outcome.",
-    promptSnippet: "Wait for all currently active direct children without parent model churn",
-    promptGuidelines: ["Use wait_for_children after delegation when parent work would overlap or speculate about child results."],
-    parameters: Type.Object({}),
-    async execute(_id, _params, signal, onUpdate, ctx) {
-      requireRole(role, "parent");
+    description: "Wait for the next direct-child completion or question, or for all selected children.",
+    promptSnippet: "Wait without model churn for the next child completion/question or all children",
+    parameters: Type.Object({
+      delegationIds: Type.Optional(Type.Array(Type.String())),
+      until: Type.Optional(StringEnum(["next", "all"] as const)),
+    }),
+    async execute(_id, params, signal, onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
       const records = await orchestrator.wait(ctx.sessionManager.getSessionId(), {
         signal,
+        ...(params.delegationIds ? { childIds: params.delegationIds } : {}),
+        until: params.until ?? "next",
         onProgress(current) {
-          const resolved = current.filter(isResolvedDelegation).length;
-          onUpdate?.(result(`Waiting for children: ${resolved}/${current.length} resolved.`, current));
+          onUpdate?.(result(`Waiting: ${current.filter(isResolvedDelegation).length}/${current.length} resolved.`, current));
         },
       });
-      return result(formatReports(records), records);
+      return result(formatRecords(records), records);
     },
   });
 
   pi.registerTool({
     name: "child_status",
     label: "Child Status",
-    description: "Inspect one direct child or list every child belonging to this parent session.",
-    parameters: Type.Object({
-      delegationId: Type.Optional(Type.String({ description: "Delegation ID; omit to list all children" })),
-    }),
+    description: "Inspect one direct child or list all direct children without consuming completions.",
+    parameters: Type.Object({ delegationId: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "parent");
+      requireOrchestrator(currentAgent);
       const records = params.delegationId
-        ? [await orchestrator.child(params.delegationId)]
+        ? [await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId())]
         : await orchestrator.children(ctx.sessionManager.getSessionId());
-      for (const record of records) assertParent(record, ctx.sessionManager.getSessionId());
-      return result(formatReports(records), records);
+      return result(formatRecords(records), records);
     },
   });
 
   pi.registerTool({
-    name: "integrate_child",
-    label: "Integrate Child",
-    description: "Integrate a completed child's recorded JJ subtree with rebase -s before parent @, or finalize cleanup after parent verification.",
-    promptSnippet: "Integrate a completed child JJ subtree or finalize its verified workspace cleanup",
-    promptGuidelines: [
-      "Use integrate_child with finalize false to preserve and insert the child root plus all descendants before parent @.",
-      "Run parent validation before calling integrate_child with finalize true.",
-    ],
+    name: "respond_to_child",
+    label: "Respond to Child",
+    description: "Answer the currently outstanding correlated question from a direct child.",
     parameters: Type.Object({
       delegationId: Type.String(),
-      finalize: Type.Optional(Type.Boolean({ description: "After parent verification, forget and remove the child workspace" })),
+      questionId: Type.String(),
+      response: Type.String({ minLength: 1, maxLength: 16_000 }),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "parent");
-      const existing = await orchestrator.child(params.delegationId);
-      assertParent(existing, ctx.sessionManager.getSessionId());
-      const record = await orchestrator.integrate(params.delegationId, params.finalize ?? false);
-      return result(
-        record.state === "conflicted"
-          ? `Child ${record.id} integrated with conflicts: ${(record.conflictFiles ?? []).join(", ")}`
-          : `Child ${record.id}: ${record.state}.`,
-        record,
-      );
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      const record = await orchestrator.respond(params.delegationId, params.questionId, params.response);
+      return result(`Answered ${params.questionId} for ${record.id}.`, record);
     },
   });
 
   pi.registerTool({
     name: "abandon_child",
     label: "Abandon Child",
-    description: "Explicitly stop a child and forget/remove its workspace while retaining its JJ changes by change ID.",
+    description: "Stop a direct child without modifying or cleaning the shared working directory.",
     parameters: Type.Object({ delegationId: Type.String() }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "parent");
-      const existing = await orchestrator.child(params.delegationId);
-      assertParent(existing, ctx.sessionManager.getSessionId());
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
       const record = await orchestrator.abandon(params.delegationId);
+      return result(`Abandoned child ${record.id}; shared files were left untouched.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "ask_parent",
+    label: "Ask Parent",
+    description: "Pause for a correlated parent decision when configured uncertainty handling is ask-parent.",
+    parameters: Type.Object({
+      question: Type.String({ minLength: 1, maxLength: 8_000 }),
+      options: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2_000 }))),
+      recommendation: Type.Optional(Type.String({ maxLength: 4_000 })),
+      consequences: Type.Optional(Type.Array(Type.String({ maxLength: 2_000 }))),
+    }),
+    async execute(_id, params) {
+      if (mode !== "child" || !childDelegation) throw new Error("ask_parent requires a delegated child.");
+      if (childDelegation.task.uncertaintyHandling !== "ask-parent") {
+        throw new Error(`Task uncertainty handling is ${childDelegation.task.uncertaintyHandling}, not ask-parent.`);
+      }
+      const record = await orchestrator.askParent(childDelegation.id, params);
+      childDelegation = record;
       return result(
-        record.workspaceRetained
-          ? `Abandoned child ${record.id}; dirty workspace retained for recovery at ${record.workspaceRecoveryPath}.`
-          : `Abandoned child ${record.id}; workspace removed without deleting backend history.`,
+        `Waiting for parent response to ${record.execution.phase === "awaiting_parent" ? record.execution.question.id : "question"}.`,
         record,
       );
     },
@@ -391,9 +464,7 @@ export function registerSubagents(
   pi.registerTool({
     name: "report_to_parent",
     label: "Report to Parent",
-    description: "Required terminal action for a child. Persist one outcome report, wake the parent waiter, and end the child run.",
-    promptSnippet: "Report the delegated child outcome to its parent and terminate the child run",
-    promptGuidelines: ["Child sessions must call report_to_parent exactly once after completing validation or encountering a blocker."],
+    description: "Resolve the delegated task, wake its direct parent, and terminate the child run.",
     parameters: Type.Object({
       outcome: StringEnum(["completed", "blocked", "failed", "cancelled"] as const),
       summary: Type.String(),
@@ -402,74 +473,107 @@ export function registerSubagents(
       concerns: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireRole(role, "child");
-      if (!childDelegationId) throw new Error("Child delegation identity is unavailable.");
-      const record = await orchestrator.report(childDelegationId, {
-        outcome: params.outcome,
-        summary: params.summary,
-        ...(params.validation ? { validation: params.validation } : {}),
-        ...(params.changedFiles ? { changedFiles: params.changedFiles } : {}),
-        ...(params.concerns ? { concerns: params.concerns } : {}),
-      });
+      if (mode !== "child" || !childDelegation) throw new Error("report_to_parent requires a delegated child.");
+      const unresolved = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+        .filter((record) => !isResolvedDelegation(record));
+      if (unresolved.length > 0) throw new Error(`Resolve ${unresolved.length} child delegation(s) before reporting.`);
+      const record = await orchestrator.report(childDelegation.id, params);
+      childDelegation = record;
       ctx.shutdown();
-      return {
-        ...result(`Reported ${record.state} to parent for ${record.id}.`, record),
-        terminate: true,
-      };
+      return { ...result(`Reported ${record.execution.phase} to parent.`, record), terminate: true };
     },
   });
 }
 
-function hasRoleEntry(
-  entries: Parameters<typeof reconstructSubagentRole>[0],
-  expected: SubagentRole,
-): boolean {
-  return reconstructSubagentRole(entries).role === expected;
+function taskPacketSchema() {
+  return Type.Object({
+    objective: Type.String({ minLength: 1, maxLength: 16_000 }),
+    context: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4_000 }), { maxItems: 64 })),
+    resources: Type.Optional(Type.Array(Type.Object({
+      type: StringEnum(TASK_RESOURCE_TYPES),
+      value: Type.String({ minLength: 1, maxLength: 8_000 }),
+      reason: Type.Optional(Type.String({ maxLength: 2_000 })),
+    }), { maxItems: 64 })),
+    constraints: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4_000 }), { maxItems: 64 })),
+    acceptanceCriteria: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4_000 }), { maxItems: 64 })),
+    expectedOutput: Type.Optional(Type.String({ maxLength: 8_000 })),
+    uncertaintyHandling: Type.Optional(StringEnum(["best-effort", "block", "ask-parent"] as const)),
+  });
 }
 
-function requireRole(actual: SubagentRole, expected: SubagentRole): void {
-  if (actual !== expected) throw new Error(`Tool requires subagent role ${expected}; current role is ${actual}.`);
+function definitionFromSnapshot(snapshot: AgentDefinitionSnapshot): AgentDefinition {
+  return {
+    ...snapshot,
+    source: snapshot.source === "legacy" ? "user" : snapshot.source,
+  };
 }
 
-function assertParent(record: DelegationRecord, sessionId: string): void {
-  if (record.parentSessionId !== sessionId) throw new Error(`Delegation ${record.id} does not belong to this parent session.`);
+function verifyChildEnvironment(record: DelegationRecord): void {
+  const expectedAgent = process.env[AGENT_ENV];
+  if (expectedAgent && expectedAgent !== record.agent.name) {
+    throw new Error(`Child agent mismatch: expected ${expectedAgent}, record names ${record.agent.name}.`);
+  }
+  const allowed = process.env[ALLOWED_ENV];
+  if (allowed) {
+    const parsed = JSON.parse(allowed) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
+      throw new Error("Invalid child allowlist environment.");
+    }
+    if (JSON.stringify(parsed) !== JSON.stringify(record.agent.allowedChildren)) {
+      throw new Error("Child allowlist does not match the durable role snapshot.");
+    }
+  }
 }
 
-function requestsWorkspaceCreation(input: unknown): boolean {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
-  const command = (input as { command?: unknown }).command;
-  return typeof command === "string" && (
-    /(?:^|[;&|()\s])jj\b[^\n;&|]*\bworkspace\s+add(?:\s|$)/i.test(command)
-    || /(?:^|[;&|()\s])git\b[^\n;&|]*\bworktree\s+add(?:\s|$)/i.test(command)
-  );
+function requireOrchestrator(agent: AgentDefinition | undefined): AgentDefinition {
+  if (!agent?.tools.includes("subagent")) throw new Error("Current agent cannot orchestrate children.");
+  return agent;
+}
+
+async function requireDirectChild(
+  orchestrator: SubagentOrchestrator,
+  id: string,
+  parentSessionId: string,
+): Promise<DelegationRecord> {
+  const record = await orchestrator.child(id);
+  if (record.parentSessionId !== parentSessionId) {
+    throw new Error(`Delegation ${id} does not belong to this direct parent.`);
+  }
+  return record;
 }
 
 function entrySpawnsChild(entry: unknown): boolean {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-  const candidate = entry as {
-    type?: unknown;
-    message?: { role?: unknown; content?: unknown };
-  };
+  const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
   return candidate.type === "message"
     && candidate.message?.role === "assistant"
     && Array.isArray(candidate.message.content)
     && candidate.message.content.some((part) => Boolean(
-      part
-      && typeof part === "object"
-      && !Array.isArray(part)
+      part && typeof part === "object" && !Array.isArray(part)
       && (part as { type?: unknown }).type === "toolCall"
-      && (part as { name?: unknown }).name === "spawn_child",
+      && (part as { name?: unknown }).name === "subagent",
     ));
 }
 
-function formatReports(records: readonly DelegationRecord[]): string {
+function formatRecords(records: readonly DelegationRecord[]): string {
   if (records.length === 0) return "No matching child delegations.";
   return records.map((record) => {
-    const summary = record.report?.summary ? ` — ${record.report.summary}` : "";
-    return `${record.id}: ${record.state}${summary}`;
+    if (record.execution.phase === "awaiting_parent") {
+      return `${record.id} (${record.agent.name}): awaiting parent — ${record.execution.question.question} [${record.execution.question.id}]`;
+    }
+    const report = childReport(record);
+    return `${record.id} (${record.agent.name}): ${record.execution.phase}${report ? ` — ${report.summary}` : ""}`;
   }).join("\n");
 }
 
 function result(text: string, details: unknown) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function isDefinition(value: AgentDefinition | undefined): value is AgentDefinition {
+  return Boolean(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

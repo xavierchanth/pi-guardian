@@ -95,7 +95,7 @@ test("agent definitions reject cycles, missing children, and tool-policy mismatc
       packagedDir: root,
       agentDir: "/tmp/pi-tai-no-user-agents",
     }),
-    /cycle/,
+    /cycle|Root agent/,
   );
 
   await writeFile(join(root, "child.md"), definition({

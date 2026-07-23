@@ -30,6 +30,7 @@ const snapshot: FooterSnapshot = {
   model: "gpt-5.6-sol",
   reasoning: true,
   thinkingLevel: "low",
+  agentRole: "thinker",
 };
 
 test("renders the requested three-row work-focused footer", () => {
@@ -38,7 +39,7 @@ test("renders the requested three-row work-focused footer", () => {
 
   assert.equal(lines.length, 3);
   assert.ok(lines[0]?.startsWith("Goal: Ship a focused three-row footer"));
-  assert.ok(lines[0]?.endsWith("gpt-5.6-sol (low)"));
+  assert.ok(lines[0]?.endsWith("Thinker · gpt-5.6-sol · low"));
   assert.ok(lines[1]?.startsWith("2/3: Implement layout and truncation"));
   assert.ok(lines[1]?.endsWith("67.6%/272k (auto)"));
   assert.ok(lines[2]?.startsWith("xc/pi-tai"));
@@ -66,7 +67,7 @@ test("truncates long goals and steps while preserving right-side status", () => 
   );
   const lines = rows.map(footerRowText);
 
-  assert.ok(lines[0]?.endsWith("gpt-5.6-sol (low)"));
+  assert.ok(lines[0]?.endsWith("Thinker · gpt-5.6-sol · low"));
   assert.ok(lines[1]?.endsWith("67.6%/272k (auto)"));
   assert.ok(lines[0]?.includes("..."));
   assert.ok(lines[1]?.includes("..."));

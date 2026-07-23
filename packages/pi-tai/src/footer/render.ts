@@ -22,6 +22,7 @@ export interface FooterSnapshot {
   model: string;
   reasoning: boolean;
   thinkingLevel: string;
+  agentRole: string;
 }
 
 export interface FooterRow {
@@ -56,8 +57,7 @@ export function renderFooterRows(snapshot: FooterSnapshot, width: number): Foote
     ? `${snapshot.currentStepNumber}/${snapshot.totalSteps}`
     : `0/${snapshot.totalSteps}`;
   const step = `${stepPrefix}: ${snapshot.currentStep || "No active step"}`;
-  const model =
-    snapshot.reasoning ? `${snapshot.model} (${snapshot.thinkingLevel})` : snapshot.model;
+  const model = `${displayRole(snapshot.agentRole)} · ${snapshot.model} · ${snapshot.thinkingLevel}`;
   const context =
     snapshot.contextPercent === null
       ? `?/${formatTokens(snapshot.contextWindow)} (auto)`
@@ -83,6 +83,10 @@ export function renderFooterRows(snapshot: FooterSnapshot, width: number): Foote
 
 export function footerRowText(row: FooterRow): string {
   return row.left + row.padding + row.right;
+}
+
+function displayRole(role: string): string {
+  return role ? role[0]!.toUpperCase() + role.slice(1) : "Standalone";
 }
 
 function layoutRow(

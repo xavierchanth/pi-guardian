@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { PiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
+import { DEFAULT_PI_TAI_CONFIG } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_MODEL_PROFILES } from "../../packages/pi-tai/src/model-profiles/domain.ts";
 import {
-  MODEL_PROFILES,
-  MODEL_PROFILE_IDS,
-} from "../../packages/pi-tai/src/model-profiles/domain.ts";
-import { registerModelProfiles } from "../../packages/pi-tai/src/model-profiles/register.ts";
-import {
-  DEFAULT_MODEL_PREFERENCES,
-  MODEL_PREFERENCE_IDS,
-} from "../../packages/pi-tai/src/subagents/domain.ts";
+  matchingProfile,
+  registerModelProfiles,
+} from "../../packages/pi-tai/src/model-profiles/register.ts";
 
 type CommandHandler = (args: string, ctx: any) => Promise<void>;
 
@@ -19,12 +17,16 @@ function createHarness(options: {
   appliedEffort?: string;
 } = {}) {
   const commands = new Map<string, CommandHandler>();
+  const shortcuts = new Map<string, (ctx: any) => Promise<void>>();
   const notifications: Array<{ message: string; level: string }> = [];
   const selectedModels: unknown[] = [];
   const selectedEfforts: string[] = [];
   const pi = {
     registerCommand(name: string, command: { handler: CommandHandler }) {
       commands.set(name, command.handler);
+    },
+    registerShortcut(key: string, shortcut: { handler: (ctx: any) => Promise<void> }) {
+      shortcuts.set(key, shortcut.handler);
     },
     async setModel(model: unknown) {
       selectedModels.push(model);
@@ -38,81 +40,69 @@ function createHarness(options: {
     },
   } as unknown as ExtensionAPI;
   const ctx = {
-    modelRegistry: {
-      find: () => options.model,
-    },
+    hasUI: false,
+    model: { provider: "openai-codex", id: "gpt-5.6-sol" },
+    modelRegistry: { find: () => options.model },
     ui: {
-      notify(message: string, level: string) {
-        notifications.push({ message, level });
-      },
+      notify(message: string, level: string) { notifications.push({ message, level }); },
+      select: async () => undefined,
     },
   };
-  return { pi, ctx, commands, notifications, selectedModels, selectedEfforts };
+  const config = {
+    current: () => DEFAULT_PI_TAI_CONFIG,
+  } as PiTaiConfigService;
+  return {
+    pi, ctx, config, commands, shortcuts, notifications, selectedModels, selectedEfforts,
+  };
 }
 
-test("subagents reuse the always-available model profile definitions", () => {
-  assert.strictEqual(DEFAULT_MODEL_PREFERENCES, MODEL_PROFILES);
-  assert.strictEqual(MODEL_PREFERENCE_IDS, MODEL_PROFILE_IDS);
-  assert.deepEqual(MODEL_PROFILES.map(({ id, provider, model, effort }) => ({ id, provider, model, effort })), [
-    { id: "designer", provider: "opencode-go", model: "kimi-k3", effort: "max" },
-    { id: "thinker", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
-    { id: "worker", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
-    { id: "mechanical", provider: "openai-codex", model: "gpt-5.6-luna", effort: "high" },
+test("default profiles are independent Sol high, Sol low, and Luna high choices", () => {
+  assert.deepEqual(DEFAULT_MODEL_PROFILES, [
+    { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
+    { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
+    { name: "luna-high", provider: "openai-codex", model: "gpt-5.6-luna", effort: "high" },
   ]);
 });
 
-test("model profile commands register exact names and switch model plus effort", async () => {
-  const targetModel = { provider: "opencode-go", id: "kimi-k3" };
-  const harness = createHarness({ model: targetModel });
-  registerModelProfiles(harness.pi);
+test("profile command and Shift+Tab select model before effort", async () => {
+  const target = { provider: "openai-codex", id: "gpt-5.6-sol" };
+  const harness = createHarness({ model: target });
+  registerModelProfiles(harness.pi, harness.config);
+  assert.deepEqual([...harness.commands.keys()], ["profile", "effort"]);
+  assert.ok(harness.shortcuts.has("shift+tab"));
 
-  assert.deepEqual([...harness.commands.keys()], ["model:designer", "model:thinker", "model:worker", "model:mechanical"]);
-  await harness.commands.get("model:designer")?.("", harness.ctx);
-
-  assert.deepEqual(harness.selectedModels, [targetModel]);
-  assert.deepEqual(harness.selectedEfforts, ["max"]);
-  assert.deepEqual(harness.notifications, [{
-    message: "Switched to model profile \"designer\": opencode-go/kimi-k3 (max thinking).",
-    level: "info",
-  }]);
-});
-
-test("model profile commands reject arguments without changing session state", async () => {
-  const harness = createHarness({ model: {} });
-  registerModelProfiles(harness.pi);
-
-  await harness.commands.get("model:worker")?.("unexpected", harness.ctx);
-
-  assert.deepEqual(harness.selectedModels, []);
-  assert.deepEqual(harness.selectedEfforts, []);
-  assert.match(harness.notifications[0]?.message ?? "", /Usage: \/model:worker/);
-});
-
-test("model profile commands report missing models and credentials without changing effort", async () => {
-  const missing = createHarness();
-  registerModelProfiles(missing.pi);
-  await missing.commands.get("model:mechanical")?.("", missing.ctx);
-  assert.deepEqual(missing.selectedModels, []);
-  assert.deepEqual(missing.selectedEfforts, []);
-  assert.match(missing.notifications[0]?.message ?? "", /is not registered/);
-  assert.equal(missing.notifications[0]?.level, "error");
-
-  const unauthenticated = createHarness({ model: {}, canSelect: false });
-  registerModelProfiles(unauthenticated.pi);
-  await unauthenticated.commands.get("model:worker")?.("", unauthenticated.ctx);
-  assert.equal(unauthenticated.selectedModels.length, 1);
-  assert.deepEqual(unauthenticated.selectedEfforts, []);
-  assert.match(unauthenticated.notifications[0]?.message ?? "", /no credentials/);
-  assert.equal(unauthenticated.notifications[0]?.level, "error");
-});
-
-test("model profile commands disclose model capability clamping", async () => {
-  const harness = createHarness({ model: {}, appliedEffort: "medium" });
-  registerModelProfiles(harness.pi);
-
-  await harness.commands.get("model:thinker")?.("", harness.ctx);
-
+  await harness.commands.get("profile")?.("sol-high", harness.ctx);
+  assert.deepEqual(harness.selectedModels, [target]);
   assert.deepEqual(harness.selectedEfforts, ["high"]);
-  assert.match(harness.notifications[0]?.message ?? "", /requested high thinking, applied medium/);
-  assert.equal(harness.notifications[0]?.level, "warning");
+  assert.match(harness.notifications[0]?.message ?? "", /sol-high/);
+});
+
+test("profile model failures do not change effort", async () => {
+  const missing = createHarness();
+  registerModelProfiles(missing.pi, missing.config);
+  await missing.commands.get("profile")?.("sol-low", missing.ctx);
+  assert.deepEqual(missing.selectedEfforts, []);
+  assert.match(missing.notifications[0]?.message ?? "", /not registered/);
+
+  const denied = createHarness({ model: {}, canSelect: false });
+  registerModelProfiles(denied.pi, denied.config);
+  await denied.commands.get("profile")?.("sol-low", denied.ctx);
+  assert.deepEqual(denied.selectedEfforts, []);
+  assert.match(denied.notifications[0]?.message ?? "", /no credentials/);
+});
+
+test("effort command changes effort independently and reports clamping", async () => {
+  const harness = createHarness({ appliedEffort: "medium" });
+  registerModelProfiles(harness.pi, harness.config);
+  await harness.commands.get("effort")?.("high", harness.ctx);
+  assert.deepEqual(harness.selectedEfforts, ["high"]);
+  assert.match(harness.notifications[0]?.message ?? "", /requested high effort; applied medium/i);
+});
+
+test("matching profile is derived from actual provider, model, and effort", () => {
+  assert.equal(
+    matchingProfile(DEFAULT_MODEL_PROFILES, "openai-codex", "gpt-5.6-sol", "low")?.name,
+    "sol-low",
+  );
+  assert.equal(matchingProfile(DEFAULT_MODEL_PROFILES, "openai-codex", "gpt-5.6-sol", "medium"), undefined);
 });

@@ -34,11 +34,16 @@ test("source uses the current Pi distribution imports", () => {
   assert.deepEqual(legacy, []);
 });
 
-test("Pi-Tai packages user-authored system and role instruction files", () => {
-  for (const name of ["system.md", "parent.md", "child.md"]) {
-    const path = join(root, "packages/pi-tai/instructions", name);
-    assert.ok(existsSync(path), path);
-    assert.equal(readFileSync(path, "utf8"), "", `${name} starts user-authored and empty`);
+test("Pi-Tai packages a global instruction layer and declarative agent definitions", () => {
+  const system = join(root, "packages/pi-tai/instructions/system.md");
+  assert.ok(existsSync(system), system);
+  for (const name of ["thinker", "worker", "scout", "researcher"]) {
+    const path = join(root, "packages/pi-tai/agents", `${name}.md`);
+    const content = readFileSync(path, "utf8");
+    assert.match(content, new RegExp(`name: ${name}`));
+    assert.match(content, /model: openai-codex\/gpt-5\.6-/);
+    assert.match(content, /effort:/);
+    assert.match(content, /tools:/);
   }
 });
 

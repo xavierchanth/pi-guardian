@@ -1,40 +1,28 @@
-export const MODEL_PROFILE_IDS = ["designer", "thinker", "worker", "mechanical"] as const;
-export type ModelProfileId = (typeof MODEL_PROFILE_IDS)[number];
-export type ThinkingEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export const THINKING_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingEffort = (typeof THINKING_EFFORTS)[number];
 
 export interface ModelProfile {
-  id: ModelProfileId;
-  description: string;
+  name: string;
   provider: string;
   model: string;
   effort: ThinkingEffort;
 }
 
-export const MODEL_PROFILES: readonly ModelProfile[] = Object.freeze([
+export const DEFAULT_MODEL_PROFILES: readonly ModelProfile[] = Object.freeze([
   Object.freeze({
-    id: "designer",
-    description: "Open-ended product, system, and architecture design work.",
-    provider: "opencode-go",
-    model: "kimi-k3",
-    effort: "max",
-  }),
-  Object.freeze({
-    id: "thinker",
-    description: "Work requiring investigation, planning, architecture, or substantial judgment.",
+    name: "sol-high",
     provider: "openai-codex",
     model: "gpt-5.6-sol",
     effort: "high",
   }),
   Object.freeze({
-    id: "worker",
-    description: "Clearly planned work that still requires trusted engineering judgment.",
+    name: "sol-low",
     provider: "openai-codex",
     model: "gpt-5.6-sol",
     effort: "low",
   }),
   Object.freeze({
-    id: "mechanical",
-    description: "Explicit repetitive transformations requiring minimal discretionary judgment.",
+    name: "luna-high",
     provider: "openai-codex",
     model: "gpt-5.6-luna",
     effort: "high",

@@ -1,5 +1,7 @@
 # Workspace capabilities and subagent backend implementation plan
 
+> Historical note: delegated-workspace sections are superseded by `docs/SUBAGENTS.md`. Subagents now inherit cwd and never allocate JJ workspaces or Git worktrees automatically; standalone workspace capabilities remain current.
+
 ## Status
 
 Implemented for terminal Pi and the SDK runtime protocol. W0–W5 and the runtime-facing portion of W6 are complete; durable Host broker ownership remains part of the H3/H4 Host implementation.

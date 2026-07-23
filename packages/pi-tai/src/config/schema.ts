@@ -1,3 +1,8 @@
+import {
+  DEFAULT_MODEL_PROFILES,
+  type ModelProfile,
+} from "../model-profiles/domain.ts";
+
 export const TITLE_EFFORTS = [
   "minimal",
   "low",
@@ -32,6 +37,7 @@ export interface PiTaiConfig {
   sessionTitle: SessionTitleConfig;
   ansiTheme: AnsiThemeConfig;
   notifications: NotificationsConfig;
+  modelProfiles: readonly ModelProfile[];
 }
 
 export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
@@ -49,4 +55,5 @@ export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
     reviewFailure: true,
     agentCompletion: true,
   }),
+  modelProfiles: DEFAULT_MODEL_PROFILES,
 });

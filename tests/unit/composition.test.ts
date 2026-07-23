@@ -55,6 +55,7 @@ test("composition root registers every feature once in order", async () => {
       notificationSender: () => undefined,
       capabilities: new SessionCapabilityController(),
       agentDir: "/tmp/pi-tai-test-agent",
+      agentRole: { current: () => "standalone", set() {} },
     }),
   );
 

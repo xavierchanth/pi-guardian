@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { SessionManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
 import { CAPABILITY_STATE_ENTRY } from "../../packages/pi-tai/src/capabilities/domain.ts";
-import { JjWorkspaceService, type JjCommandRunner } from "../../packages/pi-tai/src/subagents/jj.ts";
+import { JjWorkspaceService, type JjCommandRunner } from "../../packages/pi-tai/src/workspaces/jj-service.ts";
 import type { DelegationRecord, DelegationStore } from "../../packages/pi-tai/src/subagents/store.ts";
 import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
 import { GitWorktreePort } from "../../packages/pi-tai/src/workspaces/git.ts";

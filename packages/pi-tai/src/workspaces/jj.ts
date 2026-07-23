@@ -1,4 +1,4 @@
-import { JjWorkspaceService, runJjCommand } from "../subagents/jj.ts";
+import { JjWorkspaceService, runJjCommand } from "./jj-service.ts";
 import {
   requireJjWorkspace,
   type WorkspaceAbandonResult,

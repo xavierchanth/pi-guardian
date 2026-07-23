@@ -22,6 +22,7 @@ import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerSubagents } from "./src/subagents/register.ts";
+import { createAgentRoleState, type AgentRoleState } from "./src/subagents/state.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
 import { registerWorkspaceCapabilities } from "./src/workspaces/register.ts";
 import {
@@ -37,6 +38,7 @@ export interface PiTaiRuntime {
   notificationSender: NotificationSender;
   capabilities: SessionCapabilityController;
   agentDir: string;
+  agentRole: AgentRoleState;
 }
 
 export type PiTaiRegistrar = (
@@ -74,13 +76,14 @@ const productionRegistrars: PiTaiRegistrars = {
       stateRoot: runtime.agentDir,
     });
   },
-  modelProfiles: (pi) => {
-    registerModelProfiles(pi);
+  modelProfiles: (pi, runtime) => {
+    registerModelProfiles(pi, runtime.config);
   },
   subagents: (pi, runtime) => {
     registerSubagents(pi, {
       capabilities: runtime.capabilities,
       agentDir: runtime.agentDir,
+      roleState: runtime.agentRole,
     });
   },
   sessionTitle: (pi, runtime) => {
@@ -93,7 +96,7 @@ const productionRegistrars: PiTaiRegistrars = {
     workContext: () => runtime.workContext.current(),
   }),
   footer: (pi, runtime) => {
-    registerFooter(pi, runtime.workContext);
+    registerFooter(pi, runtime.workContext, runtime.agentRole);
   },
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
@@ -109,6 +112,7 @@ function createProductionRuntime(): PiTaiRuntime {
     notificationSender: sendNativeTerminalNotification,
     capabilities: new SessionCapabilityController(),
     agentDir: getAgentDir(),
+    agentRole: createAgentRoleState(),
   };
 }
 

@@ -56,6 +56,15 @@ const FRONTMATTER_KEYS = new Set([
 ]);
 const NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const TOOL_PATTERN = /^[a-zA-Z][a-zA-Z0-9_.:-]{0,127}$/;
+const ORCHESTRATION_TOOLS = new Set([
+  "subagent",
+  "message_child",
+  "wait_for_children",
+  "child_status",
+  "respond_to_child",
+  "abandon_child",
+]);
+const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "ask_parent"]);
 
 export function discoverAgentDefinitions(options: DiscoverAgentDefinitionsOptions): AgentCatalog {
   const packagedDir = options.packagedDir
@@ -161,6 +170,12 @@ function parseDefinition(
     if (!NAME_PATTERN.test(child)) throw new Error(`Invalid child agent name "${child}" in ${filePath}.`);
   }
   const hasSubagent = tools.includes("subagent");
+  if (tools.some((tool) => CHILD_PROTOCOL_TOOLS.has(tool))) {
+    throw new Error(`Agent definitions must not declare injected child protocol tools in ${filePath}.`);
+  }
+  if (!hasSubagent && tools.some((tool) => ORCHESTRATION_TOOLS.has(tool))) {
+    throw new Error(`Agent orchestration controls require the subagent tool in ${filePath}.`);
+  }
   if (hasSubagent !== (allowedChildren.length > 0)) {
     throw new Error(
       `Agent "${name}" must declare both the subagent tool and at least one allowed child, or neither (${filePath}).`,
@@ -197,10 +212,14 @@ function parseDefinition(
 function validateGraph(definitions: ReadonlyMap<string, AgentDefinition>): void {
   for (const definition of definitions.values()) {
     for (const childName of definition.allowedChildren) {
-      if (!definitions.has(childName)) {
+      const child = definitions.get(childName);
+      if (!child) {
         throw new Error(
           `Agent "${definition.name}" references unknown child "${childName}" (${definition.filePath}).`,
         );
+      }
+      if (child.root) {
+        throw new Error(`Root agent "${childName}" cannot be spawned by "${definition.name}".`);
       }
     }
   }

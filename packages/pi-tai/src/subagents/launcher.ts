@@ -1,10 +1,10 @@
 import { execFile, spawn } from "node:child_process";
-import { closeSync, constants, existsSync, mkdirSync, openSync, rmSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, mkdirSync, openSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { chmod, open } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import type { ModelPreference } from "./domain.ts";
+import { renderTaskPacket } from "./task.ts";
 import type {
   ChildMessageDelivery,
   DelegationRecord,
@@ -17,10 +17,11 @@ export interface ChildLaunchResult {
   pid: number;
   logPath: string;
   controlPath: string;
+  promptPath: string;
 }
 
 export interface ChildLauncher {
-  launch(record: DelegationRecord, preference: ModelPreference): Promise<ChildLaunchResult>;
+  launch(record: DelegationRecord): Promise<ChildLaunchResult>;
   message(record: DelegationRecord, message: string, delivery: ChildMessageDelivery): Promise<void>;
   cleanup(record: DelegationRecord): Promise<void>;
 }
@@ -33,40 +34,45 @@ export class PiChildProcessLauncher implements ChildLauncher {
   private readonly store: DelegationStore;
   private readonly controlWrites = new Map<string, Promise<void>>();
 
-  async launch(record: DelegationRecord, preference: ModelPreference): Promise<ChildLaunchResult> {
+  async launch(record: DelegationRecord): Promise<ChildLaunchResult> {
     if (!this.store.root) throw new Error("Detached child launch requires a file-backed delegation store.");
     const stateRoot = dirname(this.store.root);
     const sessionDir = join(stateRoot, "sessions");
     const logDir = join(stateRoot, "logs");
     const controlDir = join(stateRoot, "control");
-    mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-    mkdirSync(logDir, { recursive: true, mode: 0o700 });
-    mkdirSync(controlDir, { recursive: true, mode: 0o700 });
+    const promptDir = join(stateRoot, "prompts");
+    for (const directory of [sessionDir, logDir, controlDir, promptDir]) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
     const logPath = join(logDir, `${record.id}.jsonl`);
     const errorPath = join(logDir, `${record.id}.stderr.log`);
     const controlPath = this.controlPath(record.id);
+    const promptPath = join(promptDir, `${record.id}.md`);
+    writeFileSync(promptPath, `${record.agent.systemPrompt.trim()}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
     await execFileAsync("mkfifo", [controlPath]);
     await chmod(controlPath, 0o600);
     const stdout = openSync(logPath, "a", 0o600);
     const stderr = openSync(errorPath, "a", 0o600);
     const control = openSync(controlPath, constants.O_RDWR);
-    const extensionPath = fileURLToPath(new URL("../../pi-tai.ts", import.meta.url));
+    const extensionPath = fileURLToPath(new URL("../../subagent.ts", import.meta.url));
     const args = [
       "--mode", "rpc",
       "--no-extensions",
       "--extension", extensionPath,
       "--no-skills",
       "--session-dir", sessionDir,
-      "--name", `subagent ${record.id}`,
-      "--model", `${preference.provider}/${preference.model}`,
-      "--thinking", preference.effort,
+      "--name", `${record.agent.name} ${record.id}`,
+      "--model", `${record.agent.provider}/${record.agent.model}`,
+      "--thinking", record.agent.effort,
+      "--tools", record.agent.tools.join(","),
+      "--append-system-prompt", promptPath,
       "--approve",
     ];
     const invocation = piInvocation(args);
     let child: ReturnType<typeof spawn> | undefined;
     try {
       child = spawn(invocation.command, invocation.args, {
-        cwd: record.workspace.path,
+        cwd: record.cwd,
         detached: true,
         shell: false,
         stdio: [control, stdout, stderr],
@@ -74,12 +80,15 @@ export class PiChildProcessLauncher implements ChildLauncher {
           ...process.env,
           PI_TAI_DELEGATION_ID: record.id,
           PI_TAI_DELEGATION_STORE: this.store.root,
+          PI_TAI_AGENT_NAME: record.agent.name,
+          PI_TAI_ALLOWED_CHILDREN: JSON.stringify(record.agent.allowedChildren),
         },
       });
       writeSync(control, rpcPrompt(childPrompt(record)));
     } catch (error) {
       child?.kill("SIGTERM");
       rmSync(controlPath, { force: true });
+      rmSync(promptPath, { force: true });
       throw error;
     } finally {
       closeSync(control);
@@ -88,19 +97,22 @@ export class PiChildProcessLauncher implements ChildLauncher {
     }
     if (!child?.pid) {
       rmSync(controlPath, { force: true });
+      rmSync(promptPath, { force: true });
       throw new Error("Pi child process did not start.");
     }
     const pid = child.pid;
     child.once("error", (error) => {
       rmSync(controlPath, { force: true });
+      rmSync(promptPath, { force: true });
       void markProcessFailure(this.store, record.id, `Child process failed: ${error.message}`);
     });
     child.once("exit", (code, signal) => {
       rmSync(controlPath, { force: true });
+      rmSync(promptPath, { force: true });
       void markExitedWithoutReport(this.store, record.id, code, signal);
     });
     child.unref();
-    return { pid, logPath, controlPath };
+    return { pid, logPath, controlPath, promptPath };
   }
 
   async message(
@@ -134,34 +146,41 @@ export class PiChildProcessLauncher implements ChildLauncher {
     if (record.childControlPath === this.controlPath(record.id)) {
       rmSync(record.childControlPath, { force: true });
     }
+    if (record.childPromptPath && record.childPromptPath === this.promptPath(record.id)) {
+      rmSync(record.childPromptPath, { force: true });
+    }
   }
 
   private controlPath(id: string): string {
+    this.validateId(id);
+    return join(this.stateRoot(), "control", `${id}.fifo`);
+  }
+
+  private promptPath(id: string): string {
+    this.validateId(id);
+    return join(this.stateRoot(), "prompts", `${id}.md`);
+  }
+
+  private stateRoot(): string {
     if (!this.store.root) throw new Error("Detached child control requires a file-backed delegation store.");
+    return dirname(this.store.root);
+  }
+
+  private validateId(id: string): void {
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error(`Invalid delegation id: ${id}`);
-    return join(dirname(this.store.root), "control", `${id}.fifo`);
   }
 }
 
 function childPrompt(record: DelegationRecord): string {
   return [
     `Delegation: ${record.id}`,
-    `Task: ${record.task}`,
-    `Workspace backend: ${record.workspace.backend}`,
-    `Workspace: ${record.workspace.path}`,
-    ...(record.workspace.backend === "jj"
-      ? [
-          `Base change: ${record.workspace.baseChangeId}`,
-          `Child root change: ${record.workspace.rootChangeId}`,
-        ]
-      : [
-          `Base commit: ${record.workspace.baseCommit}`,
-          `Child branch: ${record.workspace.branch}`,
-        ]),
-    ...(record.workspace.backend === "git"
-      ? ["Commit intended Git worktree changes on the delegated branch and leave the worktree clean before reporting."]
-      : []),
-    "Complete only this delegated task. Accept parent messages as updated instructions. Before finishing, call report_to_parent exactly once with the outcome and validation evidence.",
+    `Agent: ${record.agent.name}`,
+    `Working directory: ${record.cwd}`,
+    "The parent conversation is intentionally unavailable. Treat the following packet as the complete assignment.",
+    "",
+    renderTaskPacket(record.task),
+    "",
+    "Before finishing, resolve every child you create and call report_to_parent exactly once with outcome and validation evidence.",
   ].join("\n");
 }
 
@@ -180,19 +199,19 @@ function piInvocation(args: string[]): { command: string; args: string[] } {
     return { command: process.execPath, args: [currentScript, ...args] };
   }
   const execName = basename(process.execPath).toLowerCase();
-  if (!/^(node|bun)(\.exe)?$/.test(execName)) {
-    return { command: process.execPath, args };
-  }
+  if (!/^(node|bun)(\.exe)?$/.test(execName)) return { command: process.execPath, args };
   return { command: "pi", args };
 }
 
 async function markProcessFailure(store: DelegationStore, id: string, reason: string): Promise<void> {
   try {
-    await store.update(id, (record) => isRunning(record)
+    await store.update(id, (record) => isActive(record)
       ? {
           ...record,
-          state: "failed",
-          report: { outcome: "failed", summary: reason, reportedAt: new Date().toISOString() },
+          execution: {
+            phase: "failed",
+            report: { outcome: "failed", summary: reason, reportedAt: new Date().toISOString() },
+          },
         }
       : record);
   } catch {
@@ -210,6 +229,6 @@ async function markExitedWithoutReport(
   await markProcessFailure(store, id, `Child exited without report (${suffix}).`);
 }
 
-function isRunning(record: DelegationRecord): boolean {
-  return record.state === "created" || record.state === "running";
+function isActive(record: DelegationRecord): boolean {
+  return ["created", "running", "awaiting_parent"].includes(record.execution.phase);
 }

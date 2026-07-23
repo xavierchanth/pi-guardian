@@ -6,7 +6,7 @@ import { getAgentDir, SessionManager, type ExtensionAPI, type ExtensionCommandCo
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import { CAPABILITY_STATE_ENTRY } from "../capabilities/domain.ts";
-import { reconstructSubagentRole } from "../subagents/domain.ts";
+import { reconstructSubagentState } from "../subagents/domain.ts";
 import { FileDelegationStore, isResolvedDelegation, type DelegationStore } from "../subagents/store.ts";
 import type { WorkspacePort } from "./domain.ts";
 import { GitWorktreePort } from "./git.ts";
@@ -321,8 +321,8 @@ async function allocateTransition(
 }
 
 function assertStandalone(ctx: ExtensionCommandContext): void {
-  const role = reconstructSubagentRole(ctx.sessionManager.getEntries()).role;
-  if (role !== "standalone") throw new Error(`Workspace relocation requires standalone role; current role is ${role}.`);
+  const mode = reconstructSubagentState(ctx.sessionManager.getEntries()).mode;
+  if (mode !== "standalone") throw new Error(`Workspace relocation requires standalone mode; current mode is ${mode}.`);
 }
 
 function splitArgs(input: string): [string, string | undefined] {

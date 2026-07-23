@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { piTaiConfigPaths } from "./paths.ts";
 import {
+  THINKING_EFFORTS,
+  type ModelProfile,
+  type ThinkingEffort,
+} from "../model-profiles/domain.ts";
+import {
   DEFAULT_PI_TAI_CONFIG,
   TITLE_EFFORTS,
   type AnsiThemeConfig,
@@ -14,6 +19,7 @@ interface PartialPiTaiConfig {
   sessionTitle?: Partial<SessionTitleConfig>;
   ansiTheme?: Partial<AnsiThemeConfig>;
   notifications?: Partial<NotificationsConfig>;
+  modelProfiles?: ModelProfile[];
 }
 
 export interface LoadPiTaiConfigOptions {
@@ -53,6 +59,9 @@ export function loadPiTaiConfig(options: LoadPiTaiConfigOptions): LoadedPiTaiCon
       ...global.notifications,
       ...project.notifications,
     }),
+    modelProfiles: Object.freeze(
+      project.modelProfiles ?? global.modelProfiles ?? DEFAULT_PI_TAI_CONFIG.modelProfiles,
+    ),
   });
 
   return {
@@ -79,7 +88,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
   }
 
   for (const key of Object.keys(value)) {
-    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications") {
+    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications" && key !== "modelProfiles") {
       warnings.push(`Unknown top-level key ${key} in ${path}.`);
     }
   }
@@ -88,6 +97,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
     sessionTitle: parseSessionTitle(value.sessionTitle, path, warnings),
     ansiTheme: parseAnsiTheme(value.ansiTheme, path, warnings),
     notifications: parseNotifications(value.notifications, path, warnings),
+    modelProfiles: parseModelProfiles(value.modelProfiles, path, warnings),
   };
 }
 
@@ -178,6 +188,55 @@ function parseNotifications(
     else warnings.push(`Invalid notifications.${key} in ${path}: expected a boolean.`);
   }
   return result;
+}
+
+function parseModelProfiles(
+  value: unknown,
+  path: string,
+  warnings: string[],
+): ModelProfile[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    warnings.push(`Invalid modelProfiles in ${path}: expected an array.`);
+    return undefined;
+  }
+  const profiles: ModelProfile[] = [];
+  const names = new Set<string>();
+  for (let index = 0; index < value.length; index++) {
+    const entry = value[index];
+    if (!isRecord(entry)) {
+      warnings.push(`Invalid modelProfiles[${index}] in ${path}: expected an object.`);
+      return undefined;
+    }
+    warnUnknown(entry, new Set(["name", "provider", "model", "effort"]), `modelProfiles[${index}]`, path, warnings);
+    const name = profileString(entry.name);
+    const provider = profileString(entry.provider);
+    const model = profileString(entry.model);
+    const effort = entry.effort;
+    if (!name || !/^[a-z][a-z0-9-]{0,63}$/.test(name)) {
+      warnings.push(`Invalid modelProfiles[${index}].name in ${path}.`);
+      return undefined;
+    }
+    if (names.has(name)) {
+      warnings.push(`Duplicate model profile "${name}" in ${path}.`);
+      return undefined;
+    }
+    if (!provider || !model) {
+      warnings.push(`Invalid modelProfiles[${index}] model in ${path}.`);
+      return undefined;
+    }
+    if (typeof effort !== "string" || !THINKING_EFFORTS.includes(effort as ThinkingEffort)) {
+      warnings.push(`Invalid modelProfiles[${index}].effort in ${path}.`);
+      return undefined;
+    }
+    names.add(name);
+    profiles.push(Object.freeze({ name, provider, model, effort: effort as ThinkingEffort }));
+  }
+  return profiles;
+}
+
+function profileString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function assignNonEmptyString<T extends object>(

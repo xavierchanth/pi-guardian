@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, capability-gated isolated workspaces and subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, capability-gated explicit workspaces and declarative subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -76,24 +76,17 @@ When the effective editor command launches NeoVim (`nvim`, an executable path, o
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.
 
-### Isolated workspaces and persistent subagents
+### Explicit workspaces and declarative subagents
 
-Workspace capabilities are disabled by default. In a standalone session, `/cap:jj-workspaces new <name>` or `/cap:git-worktrees new <name>` creates an isolated checkout, forks the complete Pi session, and continues the same logical agent there as a standalone successor session. `on`, `off`, `status`, and `create-only` are also available under each namespace.
+Workspace capabilities are disabled by default and remain independent of subagents. In a standalone session, `/cap:jj-workspaces new <name>` or `/cap:git-worktrees new <name>` creates an isolated checkout, forks the Pi session, and continues the same logical agent there. Subagents never create workspaces or worktrees automatically.
 
-The shared model profiles are always available, including when subagents are disabled. Use `/model:designer`, `/model:thinker`, `/model:worker`, or `/model:mechanical` to switch the current session directly to that profile's model and thinking effort. The built-in `designer` profile uses `opencode-go/kimi-k3` at its supported `max` effort for open-ended design work.
+Subagents are also disabled by default. `/cap:subagents on` applies the scoped root agent definition (packaged as `thinker`), including its model, effort, exact tools, prompt, and allowed children. `/cap:subagents off` restores the previous main-session model, effort, and tools after direct children resolve.
 
-Subagents are disabled by default. Run `/cap:subagents on` to make the current session a parent, `/cap:subagents status` to inspect it, or `/cap:subagents off` after every child is resolved. New and ordinary forked sessions start standalone.
+Agent definitions are Markdown files with YAML front matter. Packaged defaults live in `packages/pi-tai/agents`; user definitions in `~/.pi/agent/agents` override them, and trusted nearest-project `.pi/agents` definitions have highest precedence. The front matter owns name, description, model, effort, exact tools, child allowlist, and uncertainty behavior. Thinker may spawn worker, scout, or researcher; worker may spawn scout or researcher; specialists cannot delegate.
 
-A parent delegates workspace work with `spawn_child`; direct `jj workspace add`, `git worktree add`, and relocation tools are blocked in parent mode. Every direct child receives:
+The `subagent` tool sends a structured, self-contained task packet to a persistent isolated Pi process in the same cwd. Conversation history is never copied. Parents can inspect status, wait for the next completion or all children, steer children, answer correlated questions, and abandon a process without cleaning shared files. Children must resolve their own descendants before reporting.
 
-- an independent persistent Pi session and detached process;
-- a dedicated JJ workspace always rooted at the parent's `@-` change—without requiring or modifying parent `@`—when JJ is available, otherwise a dedicated Git branch/worktree;
-- one shared model profile (`designer`, `thinker`, `worker`, or `mechanical`);
-- only `report_to_parent`, with no ability to delegate further.
-
-Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. The child exclusively owns its delegated workspace and performs all repository reading, editing, testing, and VCS work there. While a child is active, parent work tools are blocked: the parent can message, inspect status through child controls, wait for, or abandon the child, but it cannot touch or duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. JJ child stacks preserve all descendants through subtree rebase; Git children report a clean committed branch and preserve commits through reviewed non-squash integration. Dirty Git worktrees are retained for recovery rather than force-removed.
-
-Pi-Tai composes normal Pi context with three intentionally empty, user-authored files: `packages/pi-tai/instructions/system.md`, `parent.md`, and `child.md`. It also adds generated factual role/delegation metadata. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for lifecycle and recovery details.
+Independent model profiles now live in `pi-tai.json`. Shift+Tab cycles profiles in configured order, `/profile` selects one directly, `/effort` changes reasoning effort independently, and Pi's `/model` remains available for unrestricted model selection. See [`docs/SUBAGENTS.md`](docs/SUBAGENTS.md) for the role schema and lifecycle.
 
 ### Approval Guardian
 

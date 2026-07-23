@@ -40,6 +40,19 @@ ANSI querying runs only in interactive TUI mode.
 
 Notifications run only in interactive TUI mode and use Kitty OSC 99 when available, otherwise OSC 777.
 
+### `modelProfiles`
+
+`modelProfiles` is an ordered array of named model-and-effort pairs. It controls Shift+Tab profile cycling and `/profile`; it does not change agent prompts or tool permissions. A global array replaces packaged defaults, and a trusted project array replaces the global array. An empty array disables profile cycling.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | lowercase letters, numbers, hyphens | Stable profile name. |
+| `provider` | non-empty string | Pi model provider. |
+| `model` | non-empty string | Pi model ID. |
+| `effort` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Requested reasoning effort. |
+
+Defaults are `sol-high`, `sol-low`, and `luna-high`. Use `/effort` to change effort independently and Pi's `/model` for unrestricted model selection.
+
 ### Example
 
 ```json
@@ -59,7 +72,12 @@ Notifications run only in interactive TUI mode and use Kitty OSC 99 when availab
   "notifications": {
     "reviewFailure": true,
     "agentCompletion": true
-  }
+  },
+  "modelProfiles": [
+    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" },
+    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
+    { "name": "luna-high", "provider": "openai-codex", "model": "gpt-5.6-luna", "effort": "high" }
+  ]
 }
 ```
 
