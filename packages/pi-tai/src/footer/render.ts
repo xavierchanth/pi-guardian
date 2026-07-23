@@ -11,6 +11,7 @@ export interface FooterUsage {
 
 export interface FooterSnapshot {
   cwd: string;
+  capabilities: readonly string[];
   goal?: string;
   currentStep?: string;
   currentStepNumber?: number;
@@ -76,7 +77,12 @@ export function renderFooterRows(snapshot: FooterSnapshot, width: number): Foote
   return [
     layoutRow(goal, model, width, "text"),
     layoutRow(step, context, width, "text"),
-    layoutRow(formatWorkspacePath(snapshot.cwd), usage.join(" "), width, "text"),
+    layoutRow(
+      [formatWorkspacePath(snapshot.cwd), ...snapshot.capabilities].join(" · "),
+      usage.join(" "),
+      width,
+      "text",
+    ),
   ];
 }
 

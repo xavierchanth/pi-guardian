@@ -1,16 +1,18 @@
 # Pi-Tai declarative subagents
 
-Pi-Tai provides opt-in nested delegation through persistent isolated Pi processes. Subagents share the caller's working directory but never inherit its conversation. Automatic JJ workspace and Git worktree allocation is not part of subagent execution.
+Pi-Tai provides opt-in nested delegation through persistent isolated Pi processes. Normal subagents share the caller's working directory; thinker may instead launch exactly one planner in a recorded isolated workspace. No child inherits its parent's conversation.
 
 ## Activation
 
 ```text
-/cap:subagents on
-/cap:subagents status
-/cap:subagents off
+/subagents
+/subagents on
+/subagents status
+/subagents list [delegation-id]
+/subagents off
 ```
 
-Subagents are disabled by default. `on` resolves the effective root definition, validates its model and tools, snapshots the current model/effort/tools, and applies the root definition to the main session. `off` is rejected while direct children are unresolved and otherwise restores that snapshot. No workspace capability is probed or leased.
+Subagents are disabled by default. Bare `/subagents` toggles the capability. `on` resolves the effective root definition, validates its model and tools, snapshots the current model/effort/tools, and applies the root definition to the main session. `off` is rejected while direct children are unresolved and otherwise restores that snapshot. `force-off` recursively terminates unresolved direct children and descendants, leaves shared files untouched, then restores the snapshot. No workspace capability is probed or leased.
 
 New and ordinary forked sessions start standalone. Delegated processes reconstruct their child identity from the durable delegation record and environment-bound delegation ID.
 
@@ -60,16 +62,17 @@ Packaged hierarchy:
 
 ```text
 thinker
-├── worker
-├── scout
-└── researcher
-
-worker
+├── planner
+│   ├── worker
+│   │   ├── scout
+│   │   └── researcher
+│   ├── scout
+│   └── researcher
 ├── scout
 └── researcher
 ```
 
-`thinker` uses Sol high, `worker` uses Sol low, `scout` uses Luna medium, and `researcher` uses Terra medium. Researcher intentionally has no web tools until those tools are implemented and explicitly added.
+`thinker` and `planner` use Sol high, `worker` uses Sol low, `scout` uses Luna medium, and `researcher` uses Terra medium. Thinker may delegate to a planner, scout, or researcher. Planner may delegate to a worker, scout, or researcher. Worker may delegate only to scouts or researchers. Only thinker owns planner-workspace tools; planner can never launch a planner or create a workspace. The validated child graph contains no self-edges or cycles, so delegation depth is structurally bounded. Thinker, planner, and researcher explicitly receive `web_search` and `web_fetch`; worker and scout do not. Standalone sessions retain both as normal Pi-Tai tools.
 
 ## Sparse task ingest
 
@@ -106,14 +109,37 @@ A child launches with:
 - its snapshotted definition and prompt;
 - exact provider/model and effort;
 - exact declared built-in/custom tools;
-- only the Pi-Tai child runtime, work-context tool, and Guardian;
+- only the Pi-Tai child runtime, work-context and web tools, and Guardian;
 - a private persistent session, FIFO control channel, and JSONL log;
-- the direct parent's cwd;
+- the direct parent's cwd for normal subagents, or a recorded isolated workspace for `planner_workspace`;
 - no skills, unrelated extensions, or conversation history.
 
 The role snapshot includes source path and content hash, so edits affect future launches without silently widening a running child's authority. Nested workers receive only their own allowed descendant names and must compile fresh sparse packets.
 
-Because cwd is shared, the packaged worker prompt requires reading and re-reading before writes, narrow edits, preservation of unrelated changes, and validation after mutation. Pi-Tai does not currently serialize writer children; callers remain responsible for sensible task partitioning.
+Because cwd is shared for normal delegation, the packaged planner and worker prompts require narrow assignments, reading and re-reading before writes, preservation of unrelated changes, and validation after mutation. Parent and child processes may work concurrently; Pi-Tai does not pause the parent or serialize writers, so callers remain responsible for sensible task partitioning and avoiding duplicate work.
+
+## Workspace policy
+
+This operating model follows JJ 0.43 command help and the official [working-copy](https://docs.jj-vcs.dev/latest/working-copy/), [revset](https://docs.jj-vcs.dev/latest/revsets/), and [operation-log](https://docs.jj-vcs.dev/latest/operation-log/) documentation. In particular, each workspace has its own working-copy commit, cross-workspace rewrites can make a working copy stale, Change IDs survive rewrites unless they diverge, and the operation log preserves concurrent repository operations.
+
+Workspace and worktree backends are not session capabilities. The packaged `workspace` skill is visible for automatic model matching when the user asks for a workspace, work tree, worktree, isolated checkout, or non-interference with the main working directory. Its small `SKILL.md` probes JJ and loads exactly one detailed backend reference. JJ is preferred, Git is loaded only if JJ was unavailable before mutation, and backend fallback never occurs after mutation starts. `/skill:workspace` remains available to force loading but is not required.
+
+Subagent workspace use is narrower: only thinker may call `planner_workspace`, and that tool always launches the `planner` definition. Creation does not require an empty source working-copy change: the isolated root branches from recorded `@-`, leaving source `@` and its files in place. Integration later requires source `@` to be empty so insertion does not rewrite a live source working copy. The durable record stores the backend attachment, source workspace, base Change ID or commit, delegated root Change ID or branch, path, and one exclusive phase:
+
+- `active`: planner work is isolated and not integrated;
+- `integrated`: the complete recorded subtree/range was integrated without detected conflicts;
+- `cleaned`: the integrated workspace was forgotten and removed;
+- `attention_required`: integration or cleanup encountered uncertainty and is permanently stopped for user intervention.
+
+For JJ, creation makes the delegated root a sibling of the potentially dirty source working-copy change over the recorded `@-` base. It may snapshot normal JJ working-copy state but does not move, rewrite, discard, or edit source files. Integration runs `workspace update-stale` in both workspaces, rejects recovery output, requires the source working-copy change to be empty at integration time, resolves the recorded Change IDs uniquely, verifies the delegated root’s direct base and complete workspace ancestry, rejects foreign descendants, and runs:
+
+```text
+jj rebase -s 'exactly(change_id(<root-change-id>), 1)' -B '<source-workspace>@'
+```
+
+This moves the complete rooted subtree without assuming how many changes the planner created. Integration then verifies ancestry and checks conflicts on the source workspace revision. Cleanup is a separate operation after verified integration.
+
+Any unexpected graph, divergent Change ID, stale recovery, conflict, partial integration, or cleanup error enters `attention_required`. Thinker must preserve the operation log, workspace, files, and record; report the exact failure; and stop all JJ mutation. It must never attempt its own undo, abandon, conflict resolution, second rebase, or history repair.
 
 ## Parent controls
 
@@ -122,11 +148,29 @@ Because cwd is shared, the packaged worker prompt requires reading and re-readin
 - `child_status`: inspect direct children without consuming completion;
 - `wait_for_children`: wait for `next` (default) or `all` selected children;
 - `respond_to_child`: answer the current correlated question;
-- `abandon_child`: terminate the process without filesystem cleanup.
+- `abandon_child`: terminate the process without filesystem cleanup;
+- `planner_workspace`: create a JJ-preferred isolated workspace and launch exactly one planner;
+- `integrate_planner_workspace`: integrate a completed planner workspace and stop on any uncertainty;
+- `cleanup_planner_workspace`: forget and remove only a cleanly integrated planner workspace.
+
+`wait_for_children` uses a 1.5-second initial discovery grace when no matching child is visible. This covers Pi's parallel tool execution race where `subagent` and `wait_for_children` begin as sibling tool calls and waiting reaches durable storage just before spawning does.
 
 `wait_for_children` returns early for a child requiring parent attention. `next` marks one terminal result collected, so repeated calls yield later completions. `all` waits for all selected children unless a question requires a response.
 
 Every delegated child receives `report_to_parent`. A worker cannot report while its own direct children remain unresolved. Reporting persists exactly one completed, blocked, failed, or cancelled outcome and requests graceful child shutdown.
+
+## Activity UI
+
+While root subagents are enabled in TUI mode, Pi-Tai pins a two-line card for every unresolved or uncollected direct child below the editor:
+
+```text
+subagent · worker · Implement the bounded task
+  running · Reading the affected tests now
+```
+
+The second line is derived only from visible assistant text in the child's RPC stream; hidden thinking is never displayed. Awaiting questions and terminal report summaries replace the live line when appropriate. Collected terminal results disappear from the widget.
+
+Run `/subagents list` to select a direct child and open a detailed overlay containing its task packet, model and effort, status, latest visible activity, report, runtime identity, session file, and log path. `/subagents list <delegation-id>` opens one child directly.
 
 ## Persistence and migration
 
@@ -141,7 +185,7 @@ Records live under:
 └── prompts/
 ```
 
-Version-3 records store cwd, structured packet, role snapshot, process/session metadata, lifecycle, questions, responses, messages, and collection state. Updates use per-record locks and atomic replacement.
+Version-3 records store cwd, structured packet, role snapshot, process/session metadata, lifecycle, questions, responses, messages, collection state, and the optional discriminated planner-workspace lifecycle. Updates use per-record locks and atomic replacement.
 
 Version-1 and version-2 workspace records migrate losslessly. Their old workspace attachment is retained as `legacyWorkspace` recovery metadata and its path becomes the inherited cwd. New code never integrates, finalizes, removes, or otherwise mutates that workspace automatically.
 
@@ -161,4 +205,4 @@ Configure ordered profiles in global or trusted-project `pi-tai.json`:
 }
 ```
 
-A configured array replaces the lower-scope/default array and preserves cycle order. Shift+Tab cycles it; `/profile [name]` selects a profile; `/effort [level]` changes effort independently. Model selection must succeed before a profile changes effort. The footer shows the actual model ID and applied effort, for example `gpt-5.6-sol · high`. Agent roles are not presented as model profiles.
+A configured array replaces the lower-scope/default array and preserves cycle order. Shift+Tab cycles it, while Ctrl+Alt+T runs Pi's native thinking-level cycle; `/profile [name]` selects a profile; `/effort [level]` changes effort independently. Model selection must succeed before a profile changes effort. The footer shows the actual model ID and applied effort, for example `gpt-5.6-sol · high`. While subagents are enabled it shows `thinker` beside the directory; workspace backends are not capability labels.

@@ -1,15 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
 import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
 import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
-
-const execFileAsync = promisify(execFile);
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-sdk-"));
@@ -39,6 +35,8 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
   assert.ok(capabilities.tools.includes("update_plan"));
   assert.ok(capabilities.commands.includes("continue"));
   assert.ok(capabilities.commands.includes("plan-status"));
+  assert.equal(capabilities.commands.includes("jj-workspaces"), false);
+  assert.equal(capabilities.commands.includes("git-worktrees"), false);
   assert.deepEqual(capabilities.extensionErrors, []);
 
   const turnA = await first.startPrompt(
@@ -74,37 +72,22 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
   await second.shutdown();
 });
 
-test("Pi SDK runtime enables Git capability and relocates into a successor session", async () => {
+test("Pi SDK runtime does not expose workspace backends as capabilities", async () => {
   const paths = await fixture();
-  await execFileAsync("git", ["init", "-q"], { cwd: paths.cwd });
-  await writeFile(join(paths.cwd, "file.txt"), "base\n");
-  await execFileAsync("git", ["add", "file.txt"], { cwd: paths.cwd });
-  await execFileAsync("git", ["-c", "user.name=Pi Tai", "-c", "user.email=pi@example.invalid", "commit", "-qm", "base"], { cwd: paths.cwd });
-
-  const events: RuntimeEventInput[] = [];
   const port = new PiSdkRuntimePort();
-  const source = await port.createSession({ ...paths, faux: true }, (event) => events.push(event));
-  const seed = await port.startPrompt(
-    { turnId: "seed", text: "first persisted turn" },
-    "seed-command",
-    (event) => events.push(event),
+  await port.createSession({ ...paths, faux: true }, () => {});
+  const capabilities = await port.capabilities();
+  assert.equal(capabilities.sessionCapabilities.some(
+    (capability) => capability.id === "jj-workspaces" || capability.id === "git-worktrees",
+  ), false);
+  await assert.rejects(
+    port.setCapability({ capabilityId: "git-worktrees", enabled: true }, () => {}),
+    /Unknown capability/,
   );
-  await seed.completion;
-  const enabled = await port.setCapability(
-    { capabilityId: "git-worktrees", enabled: true },
-    (event) => events.push(event),
+  await assert.rejects(
+    port.relocateWorkspace({ backend: "git", name: "hosted-focused" }, () => {}),
+    /ask the agent for a workspace/,
   );
-  assert.ok(enabled.sessionCapabilities.some(
-    (capability) => capability.id === "git-worktrees" && capability.toolsExposed,
-  ));
-  const successor = await port.relocateWorkspace(
-    { backend: "git", name: "hosted-focused" },
-    (event) => events.push(event),
-  );
-  assert.match(successor.cwd, /hosted-focused$/);
-  assert.notEqual(successor.sessionId, source.sessionId);
-  assert.ok(successor.sessionFile.startsWith(paths.sessionDir));
-  assert.ok(events.some((event) => event.event === "session.capabilities_changed"));
   await port.shutdown();
 });
 

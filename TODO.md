@@ -1,0 +1,5 @@
+- [ ] image gen tool
+- [ ] computer use tool
+- [ ] browser use tool
+- [ ] deeper cmux integrations (browser)
+- [ ] when wait_for_children tool is active don't queer a steer message, interrupt and act on the new message immediately.

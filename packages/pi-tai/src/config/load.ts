@@ -9,6 +9,7 @@ import {
   DEFAULT_PI_TAI_CONFIG,
   TITLE_EFFORTS,
   type AnsiThemeConfig,
+  type CompactionConfig,
   type NotificationsConfig,
   type PiTaiConfig,
   type SessionTitleConfig,
@@ -19,6 +20,7 @@ interface PartialPiTaiConfig {
   sessionTitle?: Partial<SessionTitleConfig>;
   ansiTheme?: Partial<AnsiThemeConfig>;
   notifications?: Partial<NotificationsConfig>;
+  compaction?: Partial<CompactionConfig>;
   modelProfiles?: ModelProfile[];
 }
 
@@ -59,6 +61,11 @@ export function loadPiTaiConfig(options: LoadPiTaiConfigOptions): LoadedPiTaiCon
       ...global.notifications,
       ...project.notifications,
     }),
+    compaction: Object.freeze({
+      ...DEFAULT_PI_TAI_CONFIG.compaction,
+      ...global.compaction,
+      ...project.compaction,
+    }),
     modelProfiles: Object.freeze(
       project.modelProfiles ?? global.modelProfiles ?? DEFAULT_PI_TAI_CONFIG.modelProfiles,
     ),
@@ -88,7 +95,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
   }
 
   for (const key of Object.keys(value)) {
-    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications" && key !== "modelProfiles") {
+    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications" && key !== "compaction" && key !== "modelProfiles") {
       warnings.push(`Unknown top-level key ${key} in ${path}.`);
     }
   }
@@ -97,6 +104,7 @@ function readConfig(path: string, warnings: string[]): PartialPiTaiConfig {
     sessionTitle: parseSessionTitle(value.sessionTitle, path, warnings),
     ansiTheme: parseAnsiTheme(value.ansiTheme, path, warnings),
     notifications: parseNotifications(value.notifications, path, warnings),
+    compaction: parseCompaction(value.compaction, path, warnings),
     modelProfiles: parseModelProfiles(value.modelProfiles, path, warnings),
   };
 }
@@ -186,6 +194,38 @@ function parseNotifications(
     if (value[key] === undefined) continue;
     if (typeof value[key] === "boolean") result[key] = value[key];
     else warnings.push(`Invalid notifications.${key} in ${path}: expected a boolean.`);
+  }
+  return result;
+}
+
+function parseCompaction(
+  value: unknown,
+  path: string,
+  warnings: string[],
+): Partial<CompactionConfig> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    warnings.push(`Invalid compaction in ${path}: expected an object.`);
+    return undefined;
+  }
+
+  warnUnknown(value, new Set(["enabled", "thresholdPercent"]), "compaction", path, warnings);
+  const result: Partial<CompactionConfig> = {};
+  if (value.enabled !== undefined) {
+    if (typeof value.enabled === "boolean") result.enabled = value.enabled;
+    else warnings.push(`Invalid compaction.enabled in ${path}: expected a boolean.`);
+  }
+  if (value.thresholdPercent !== undefined) {
+    if (
+      typeof value.thresholdPercent === "number"
+      && Number.isFinite(value.thresholdPercent)
+      && value.thresholdPercent >= 1
+      && value.thresholdPercent <= 100
+    ) {
+      result.thresholdPercent = value.thresholdPercent;
+    } else {
+      warnings.push(`Invalid compaction.thresholdPercent in ${path}: expected a number from 1 to 100.`);
+    }
   }
   return result;
 }

@@ -27,7 +27,7 @@ export function registerCapabilityController(
     return { systemPrompt: [event.systemPrompt, ...layers].join("\n\n") };
   });
 
-  pi.registerCommand("cap:list", {
+  pi.registerCommand("capabilities", {
     description: "List Pi-Tai session capabilities",
     handler: async (_args, ctx) => {
       for (const capability of controller.snapshot().capabilities) {

@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { PiTaiConfigService } from "../config/register.ts";
+import { PROFILE_CYCLE_SHORTCUT } from "../keybindings/register.ts";
 import {
   THINKING_EFFORTS,
   type ModelProfile,
@@ -62,7 +63,7 @@ export function registerModelProfiles(
     },
   });
 
-  pi.registerShortcut("shift+tab", {
+  pi.registerShortcut(PROFILE_CYCLE_SHORTCUT, {
     description: "Cycle configured model profiles",
     handler: async (ctx) => {
       const configured = profiles();

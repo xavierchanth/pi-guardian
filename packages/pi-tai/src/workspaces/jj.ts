@@ -55,6 +55,7 @@ export class JjWorkspacePort implements WorkspacePort {
       parentWorkspace: jj.sourceWorkspace,
       childWorkspace: jj.name,
       childWorkspacePath: jj.path,
+      baseChangeId: jj.baseChangeId,
       childRootChangeId: jj.rootChangeId,
     });
   }

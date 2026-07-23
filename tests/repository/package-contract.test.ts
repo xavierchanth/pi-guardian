@@ -6,7 +6,7 @@ import test from "node:test";
 const root = resolve(import.meta.dirname, "../..");
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   keywords?: string[];
-  pi?: { extensions?: string[]; prompts?: string[]; themes?: string[] };
+  pi?: { extensions?: string[]; prompts?: string[]; themes?: string[]; skills?: string[] };
   dependencies?: Record<string, string>;
   files?: string[];
 };
@@ -16,11 +16,13 @@ test("root manifest is a discoverable Pi package", () => {
   assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/pi-tai.ts"]);
   assert.deepEqual(manifest.pi?.themes, ["./packages/pi-tai/themes"]);
   assert.deepEqual(manifest.pi?.prompts, ["./packages/pi-tai/prompts"]);
+  assert.deepEqual(manifest.pi?.skills, ["./packages/pi-tai/skills"]);
 
   for (const resource of [
     ...(manifest.pi?.extensions ?? []),
     ...(manifest.pi?.themes ?? []),
     ...(manifest.pi?.prompts ?? []),
+    ...(manifest.pi?.skills ?? []),
   ]) {
     assert.ok(readFileOrDirectoryExists(join(root, resource)), resource);
   }
@@ -37,7 +39,7 @@ test("source uses the current Pi distribution imports", () => {
 test("Pi-Tai packages a global instruction layer and declarative agent definitions", () => {
   const system = join(root, "packages/pi-tai/instructions/system.md");
   assert.ok(existsSync(system), system);
-  for (const name of ["thinker", "worker", "scout", "researcher"]) {
+  for (const name of ["thinker", "planner", "worker", "scout", "researcher"]) {
     const path = join(root, "packages/pi-tai/agents", `${name}.md`);
     const content = readFileSync(path, "utf8");
     assert.match(content, new RegExp(`name: ${name}`));
@@ -45,6 +47,21 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
     assert.match(content, /effort:/);
     assert.match(content, /tools:/);
   }
+});
+
+test("workspace is packaged as an automatic JJ-first routed skill", () => {
+  const directory = join(root, "packages/pi-tai/skills/workspace");
+  const skill = readFileSync(join(directory, "SKILL.md"), "utf8");
+  const jj = readFileSync(join(directory, "references/jj.md"), "utf8");
+  const git = readFileSync(join(directory, "references/git.md"), "utf8");
+  assert.match(skill, /name: workspace/);
+  assert.doesNotMatch(skill, /disable-model-invocation/);
+  assert.match(skill, /workspace, work tree, worktree, isolated checkout/);
+  assert.match(skill, /references\/jj\.md/);
+  assert.match(skill, /references\/git\.md/);
+  assert.match(jj, /source `@` to be empty/);
+  assert.match(jj, /Create the isolated workspace from the source `@-`/);
+  assert.match(git, /Use this strategy only when `jj root` failed/);
 });
 
 test("continue is packaged as a visible prompt template", () => {
@@ -118,6 +135,15 @@ test("package ships standalone Guardian and required support files", () => {
   assert.ok(manifest.files?.includes("justfile"));
   assert.ok(existsSync(join(root, "justfile")));
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
+});
+
+test("package ships web tools and their child-runtime dependencies", () => {
+  assert.ok(manifest.dependencies?.["html-to-text"]);
+  assert.ok(manifest.dependencies?.["ipaddr.js"]);
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/web/register.ts")));
+  const childRuntime = readFileSync(join(root, "packages/pi-tai/subagent.ts"), "utf8");
+  assert.match(childRuntime, /registerWebTools\(pi\)/);
+  assert.ok(childRuntime.indexOf("registerWebTools(pi)") < childRuntime.indexOf("registerSubagents(pi"));
 });
 
 function readFileOrDirectoryExists(path: string): boolean {

@@ -10,11 +10,17 @@ export const PARENT_TOOL_NAMES = [
   "child_status",
   "respond_to_child",
   "abandon_child",
+  "planner_workspace",
+  "integrate_planner_workspace",
+  "cleanup_planner_workspace",
 ] as const;
 export const CHILD_PROTOCOL_TOOL_NAMES = ["report_to_parent", "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;
 
-export type SubagentsCommand = "on" | "off" | "status";
+export type SubagentsCommand =
+  | { action: "toggle" }
+  | { action: "on" | "off" | "force-off" | "status" }
+  | { action: "list"; delegationId?: string };
 
 export interface PersistedSubagentState {
   mode: SubagentMode;
@@ -29,9 +35,18 @@ export interface PersistedSubagentState {
 }
 
 export function parseSubagentsCommand(input: string): SubagentsCommand | undefined {
-  const value = input.trim().toLowerCase();
-  if (!value || value === "on") return "on";
-  if (value === "off" || value === "status") return value;
+  const parts = input.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { action: "toggle" };
+  const action = parts[0].toLowerCase();
+  if (action === "list" && parts.length <= 2) {
+    return { action, ...(parts[1] ? { delegationId: parts[1] } : {}) };
+  }
+  if (
+    parts.length === 1
+    && (action === "on" || action === "off" || action === "force-off" || action === "status")
+  ) {
+    return { action };
+  }
   return undefined;
 }
 

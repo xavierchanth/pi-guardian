@@ -21,10 +21,4 @@ export const DEFAULT_MODEL_PROFILES: readonly ModelProfile[] = Object.freeze([
     model: "gpt-5.6-sol",
     effort: "low",
   }),
-  Object.freeze({
-    name: "luna-high",
-    provider: "openai-codex",
-    model: "gpt-5.6-luna",
-    effort: "high",
-  }),
 ]);

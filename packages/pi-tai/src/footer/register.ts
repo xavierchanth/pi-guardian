@@ -1,11 +1,14 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { SessionCapabilityController } from "../capabilities/controller.ts";
+import { reconstructSubagentState } from "../subagents/domain.ts";
 import type { WorkContextStore } from "../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
 
 export function registerFooter(
   pi: ExtensionAPI,
   workContext: WorkContextStore,
+  capabilities: SessionCapabilityController,
 ): void {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -13,7 +16,7 @@ export function registerFooter(
     ctx.ui.setFooter((_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
-        return renderFooterRows(createSnapshot(pi, ctx, workContext), width).map(
+        return renderFooterRows(createSnapshot(pi, ctx, workContext, capabilities), width).map(
           (row) =>
             theme.fg(row.leftColor, row.left) +
             theme.fg("text", row.padding + row.right),
@@ -27,6 +30,7 @@ function createSnapshot(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   workContext: WorkContextStore,
+  capabilities: SessionCapabilityController,
 ): FooterSnapshot {
   const usage: FooterUsage = {
     input: 0,
@@ -36,7 +40,8 @@ function createSnapshot(
     cost: 0,
   };
 
-  for (const entry of ctx.sessionManager.getEntries()) {
+  const entries = ctx.sessionManager.getEntries();
+  for (const entry of entries) {
     if (entry.type !== "message" || entry.message.role !== "assistant") continue;
     const message = entry.message as AssistantMessage;
     usage.input += message.usage.input;
@@ -54,8 +59,23 @@ function createSnapshot(
   );
   const context = ctx.getContextUsage();
   const model = ctx.model;
+  const subagentState = reconstructSubagentState(entries);
+  const capabilityOrder = ["subagents"];
+  const capabilityLabels = [...capabilities.snapshot().capabilities]
+    .filter((capability) => capability.serviceEnabled)
+    .sort((left, right) => {
+      const leftIndex = capabilityOrder.indexOf(left.id);
+      const rightIndex = capabilityOrder.indexOf(right.id);
+      return (leftIndex < 0 ? capabilityOrder.length : leftIndex)
+        - (rightIndex < 0 ? capabilityOrder.length : rightIndex);
+    })
+    .map((capability) => {
+      if (capability.id === "subagents") return subagentState.agentName ?? "thinker";
+      return capability.label;
+    });
   return {
     cwd: ctx.cwd,
+    capabilities: capabilityLabels,
     goal: work?.goal,
     currentStep: active?.content ?? (complete ? "Complete" : undefined),
     currentStepNumber: active ? activeIndex + 1 : complete ? work?.plan.length : undefined,

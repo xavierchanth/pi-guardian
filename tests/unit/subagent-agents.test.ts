@@ -19,13 +19,25 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
     agentDir: "/tmp/pi-tai-no-user-agents",
   });
   assert.equal(catalog.root.name, "thinker");
-  assert.deepEqual(catalog.root.allowedChildren, ["worker", "scout", "researcher"]);
+  assert.deepEqual(catalog.root.allowedChildren, ["planner", "scout", "researcher"]);
+  assert.deepEqual(catalog.byName.get("planner")?.allowedChildren, ["worker", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("worker")?.allowedChildren, ["scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("scout")?.allowedChildren, []);
   assert.deepEqual(catalog.byName.get("researcher")?.allowedChildren, []);
+  assert.ok(catalog.root.tools.includes("planner_workspace"));
+  assert.equal(catalog.byName.get("planner")?.tools.includes("planner_workspace"), false);
+  for (const name of ["thinker", "planner", "researcher"]) {
+    assert.ok(catalog.byName.get(name)?.tools.includes("web_search"), name);
+    assert.ok(catalog.byName.get(name)?.tools.includes("web_fetch"), name);
+  }
+  for (const name of ["worker", "scout"]) {
+    assert.equal(catalog.byName.get(name)?.tools.includes("web_search"), false, name);
+    assert.equal(catalog.byName.get(name)?.tools.includes("web_fetch"), false, name);
+  }
   assert.deepEqual(
     catalog.agents.map(({ name, model, effort }) => ({ name, model, effort })),
     [
+      { name: "planner", model: "gpt-5.6-sol", effort: "high" },
       { name: "researcher", model: "gpt-5.6-terra", effort: "medium" },
       { name: "scout", model: "gpt-5.6-luna", effort: "medium" },
       { name: "thinker", model: "gpt-5.6-sol", effort: "high" },

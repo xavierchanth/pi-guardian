@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
 import { registerFooter } from "../../packages/pi-tai/src/footer/register.ts";
 import {
   footerRowText,
@@ -13,6 +14,7 @@ import type { WorkContextStore } from "../../packages/pi-tai/src/work-context/pe
 
 const snapshot: FooterSnapshot = {
   cwd: "/Users/chant/src/xc/pi-tai",
+  capabilities: ["thinker"],
   goal: "Ship a focused three-row footer",
   currentStep: "Implement layout and truncation",
   currentStepNumber: 2,
@@ -41,7 +43,7 @@ test("renders the requested three-row work-focused footer", () => {
   assert.ok(lines[0]?.endsWith("gpt-5.6-sol · low"));
   assert.ok(lines[1]?.startsWith("2/3: Implement layout and truncation"));
   assert.ok(lines[1]?.endsWith("67.6%/272k (auto)"));
-  assert.ok(lines[2]?.startsWith("xc/pi-tai"));
+  assert.ok(lines[2]?.startsWith("xc/pi-tai · thinker"));
   assert.ok(lines[2]?.endsWith("↑465k ↓35k R7.2M $6.991 (sub)"));
   assert.deepEqual(rows.map((row) => row.leftColor), ["text", "text", "text"]);
   for (const line of lines) assert.equal(visibleWidth(line), 100);
@@ -78,7 +80,7 @@ test("shows exactly the parent and current workspace path segments", () => {
   assert.equal(formatWorkspacePath("/tmp/project"), "tmp/project");
 });
 
-test("renders every footer row with the base foreground only in TUI mode", () => {
+test("renders enabled capability labels beside the directory with base foreground", async () => {
   const handlers = new Map<string, (event: unknown, ctx: any) => void>();
   const pi = {
     on(event: string, handler: (event: unknown, ctx: any) => void) {
@@ -94,7 +96,10 @@ test("renders every footer row with the base foreground only in TUI mode", () =>
     replace() {},
     reconstruct: () => undefined,
   };
-  registerFooter(pi, workContext);
+  const capabilities = new SessionCapabilityController();
+  capabilities.register({ id: "subagents", label: "Subagents", description: "Delegate work" });
+  await capabilities.enable("subagents", { owner: "user", exposure: "model-tools" });
+  registerFooter(pi, workContext, capabilities);
 
   let factory: ((tui: any, theme: any, footerData: any) => any) | undefined;
   const ctx = {
@@ -102,7 +107,13 @@ test("renders every footer row with the base foreground only in TUI mode", () =>
     cwd: "/tmp/project",
     model: undefined,
     modelRegistry: { isUsingOAuth: () => false },
-    sessionManager: { getEntries: () => [] },
+    sessionManager: {
+      getEntries: () => [{
+        type: "custom",
+        customType: "pi-tai-subagent-role",
+        data: { mode: "root", agentName: "thinker" },
+      }],
+    },
     getContextUsage: () => undefined,
     ui: {
       setFooter(value: typeof factory) {
@@ -124,7 +135,9 @@ test("renders every footer row with the base foreground only in TUI mode", () =>
     },
     { getAvailableProviderCount: () => 1 },
   );
-  assert.equal(footer.render(60).length, 3);
+  const lines = footer.render(80);
+  assert.equal(lines.length, 3);
+  assert.match(lines[2] ?? "", /^tmp\/project · thinker/);
   assert.deepEqual(colors, ["text", "text", "text", "text", "text", "text"]);
 
   factory = undefined;

@@ -10,8 +10,14 @@ test("composition root registers every feature once in order", async () => {
   const calls: string[] = [];
   const extension = createPiTaiExtension(
     {
+      keybindings: () => {
+        calls.push("keybindings");
+      },
       config: () => {
         calls.push("config");
+      },
+      compaction: () => {
+        calls.push("compaction");
       },
       capabilities: () => {
         calls.push("capabilities");
@@ -22,8 +28,8 @@ test("composition root registers every feature once in order", async () => {
       responseEditor: () => {
         calls.push("response-editor");
       },
-      workspaces: () => {
-        calls.push("workspaces");
+      webTools: () => {
+        calls.push("web-tools");
       },
       modelProfiles: () => {
         calls.push("model-profiles");
@@ -61,11 +67,13 @@ test("composition root registers every feature once in order", async () => {
   await extension({} as ExtensionAPI);
 
   assert.deepEqual(calls, [
+    "keybindings",
     "config",
+    "compaction",
     "capabilities",
     "work-context",
     "response-editor",
-    "workspaces",
+    "web-tools",
     "model-profiles",
     "subagents",
     "session-title",

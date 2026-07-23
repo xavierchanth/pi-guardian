@@ -10,8 +10,10 @@ import {
   registerPiTaiConfig,
   type PiTaiConfigService,
 } from "./src/config/register.ts";
+import { registerAutoCompaction } from "./src/compaction/register.ts";
 import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
+import { registerFirstPartyKeybindings } from "./src/keybindings/register.ts";
 import { registerModelProfiles } from "./src/model-profiles/register.ts";
 import {
   registerNotifications,
@@ -22,8 +24,8 @@ import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerSubagents } from "./src/subagents/register.ts";
+import { registerWebTools } from "./src/web/register.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
-import { registerWorkspaceCapabilities } from "./src/workspaces/register.ts";
 import {
   createPiSessionWorkContextStore,
   type WorkContextStore,
@@ -45,11 +47,13 @@ export type PiTaiRegistrar = (
 ) => void | Promise<void>;
 
 export interface PiTaiRegistrars {
+  keybindings: PiTaiRegistrar;
   config: PiTaiRegistrar;
+  compaction: PiTaiRegistrar;
   capabilities: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
-  workspaces: PiTaiRegistrar;
+  webTools: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
@@ -60,7 +64,9 @@ export interface PiTaiRegistrars {
 }
 
 const productionRegistrars: PiTaiRegistrars = {
+  keybindings: (pi, runtime) => registerFirstPartyKeybindings(pi, runtime.agentDir),
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
+  compaction: (pi, runtime) => registerAutoCompaction(pi, runtime.config),
   capabilities: (pi, runtime) => registerCapabilityController(pi, runtime.capabilities),
   workContext: (pi, runtime) => {
     registerWorkContext(pi, runtime.workContext);
@@ -68,11 +74,8 @@ const productionRegistrars: PiTaiRegistrars = {
   responseEditor: (pi) => {
     registerResponseEditor(pi);
   },
-  workspaces: (pi, runtime) => {
-    registerWorkspaceCapabilities(pi, {
-      capabilities: runtime.capabilities,
-      stateRoot: runtime.agentDir,
-    });
+  webTools: (pi) => {
+    registerWebTools(pi);
   },
   modelProfiles: (pi, runtime) => {
     registerModelProfiles(pi, runtime.config);
@@ -93,7 +96,7 @@ const productionRegistrars: PiTaiRegistrars = {
     workContext: () => runtime.workContext.current(),
   }),
   footer: (pi, runtime) => {
-    registerFooter(pi, runtime.workContext);
+    registerFooter(pi, runtime.workContext, runtime.capabilities);
   },
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
@@ -118,11 +121,13 @@ export function createPiTaiExtension(
 ): (pi: ExtensionAPI) => Promise<void> {
   return async (pi) => {
     const runtime = createRuntime();
+    await registrars.keybindings(pi, runtime);
     await registrars.config(pi, runtime);
+    await registrars.compaction(pi, runtime);
     await registrars.capabilities(pi, runtime);
     await registrars.workContext(pi, runtime);
     await registrars.responseEditor(pi, runtime);
-    await registrars.workspaces(pi, runtime);
+    await registrars.webTools(pi, runtime);
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);

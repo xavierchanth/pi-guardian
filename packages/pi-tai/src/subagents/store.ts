@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WorkspaceAttachment } from "../workspaces/domain.ts";
+import type { WorkspaceAttachment, WorkspaceTip } from "../workspaces/domain.ts";
 import type {
   AgentDefinition,
   AgentDefinitionSource,
@@ -67,6 +67,39 @@ export interface ParentMessage {
   questionId?: string;
 }
 
+export type DelegatedWorkspaceState =
+  | { phase: "active"; attachment: WorkspaceAttachment }
+  | {
+      phase: "attention_required";
+      attachment: WorkspaceAttachment;
+      operation: "integration";
+      tip: WorkspaceTip;
+      reason: string;
+      stoppedAt: string;
+    }
+  | {
+      phase: "attention_required";
+      attachment: WorkspaceAttachment;
+      operation: "cleanup";
+      tip: WorkspaceTip;
+      integratedAt: string;
+      reason: string;
+      stoppedAt: string;
+    }
+  | {
+      phase: "integrated";
+      attachment: WorkspaceAttachment;
+      tip: WorkspaceTip;
+      integratedAt: string;
+    }
+  | {
+      phase: "cleaned";
+      attachment: WorkspaceAttachment;
+      tip: WorkspaceTip;
+      integratedAt: string;
+      cleanedAt: string;
+    };
+
 export interface DelegationRecord {
   version: 3;
   id: string;
@@ -85,6 +118,7 @@ export interface DelegationRecord {
   parentMessages?: ParentMessage[];
   answeredQuestions?: AnsweredParentQuestion[];
   parentCollectedAt?: string;
+  workspace?: DelegatedWorkspaceState;
   legacyWorkspace?: WorkspaceAttachment;
   createdAt: string;
   updatedAt: string;
@@ -235,6 +269,7 @@ export class FileDelegationStore implements DelegationStore {
 export interface WaitForChildrenOptions {
   signal?: AbortSignal;
   pollIntervalMs?: number;
+  initialGraceMs?: number;
   childIds?: readonly string[];
   until?: "next" | "all";
   onProgress?: (records: readonly DelegationRecord[]) => void;
@@ -253,13 +288,20 @@ export async function waitForChildren(
   parentSessionId: string,
   options: WaitForChildrenOptions = {},
 ): Promise<DelegationRecord[]> {
-  const available = (await store.listChildren(parentSessionId)).filter((record) =>
-    !options.childIds || options.childIds.includes(record.id),
-  );
+  const interval = options.pollIntervalMs ?? 250;
+  const graceDeadline = Date.now() + (options.initialGraceMs ?? 1_500);
+  let available: DelegationRecord[] = [];
+  do {
+    if (options.signal?.aborted) throw new Error("Waiting for children was cancelled.");
+    available = (await store.listChildren(parentSessionId)).filter((record) =>
+      !options.childIds || options.childIds.includes(record.id),
+    );
+    if (available.length > 0 || Date.now() >= graceDeadline) break;
+    await delay(Math.min(interval, graceDeadline - Date.now()), options.signal);
+  } while (true);
   const snapshot = available.map((record) => record.id);
   if (snapshot.length === 0) return [];
   const until = options.until ?? "next";
-  const interval = options.pollIntervalMs ?? 250;
   while (true) {
     if (options.signal?.aborted) throw new Error("Waiting for children was cancelled.");
     const records = (await Promise.all(snapshot.map((id) => store.get(id))))
@@ -402,6 +444,28 @@ function validateRecord(record: DelegationRecord): void {
   if (!record.task?.objective || !record.execution?.phase) throw new Error("Invalid delegation record.");
   if (record.execution.phase === "awaiting_parent" && !record.execution.question?.id) {
     throw new Error("Awaiting-parent delegation is missing its question.");
+  }
+  if (record.workspace) {
+    if (record.workspace.attachment.purpose !== "delegation") {
+      throw new Error("Delegated workspace must have delegation purpose.");
+    }
+    if (record.cwd !== record.workspace.attachment.path) {
+      throw new Error("Delegated workspace path must match the child cwd.");
+    }
+    if (record.workspace.phase === "attention_required") {
+      if (!record.workspace.reason.trim() || !record.workspace.tip?.id) {
+        throw new Error("Attention-required workspace state must include its reason and captured tip.");
+      }
+      if (record.workspace.operation === "cleanup" && !record.workspace.integratedAt) {
+        throw new Error("Cleanup attention state must retain its integration timestamp.");
+      }
+    }
+    if (
+      (record.workspace.phase === "integrated" || record.workspace.phase === "cleaned")
+      && (!record.workspace.tip?.id || !record.workspace.integratedAt)
+    ) {
+      throw new Error("Integrated workspace state must retain its tip and integration timestamp.");
+    }
   }
 }
 

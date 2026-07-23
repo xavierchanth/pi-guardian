@@ -23,6 +23,10 @@ test("returns immutable defaults when files are absent", () => {
     reviewFailure: true,
     agentCompletion: true,
   });
+  assert.deepEqual(loaded.config.compaction, {
+    enabled: true,
+    thresholdPercent: 90,
+  });
   assert.ok(Object.isFrozen(loaded.config));
   assert.deepEqual(loaded.warnings, []);
 });
@@ -33,11 +37,13 @@ test("trusted project values override valid global values", () => {
     sessionTitle: { provider: "global-provider", model: "global-model", maxWords: 8 },
     ansiTheme: { darkTheme: "global-dark" },
     notifications: { reviewFailure: false },
+    compaction: { thresholdPercent: 85 },
   }));
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { model: "project-model" },
     ansiTheme: { lightTheme: "project-light" },
     notifications: { agentCompletion: false },
+    compaction: { enabled: false, thresholdPercent: 92.5 },
   }));
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
@@ -53,6 +59,10 @@ test("trusted project values override valid global values", () => {
   assert.deepEqual(loaded.config.notifications, {
     reviewFailure: false,
     agentCompletion: false,
+  });
+  assert.deepEqual(loaded.config.compaction, {
+    enabled: false,
+    thresholdPercent: 92.5,
   });
 });
 
@@ -92,6 +102,7 @@ test("invalid overrides are ignored without erasing valid global values", () => 
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { provider: "", maxWords: 99, surprise: true },
     notifications: { reviewFailure: "yes", surprise: true },
+    compaction: { enabled: "yes", thresholdPercent: 101, surprise: true },
     unknown: true,
   }));
 
@@ -99,7 +110,13 @@ test("invalid overrides are ignored without erasing valid global values", () => 
   assert.equal(loaded.config.sessionTitle.provider, "global");
   assert.equal(loaded.config.sessionTitle.maxWords, 7);
   assert.ok(loaded.warnings.some((warning) => warning.includes("sessionTitle.maxWords")));
+  assert.deepEqual(loaded.config.compaction, {
+    enabled: true,
+    thresholdPercent: 90,
+  });
   assert.ok(loaded.warnings.some((warning) => warning.includes("notifications.reviewFailure")));
+  assert.ok(loaded.warnings.some((warning) => warning.includes("compaction.enabled")));
+  assert.ok(loaded.warnings.some((warning) => warning.includes("compaction.thresholdPercent")));
   assert.ok(loaded.warnings.some((warning) => warning.includes("Unknown top-level key")));
 });
 

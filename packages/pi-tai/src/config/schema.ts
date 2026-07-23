@@ -33,10 +33,16 @@ export interface NotificationsConfig {
   agentCompletion: boolean;
 }
 
+export interface CompactionConfig {
+  enabled: boolean;
+  thresholdPercent: number;
+}
+
 export interface PiTaiConfig {
   sessionTitle: SessionTitleConfig;
   ansiTheme: AnsiThemeConfig;
   notifications: NotificationsConfig;
+  compaction: CompactionConfig;
   modelProfiles: readonly ModelProfile[];
 }
 
@@ -54,6 +60,10 @@ export const DEFAULT_PI_TAI_CONFIG: PiTaiConfig = Object.freeze({
   notifications: Object.freeze({
     reviewFailure: true,
     agentCompletion: true,
+  }),
+  compaction: Object.freeze({
+    enabled: true,
+    thresholdPercent: 90,
   }),
   modelProfiles: DEFAULT_MODEL_PROFILES,
 });

@@ -39,8 +39,6 @@ export class GitWorktreePort implements WorkspacePort {
   async create(request: WorkspaceCreateRequest): Promise<WorkspaceAttachment> {
     validateName(request.name);
     const repoRoot = line(await this.run(request.cwd, ["rev-parse", "--show-toplevel"]), "Git repository root");
-    const dirty = await this.run(repoRoot, ["status", "--porcelain"]);
-    if (dirty.trim()) throw new Error("Git worktree creation requires a clean source checkout.");
     const baseCommit = line(await this.run(repoRoot, ["rev-parse", "HEAD"]), "Git base commit");
     const repoKey = createHash("sha256").update(resolve(repoRoot)).digest("hex").slice(0, 16);
     const parent = join(this.root, repoKey);

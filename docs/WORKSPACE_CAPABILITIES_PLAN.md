@@ -1,6 +1,6 @@
 # Workspace capabilities and subagent backend implementation plan
 
-> Historical note: delegated-workspace sections are superseded by `docs/SUBAGENTS.md`. Subagents now inherit cwd and never allocate JJ workspaces or Git worktrees automatically; standalone workspace capabilities remain current.
+> Historical note: this plan is superseded by `docs/SUBAGENTS.md`. JJ and Git backends are no longer session capabilities; standalone workspace requests route through the packaged skill, normal subagents inherit cwd, and only thinker may launch a planner in a recorded isolated workspace.
 
 ## Status
 
@@ -177,7 +177,7 @@ Preserve the implemented topology:
 
 ### Git relocation
 
-- Require a Git repository, clean source checkout, and non-conflicting target path.
+- Require a Git repository and non-conflicting target path; source checkout changes remain in place and are not included.
 - Create a dedicated branch/ref and managed worktree from source `HEAD`.
 - Record repository identity, base commit, branch/ref, path, and source checkout.
 - Fork/switch the Pi session exactly as in JJ relocation.

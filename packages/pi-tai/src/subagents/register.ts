@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
@@ -5,8 +6,13 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Key, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
+import type { WorkspacePort } from "../workspaces/domain.ts";
+import { GitWorktreePort } from "../workspaces/git.ts";
+import { JjWorkspacePort } from "../workspaces/jj.ts";
+import { PreferredWorkspacePort } from "../workspaces/preferred.ts";
 import {
   discoverAgentDefinitions,
   validateAgentTools,
@@ -35,12 +41,19 @@ import {
   type DelegationStore,
 } from "./store.ts";
 import { TASK_RESOURCE_TYPES } from "./task.ts";
+import {
+  formatChildDetail,
+  summarizeChildActivity,
+  type ChildActivitySummary,
+} from "./ui.ts";
 
 const ROLE_ENTRY = "pi-tai-subagent-role";
 const CHILD_ENV = "PI_TAI_DELEGATION_ID";
 const STORE_ENV = "PI_TAI_DELEGATION_STORE";
 const AGENT_ENV = "PI_TAI_AGENT_NAME";
 const ALLOWED_ENV = "PI_TAI_ALLOWED_CHILDREN";
+const CHILD_WIDGET_KEY = "pi-tai-subagents";
+const CHILD_WIDGET_INTERVAL_MS = 500;
 
 export interface SubagentDependencies {
   store?: DelegationStore;
@@ -49,6 +62,7 @@ export interface SubagentDependencies {
   discoverAgents?: (ctx: ExtensionContext) => AgentCatalog;
   childDelegationId?: string;
   capabilities?: SessionCapabilityController;
+  workspace?: WorkspacePort;
   agentDir?: string;
 }
 
@@ -65,6 +79,10 @@ export function registerSubagents(
     launcher: new PiChildProcessLauncher(store),
   });
   const capabilities = dependencies.capabilities;
+  const workspace = dependencies.workspace ?? new PreferredWorkspacePort(
+    new JjWorkspacePort(),
+    new GitWorktreePort(join(agentDir, "pi-tai", "workspaces", "git")),
+  );
   capabilities?.register({
     id: "subagents",
     label: "Subagents",
@@ -84,12 +102,113 @@ export function registerSubagents(
   let catalog: AgentCatalog | undefined;
   let currentAgent: AgentDefinition | undefined;
   let childDelegation: DelegationRecord | undefined;
-  let spawnSeenThisTurn = false;
-  const parentTools = new Set<string>(PARENT_TOOL_NAMES);
+  let childWidgetTimer: ReturnType<typeof setInterval> | undefined;
+  let childWidgetRefresh: Promise<void> | undefined;
+  let childWidgetGeneration = 0;
 
   const loadCatalog = (ctx: ExtensionContext): AgentCatalog => {
     catalog = discover(ctx);
     return catalog;
+  };
+
+  const isRootMode = (): boolean => mode === "root";
+
+  const refreshChildWidget = (ctx: ExtensionContext): Promise<void> => {
+    if (ctx.mode !== "tui" || !isRootMode()) return Promise.resolve();
+    if (childWidgetRefresh) return childWidgetRefresh;
+    const generation = childWidgetGeneration;
+    childWidgetRefresh = (async () => {
+      const records = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+        .filter((record) => !isResolvedDelegation(record) || !record.parentCollectedAt);
+      if (records.length === 0 || !isRootMode() || generation !== childWidgetGeneration) {
+        ctx.ui.setWidget(CHILD_WIDGET_KEY, undefined);
+        return;
+      }
+      const summaries = await Promise.all(records.map(summarizeChildActivity));
+      if (!isRootMode() || generation !== childWidgetGeneration) return;
+      ctx.ui.setWidget(
+        CHILD_WIDGET_KEY,
+        (_tui, theme) => ({
+          render(width: number) {
+            return summaries.flatMap(({ record, activity }) => [
+              truncateToWidth(
+                `${theme.fg("accent", "subagent")} · ${theme.fg("muted", record.agent.name)} · ${singleDisplayLine(record.task.objective)}`,
+                width,
+                "…",
+              ),
+              truncateToWidth(
+                `  ${theme.fg(childPhaseColor(record), record.execution.phase)} · ${theme.fg("dim", singleDisplayLine(activity))}`,
+                width,
+                "…",
+              ),
+            ]);
+          },
+          invalidate() {},
+        }),
+        { placement: "belowEditor" },
+      );
+    })().catch(() => undefined).finally(() => {
+      childWidgetRefresh = undefined;
+    });
+    return childWidgetRefresh;
+  };
+
+  const stopChildWidget = (ctx?: ExtensionContext) => {
+    childWidgetGeneration += 1;
+    if (childWidgetTimer) clearInterval(childWidgetTimer);
+    childWidgetTimer = undefined;
+    ctx?.ui.setWidget(CHILD_WIDGET_KEY, undefined);
+  };
+
+  const startChildWidget = (ctx: ExtensionContext) => {
+    stopChildWidget(ctx);
+    if (ctx.mode !== "tui" || mode !== "root") return;
+    void refreshChildWidget(ctx);
+    childWidgetTimer = setInterval(() => void refreshChildWidget(ctx), CHILD_WIDGET_INTERVAL_MS);
+    childWidgetTimer.unref();
+  };
+
+  const showSubagentView = async (requestedId: string | undefined, ctx: ExtensionContext) => {
+    const records = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    if (records.length === 0) {
+      ctx.ui.notify("No child delegations for this session.", "info");
+      return;
+    }
+    let selected = requestedId
+      ? records.find((record) => record.id === requestedId)
+      : undefined;
+    if (requestedId && !selected) {
+      ctx.ui.notify(`Unknown direct child delegation: ${requestedId}`, "error");
+      return;
+    }
+    if (!selected && ctx.mode === "tui") {
+      const choices = records.map(
+        (record) => `${record.id} · ${record.agent.name} · ${record.execution.phase} · ${record.task.objective}`,
+      );
+      const choice = await ctx.ui.select("Inspect subagent", choices);
+      selected = choice ? records[choices.indexOf(choice)] : undefined;
+    }
+    selected ??= records[0];
+    if (!selected) return;
+    const detail = formatChildDetail(await summarizeChildActivity(selected));
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify(detail, "info");
+      return;
+    }
+    await ctx.ui.custom<void>((_tui, _theme, _keybindings, done) => {
+      const text = new Text(`${detail}\n\nEsc, Enter, or q to close`, 1, 1);
+      return {
+        render: (width: number) => text.render(width),
+        invalidate: () => text.invalidate(),
+        handleInput(data: string) {
+          if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data === "q") done();
+        },
+      };
+    }, {
+      overlay: true,
+      overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center", margin: 1 },
+    });
   };
 
   const availableToolNames = () => new Set(pi.getAllTools().map((tool) => tool.name));
@@ -140,6 +259,53 @@ export function registerSubagents(
     return true;
   };
 
+  const disableSubagents = async (
+    ctx: ExtensionContext,
+    force: boolean,
+  ): Promise<void> => {
+    if (mode === "child") {
+      ctx.ui.notify("Delegated children cannot change their root role.", "error");
+      return;
+    }
+    const unresolved = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+      .filter((record) => !isResolvedDelegation(record));
+    if (unresolved.length > 0 && !force) {
+      ctx.ui.notify(
+        `Cannot disable subagents with ${unresolved.length} unresolved children. Use force-off to terminate them.`,
+        "error",
+      );
+      return;
+    }
+    const abandoned = force
+      ? await orchestrator.forceAbandonChildren(ctx.sessionManager.getSessionId())
+      : [];
+    if (mode === "root") {
+      const previous = state.previous;
+      if (previous?.provider && previous.model) {
+        const model = ctx.modelRegistry.find(previous.provider, previous.model);
+        if (model) await pi.setModel(model);
+      }
+      if (previous) {
+        pi.setThinkingLevel(previous.effort as Parameters<typeof pi.setThinkingLevel>[0]);
+        pi.setActiveTools(previous.tools);
+      } else {
+        applyTools();
+      }
+      mode = "standalone";
+      currentAgent = undefined;
+      state = { mode };
+      capabilities?.disable("subagents", "user");
+      pi.appendEntry(ROLE_ENTRY, state);
+    }
+    stopChildWidget(ctx);
+    ctx.ui.notify(
+      force
+        ? `Subagents disabled; terminated ${abandoned.length} unresolved child process(es).`
+        : "Subagents disabled for this session.",
+      "info",
+    );
+  };
+
   pi.on("session_start", async (event, ctx) => {
     const persisted = reconstructSubagentState(ctx.sessionManager.getEntries());
     const fresh = event.reason === "new" || event.reason === "fork";
@@ -166,6 +332,7 @@ export function registerSubagents(
         file: ctx.sessionManager.getSessionFile(),
       });
       applyTools(currentAgent);
+      stopChildWidget(ctx);
       return;
     }
     if (mode === "root") {
@@ -178,10 +345,12 @@ export function registerSubagents(
         capabilities?.disable("subagents", "user");
         pi.appendEntry(ROLE_ENTRY, state);
       }
+      startChildWidget(ctx);
       return;
     }
     currentAgent = undefined;
     applyTools();
+    stopChildWidget(ctx);
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -211,48 +380,26 @@ export function registerSubagents(
     };
   });
 
-  pi.on("turn_start", () => {
-    spawnSeenThisTurn = false;
-  });
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (!currentAgent?.tools.includes("subagent")) return;
-    if (event.toolName === "subagent") {
-      spawnSeenThisTurn = true;
-      return;
-    }
-    if (parentTools.has(event.toolName) || CHILD_PROTOCOL_TOOL_NAMES.includes(event.toolName as never)) return;
-    if (spawnSeenThisTurn || entrySpawnsChild(ctx.sessionManager.getLeafEntry?.())) {
-      return {
-        block: true,
-        reason: "Parent work cannot run in the same turn as subagent. Delegate the complete task, then wait or inspect child status.",
-      };
-    }
-    const activeChildren = (await orchestrator.children(ctx.sessionManager.getSessionId()))
-      .filter((record) => !isResolvedDelegation(record));
-    if (activeChildren.length > 0) {
-      return {
-        block: true,
-        reason: `Parent work is paused while ${activeChildren.length} child delegation(s) are active. Use child controls instead of duplicating their work.`,
-      };
-    }
-  });
-
-  pi.on("session_shutdown", async (event) => {
+  pi.on("session_shutdown", async (event, ctx) => {
+    stopChildWidget(ctx);
     if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
       await orchestrator.cleanupChildControl(childDelegation.id);
     }
   });
 
-  pi.registerCommand("cap:subagents", {
-    description: "Enable, inspect, or disable declarative subagents",
+  pi.registerCommand("subagents", {
+    description: "Toggle, configure, or inspect declarative subagents",
     handler: async (args, ctx) => {
       const command = parseSubagentsCommand(args);
       if (!command) {
-        ctx.ui.notify("Usage: /cap:subagents [on|off|status]", "warning");
+        ctx.ui.notify("Usage: /subagents [on|off|force-off|status|list [delegation-id]]", "warning");
         return;
       }
-      if (command === "status") {
+      if (command.action === "list") {
+        await showSubagentView(command.delegationId, ctx);
+        return;
+      }
+      if (command.action === "status") {
         const children = await orchestrator.children(ctx.sessionManager.getSessionId());
         const unresolved = children.filter((record) => !isResolvedDelegation(record)).length;
         ctx.ui.notify(
@@ -261,53 +408,36 @@ export function registerSubagents(
         );
         return;
       }
+      if (command.action === "off" || command.action === "force-off") {
+        await disableSubagents(ctx, command.action === "force-off");
+        return;
+      }
+      if (command.action === "toggle" && mode === "root") {
+        await disableSubagents(ctx, false);
+        return;
+      }
       if (mode === "child") {
         ctx.ui.notify("Delegated children cannot change their root role.", "error");
         return;
       }
-      if (command === "on") {
-        if (mode === "root") {
-          ctx.ui.notify(`Subagents already enabled as ${currentAgent?.name ?? "root"}.`, "info");
-          return;
-        }
-        const root = loadCatalog(ctx).root;
-        const previous: PersistedSubagentState["previous"] = {
-          ...(ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {}),
-          effort: pi.getThinkingLevel(),
-          tools: pi.getActiveTools(),
-        };
-        if (!await activateAgent(root, ctx)) return;
-        await capabilities?.enable("subagents", { owner: "user", exposure: "model-tools" });
-        mode = "root";
-        state = { mode, agentName: root.name, previous };
-        pi.appendEntry(ROLE_ENTRY, state);
-        applyTools(root);
-        ctx.ui.notify(`Subagents enabled with root agent "${root.name}".`, "info");
+      if (mode === "root") {
+        ctx.ui.notify(`Subagents already enabled as ${currentAgent?.name ?? "root"}.`, "info");
         return;
       }
-      const unresolved = (await orchestrator.children(ctx.sessionManager.getSessionId()))
-        .filter((record) => !isResolvedDelegation(record));
-      if (unresolved.length > 0) {
-        ctx.ui.notify(`Cannot disable subagents with ${unresolved.length} unresolved children.`, "error");
-        return;
-      }
-      const previous = state.previous;
-      if (previous?.provider && previous.model) {
-        const model = ctx.modelRegistry.find(previous.provider, previous.model);
-        if (model) await pi.setModel(model);
-      }
-      if (previous) {
-        pi.setThinkingLevel(previous.effort as Parameters<typeof pi.setThinkingLevel>[0]);
-        pi.setActiveTools(previous.tools);
-      } else {
-        applyTools();
-      }
-      mode = "standalone";
-      currentAgent = undefined;
-      state = { mode };
-      capabilities?.disable("subagents", "user");
+      const root = loadCatalog(ctx).root;
+      const previous: PersistedSubagentState["previous"] = {
+        ...(ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {}),
+        effort: pi.getThinkingLevel(),
+        tools: pi.getActiveTools(),
+      };
+      if (!await activateAgent(root, ctx)) return;
+      await capabilities?.enable("subagents", { owner: "user", exposure: "model-tools" });
+      mode = "root";
+      state = { mode, agentName: root.name, previous };
       pi.appendEntry(ROLE_ENTRY, state);
-      ctx.ui.notify("Subagents disabled for this session.", "info");
+      applyTools(root);
+      startChildWidget(ctx);
+      ctx.ui.notify(`Subagents enabled with root agent "${root.name}".`, "info");
     },
   });
 
@@ -318,7 +448,7 @@ export function registerSubagents(
     promptSnippet: "Delegate a self-contained task packet to an allowed specialized child",
     promptGuidelines: [
       "Use subagent only with a self-contained task packet; children share cwd but receive no conversation history.",
-      "After spawning children, use wait_for_children or child_status instead of duplicating their assignments.",
+      "After spawning children, continue independent parent work when useful, but do not duplicate their assignments; use wait_for_children or child_status when you need their results.",
     ],
     parameters: Type.Object({
       agent: Type.String({ description: "Allowed child agent name" }),
@@ -341,7 +471,82 @@ export function registerSubagents(
         parentSessionId: ctx.sessionManager.getSessionId(),
         ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
       });
+      await refreshChildWidget(ctx);
       return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "planner_workspace",
+    label: "Planner Workspace",
+    description: "Create an isolated preferred workspace (JJ before Git) and launch one planner there. Only the root thinker may call this tool.",
+    promptSnippet: "Launch a planner for a substantial subtask in an isolated workspace",
+    promptGuidelines: [
+      "Use planner_workspace only from the root thinker, only for a substantial self-contained planner task, and only when workspace isolation is useful.",
+      "planner_workspace may branch from source @- while source @ contains ongoing work; it never moves or rewrites source files during creation and never falls back from a partially failed JJ mutation to Git.",
+    ],
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Optional lowercase workspace name" })),
+      task: taskPacketSchema(),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const caller = requireWorkspaceThinker(currentAgent);
+      const effectiveCatalog = loadCatalog(ctx);
+      const planner = effectiveCatalog.byName.get("planner");
+      if (!planner) throw new Error("The agent catalog has no planner definition.");
+      if (!caller.allowedChildren.includes(planner.name)) {
+        throw new Error(`Agent "${caller.name}" cannot create "${planner.name}".`);
+      }
+      validateAgentTools(planner, availableToolNames());
+      const name = plannerWorkspaceName(params.name, params.task.objective);
+      const attachment = await workspace.create({
+        cwd: ctx.cwd,
+        name,
+        purpose: "delegation",
+      });
+      const record = await orchestrator.spawnChild({
+        task: params.task,
+        agent: planner,
+        caller,
+        parentCwd: attachment.path,
+        parentSessionId: ctx.sessionManager.getSessionId(),
+        workspace: attachment,
+      });
+      await refreshChildWidget(ctx);
+      return result(
+        `Spawned planner ${record.id} in ${attachment.backend} workspace ${attachment.path}.`,
+        record,
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "integrate_planner_workspace",
+    label: "Integrate Planner Workspace",
+    description: "Integrate one completed direct planner workspace into the thinker workspace. Any uncertainty or conflict stops for user intervention.",
+    parameters: Type.Object({ delegationId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      requirePlannerWorkspace(child);
+      const record = await orchestrator.integrateWorkspace(child.id, workspace);
+      await refreshChildWidget(ctx);
+      return result(`Integrated planner workspace for ${record.id}; cleanup remains explicit.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "cleanup_planner_workspace",
+    label: "Cleanup Planner Workspace",
+    description: "Forget and remove a planner workspace only after its integration was recorded as clean.",
+    parameters: Type.Object({ delegationId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      requirePlannerWorkspace(child);
+      const record = await orchestrator.cleanupWorkspace(child.id, workspace);
+      await refreshChildWidget(ctx);
+      return result(`Cleaned planner workspace for ${record.id}.`, record);
     },
   });
 
@@ -425,6 +630,7 @@ export function registerSubagents(
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
       const record = await orchestrator.abandon(params.delegationId);
+      await refreshChildWidget(ctx);
       return result(`Abandoned child ${record.id}; shared files were left untouched.`, record);
     },
   });
@@ -522,6 +728,34 @@ function requireOrchestrator(agent: AgentDefinition | undefined): AgentDefinitio
   return agent;
 }
 
+function requireWorkspaceThinker(agent: AgentDefinition | undefined): AgentDefinition {
+  if (!agent?.root || !agent.tools.includes("planner_workspace")) {
+    throw new Error("Only the root thinker can manage planner workspaces.");
+  }
+  return agent;
+}
+
+function requirePlannerWorkspace(record: DelegationRecord): void {
+  if (record.agent.name !== "planner" || !record.workspace) {
+    throw new Error(`Delegation ${record.id} is not an isolated planner workspace.`);
+  }
+}
+
+function plannerWorkspaceName(requested: string | undefined, objective: string): string {
+  if (requested) {
+    const normalized = requested.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(normalized)) {
+      throw new Error("Workspace name must contain lowercase letters, numbers, and hyphens only.");
+    }
+    return normalized;
+  }
+  const slug = objective.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 24) || "task";
+  return `planner-${slug}-${randomUUID().slice(0, 8)}`;
+}
+
 async function requireDirectChild(
   orchestrator: SubagentOrchestrator,
   id: string,
@@ -532,19 +766,6 @@ async function requireDirectChild(
     throw new Error(`Delegation ${id} does not belong to this direct parent.`);
   }
   return record;
-}
-
-function entrySpawnsChild(entry: unknown): boolean {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-  const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
-  return candidate.type === "message"
-    && candidate.message?.role === "assistant"
-    && Array.isArray(candidate.message.content)
-    && candidate.message.content.some((part) => Boolean(
-      part && typeof part === "object" && !Array.isArray(part)
-      && (part as { type?: unknown }).type === "toolCall"
-      && (part as { name?: unknown }).name === "subagent",
-    ));
 }
 
 function formatRecords(records: readonly DelegationRecord[]): string {
@@ -560,6 +781,26 @@ function formatRecords(records: readonly DelegationRecord[]): string {
 
 function result(text: string, details: unknown) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function singleDisplayLine(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function childPhaseColor(record: DelegationRecord): "success" | "error" | "warning" | "muted" {
+  switch (record.execution.phase) {
+    case "completed": return "success";
+    case "failed":
+    case "cancelled":
+    case "abandoned": return "error";
+    case "awaiting_parent": return "warning";
+    case "created":
+    case "running":
+    case "blocked": return "muted";
+  }
 }
 
 function isDefinition(value: AgentDefinition | undefined): value is AgentDefinition {

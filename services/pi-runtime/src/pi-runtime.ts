@@ -175,7 +175,7 @@ export class PiSdkRuntimePort implements RuntimePort {
     );
     if (!known) throw new Error(`Unknown capability: ${params.capabilityId}`);
     await this.requireSession().prompt(
-      `/cap:${params.capabilityId} ${params.enabled ? "on" : "off"}`,
+      `/${params.capabilityId} ${params.enabled ? "on" : "off"}`,
       { source: "rpc" },
     );
     const capabilities = await this.capabilities();
@@ -188,19 +188,12 @@ export class PiSdkRuntimePort implements RuntimePort {
   }
 
   async relocateWorkspace(
-    params: SessionRelocateWorkspaceParams,
-    emit: RuntimeEventSink,
+    _params: SessionRelocateWorkspaceParams,
+    _emit: RuntimeEventSink,
   ): Promise<SessionInfo> {
-    const command = params.backend === "jj" ? "jj-workspaces" : "git-worktrees";
-    await this.requireSession().prompt(`/cap:${command} new ${params.name}`, { source: "rpc" });
-    if (!this.runtime) throw new Error("Session runtime was disposed during relocation.");
-    const info = sessionInfo(this.runtime.session, this.runtime.cwd);
-    emit({
-      event: "session.replaced",
-      sessionId: info.sessionId,
-      data: { ...info, capabilities: await this.capabilities() },
-    });
-    return info;
+    throw new Error(
+      "Direct hosted workspace relocation is disabled; ask the agent for a workspace or start Pi from the created workspace path.",
+    );
   }
 
   async disposeSession(): Promise<void> {

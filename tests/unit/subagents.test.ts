@@ -25,6 +25,11 @@ import {
   type DelegationStore,
 } from "../../packages/pi-tai/src/subagents/store.ts";
 import { normalizeTaskPacket, renderTaskPacket } from "../../packages/pi-tai/src/subagents/task.ts";
+import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
+import {
+  formatChildDetail,
+  latestAssistantLine,
+} from "../../packages/pi-tai/src/subagents/ui.ts";
 
 const execFileAsync = promisify(execFile);
 const TOOL_NAMES = [
@@ -32,10 +37,14 @@ const TOOL_NAMES = [
   ...PARENT_TOOL_NAMES, "report_to_parent", "ask_parent",
 ];
 
-test("subagent mode tools are exact and capability command parsing remains stable", () => {
-  assert.equal(parseSubagentsCommand(""), "on");
-  assert.equal(parseSubagentsCommand("status"), "status");
-  assert.equal(parseSubagentsCommand("off"), "off");
+test("subagent mode tools are exact and unified command parsing remains stable", () => {
+  assert.deepEqual(parseSubagentsCommand(""), { action: "toggle" });
+  assert.deepEqual(parseSubagentsCommand("status"), { action: "status" });
+  assert.deepEqual(parseSubagentsCommand("off"), { action: "off" });
+  assert.deepEqual(parseSubagentsCommand("force-off"), { action: "force-off" });
+  assert.deepEqual(parseSubagentsCommand("list"), { action: "list" });
+  assert.deepEqual(parseSubagentsCommand("list child-1"), { action: "list", delegationId: "child-1" });
+  assert.equal(parseSubagentsCommand("list child-1 extra"), undefined);
   assert.equal(parseSubagentsCommand("bad"), undefined);
   assert.deepEqual(activeToolsForMode(["read", ...PARENT_TOOL_NAMES], "standalone"), ["read"]);
   assert.deepEqual(activeToolsForMode(["read"], "root", ["read", "subagent"]), ["read", "subagent"]);
@@ -146,6 +155,104 @@ test("orchestrator launches in the parent cwd and enforces the caller child allo
   );
 });
 
+test("planner workspace integration is explicit, durable, and cleanup follows integration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-"));
+  const store = new FileDelegationStore(root);
+  const orchestrator = new SubagentOrchestrator({
+    store,
+    launcher: {
+      launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+      message: async () => undefined,
+      cleanup: async () => undefined,
+    },
+  });
+  const thinker = {
+    ...agent("thinker", ["planner"], true),
+    root: true,
+    tools: ["read", "subagent", "planner_workspace"],
+  };
+  const planner = agent("planner", ["worker", "scout", "researcher"], true);
+  const attachment = {
+    backend: "jj" as const,
+    purpose: "delegation" as const,
+    repoRoot: "/repo",
+    sourceWorkspace: "default",
+    baseChangeId: "base",
+    name: "planned",
+    path: "/repo/.jj/workspaces/planned",
+    rootChangeId: "root",
+  };
+  const child = await orchestrator.spawnChild({
+    task: { objective: "Plan the subsystem" },
+    agent: planner,
+    caller: thinker,
+    parentCwd: attachment.path,
+    parentSessionId: "parent",
+    workspace: attachment,
+  });
+  await orchestrator.report(child.id, { outcome: "completed", summary: "done" });
+
+  const calls: string[] = [];
+  const workspace = {
+    kind: "jj",
+    captureTip: async () => { calls.push("tip"); return { id: "tip", clean: true }; },
+    integrate: async () => { calls.push("integrate"); return { conflicted: false, conflictFiles: [] }; },
+    finalize: async () => { calls.push("cleanup"); },
+  } as unknown as WorkspacePort;
+  const integrated = await orchestrator.integrateWorkspace(child.id, workspace);
+  assert.equal(integrated.workspace?.phase, "integrated");
+  const cleaned = await orchestrator.cleanupWorkspace(child.id, workspace);
+  assert.equal(cleaned.workspace?.phase, "cleaned");
+  assert.deepEqual(calls, ["tip", "integrate", "cleanup"]);
+});
+
+test("planner workspace integration failure enters a non-retryable attention state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-stop-"));
+  const store = new FileDelegationStore(root);
+  const orchestrator = new SubagentOrchestrator({
+    store,
+    launcher: {
+      launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+      message: async () => undefined,
+      cleanup: async () => undefined,
+    },
+  });
+  const thinker = {
+    ...agent("thinker", ["planner"], true),
+    root: true,
+    tools: ["read", "subagent", "planner_workspace"],
+  };
+  const planner = agent("planner", ["worker"], true);
+  const attachment = {
+    backend: "jj" as const,
+    purpose: "delegation" as const,
+    repoRoot: "/repo",
+    sourceWorkspace: "default",
+    baseChangeId: "base",
+    name: "planned",
+    path: "/repo/.jj/workspaces/planned",
+    rootChangeId: "root",
+  };
+  const child = await orchestrator.spawnChild({
+    task: { objective: "Plan the subsystem" },
+    agent: planner,
+    caller: thinker,
+    parentCwd: attachment.path,
+    parentSessionId: "parent",
+    workspace: attachment,
+  });
+  await orchestrator.report(child.id, { outcome: "completed", summary: "done" });
+  const workspace = {
+    kind: "jj",
+    captureTip: async () => ({ id: "tip", clean: true }),
+    integrate: async () => { throw new Error("unexpected graph"); },
+  } as unknown as WorkspacePort;
+
+  await assert.rejects(orchestrator.integrateWorkspace(child.id, workspace), /ask the user to intervene/);
+  assert.equal((await store.get(child.id))?.workspace?.phase, "attention_required");
+  await assert.rejects(orchestrator.integrateWorkspace(child.id, workspace), /requires user attention/);
+});
+
 test("wait next consumes one completion while status and later waits preserve the rest", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-wait-"));
   const store = new FileDelegationStore(root);
@@ -156,6 +263,19 @@ test("wait next consumes one completion while status and later waits preserve th
   const second = await waitForChildren(store, "parent", { until: "next", pollIntervalMs: 1 });
   assert.equal(second.length, 1);
   assert.notEqual(first[0]?.id, second[0]?.id);
+});
+
+test("wait allows a bounded grace period for a concurrently spawned child", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-wait-grace-"));
+  const store = new FileDelegationStore(root);
+  const waiting = waitForChildren(store, "parent", {
+    until: "next",
+    pollIntervalMs: 2,
+    initialGraceMs: 100,
+  });
+  setTimeout(() => void store.create(record("late", "completed")), 10);
+  const records = await waiting;
+  assert.equal(records[0]?.id, "late");
 });
 
 test("questions wake waiters and require a correlated parent response", async () => {
@@ -185,6 +305,51 @@ test("questions wake waiters and require a correlated parent response", async ()
   assert.match(sent[0] ?? "", /Parent response/);
 });
 
+test("force abandon terminates the full nested delegation tree but not unrelated children", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-force-abandon-"));
+  const store = new FileDelegationStore(root);
+  const cleaned: string[] = [];
+  const orchestrator = new SubagentOrchestrator({
+    store,
+    launcher: {
+      launch: async () => ({ pid: 999_999, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+      message: async () => undefined,
+      cleanup: async (child) => { cleaned.push(child.id); },
+    },
+  });
+  await store.create(record("direct", "running"));
+  await store.create({
+    ...record("nested", "running"),
+    parentSessionId: "child-session",
+    parentDelegationId: "direct",
+  });
+  await store.create({ ...record("unrelated", "running"), parentSessionId: "other" });
+  const abandoned = await orchestrator.forceAbandonChildren("parent");
+  assert.deepEqual(abandoned.map((child) => child.id), ["nested", "direct"]);
+  assert.deepEqual(cleaned, ["nested", "direct"]);
+  assert.equal((await store.get("unrelated"))?.execution.phase, "running");
+});
+
+test("child activity uses only the latest visible assistant text", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-child-activity-"));
+  const logPath = join(root, "child.jsonl");
+  await writeFile(logPath, [
+    JSON.stringify({ type: "message_update", message: {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "private reasoning" }, { type: "text", text: "First line" }],
+    } }),
+    JSON.stringify({ type: "message_end", message: {
+      role: "assistant",
+      content: [{ type: "text", text: "Progress update\nReading tests now" }],
+    } }),
+    "",
+  ].join("\n"));
+  assert.equal(await latestAssistantLine(logPath), "Reading tests now");
+  const detail = formatChildDetail({ record: record("detail", "running"), activity: "Reading tests now" });
+  assert.match(detail, /LATEST ACTIVITY\nReading tests now/);
+  assert.doesNotMatch(detail, /private reasoning/);
+});
+
 test("persistent child control channel writes RPC follow-up commands", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-control-"));
   const storeRoot = join(stateRoot, "delegations");
@@ -209,7 +374,7 @@ test("persistent child control channel writes RPC follow-up commands", async () 
   }
 });
 
-test("cap:subagents applies the thinker definition without workspace capability leases", async () => {
+test("subagents toggles the thinker definition without pausing concurrent parent work", async () => {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const tools = new Map<string, any>();
@@ -234,17 +399,53 @@ test("cap:subagents applies the thinker definition without workspace capability 
     setModel: async (model: { id: string }) => { selectedModel = model.id; return true; },
   } as unknown as ExtensionAPI;
   const capabilities = new SessionCapabilityController();
+  let forceAbandonCalls = 0;
+  let plannerSpawn: Record<string, any> | undefined;
+  let workspaceCreate: Record<string, any> | undefined;
+  let childRecords = [record("visible", "running")];
+  let widgetFactory: ((tui: unknown, theme: { fg: (_color: string, text: string) => string }) => {
+    render(width: number): string[];
+  }) | undefined;
   capabilities.bindTools({ getActiveTools: () => active, setActiveTools: (next) => { active = next; } });
   const catalog = agentCatalog();
   registerSubagents(pi, {
     store: {} as DelegationStore,
-    orchestrator: { children: async () => [] } as unknown as SubagentOrchestrator,
+    orchestrator: {
+      children: async () => childRecords,
+      spawnChild: async (request: Record<string, any>) => {
+        plannerSpawn = request;
+        return {
+          ...record("planned", "running"),
+          cwd: request.parentCwd,
+          agent: request.agent,
+          workspace: { phase: "active", attachment: request.workspace },
+        };
+      },
+      forceAbandonChildren: async () => { forceAbandonCalls += 1; return []; },
+    } as unknown as SubagentOrchestrator,
     capabilities,
+    workspace: {
+      kind: "jj",
+      create: async (request: Record<string, any>) => {
+        workspaceCreate = request;
+        return {
+          backend: "jj" as const,
+          purpose: "delegation" as const,
+          repoRoot: "/repo",
+          sourceWorkspace: "default",
+          baseChangeId: "base",
+          name: request.name,
+          path: `/repo/.jj/workspaces/${request.name}`,
+          rootChangeId: "root",
+        };
+      },
+    } as unknown as WorkspacePort,
     discoverAgents: () => catalog,
     loadInstructions: () => ({ system: "" }),
   });
   const notifications: string[] = [];
   const ctx = {
+    mode: "tui",
     cwd: "/repo",
     model: { provider: "openai-codex", id: selectedModel },
     modelRegistry: {
@@ -256,10 +457,14 @@ test("cap:subagents applies the thinker definition without workspace capability 
       getSessionId: () => "parent",
       getSessionFile: () => "/session.jsonl",
     },
-    ui: { notify(message: string) { notifications.push(message); } },
+    ui: {
+      notify(message: string) { notifications.push(message); },
+      setWidget(_key: string, value?: typeof widgetFactory) { widgetFactory = value; },
+    },
   };
   await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
-  await commands.get("cap:subagents")?.("on", ctx);
+  assert.equal(handlers.has("tool_call"), false);
+  await commands.get("subagents")?.("", ctx);
   assert.equal(selectedModel, "gpt-5.6-sol");
   assert.equal(effort, "high");
   assert.deepEqual(active, catalog.root.tools);
@@ -268,6 +473,38 @@ test("cap:subagents applies the thinker definition without workspace capability 
     ["subagents"],
   );
   assert.match(notifications.at(-1) ?? "", /thinker/);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(widgetFactory);
+  const widgetLines = widgetFactory({}, { fg: (_color, text) => text }).render(100);
+  assert.match(widgetLines[0] ?? "", /subagent · scout · task visible/);
+  assert.match(widgetLines[1] ?? "", /running · Waiting for the first model update/);
+
+  await tools.get("planner_workspace")?.execute(
+    "tool",
+    { name: "planned", task: { objective: "Plan isolated work" } },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.deepEqual(workspaceCreate, { cwd: "/repo", name: "planned", purpose: "delegation" });
+  assert.equal(plannerSpawn?.agent.name, "planner");
+  assert.equal(plannerSpawn?.parentCwd, "/repo/.jj/workspaces/planned");
+  assert.equal(plannerSpawn?.workspace.backend, "jj");
+
+  childRecords = [];
+  await commands.get("subagents")?.("", ctx);
+  assert.equal(selectedModel, "gpt-5.6-luna");
+  assert.equal(effort, "low");
+  assert.deepEqual(active, ["read"]);
+
+  childRecords = [record("visible", "running")];
+  await commands.get("subagents")?.("on", ctx);
+  await commands.get("subagents")?.("force-off", ctx);
+  assert.equal(forceAbandonCalls, 1);
+  assert.equal(selectedModel, "gpt-5.6-luna");
+  assert.equal(effort, "low");
+  assert.deepEqual(active, ["read"]);
+  assert.match(notifications.at(-1) ?? "", /terminated 0/);
 });
 
 function agent(name: string, children: string[], canSpawn: boolean): AgentDefinition {
@@ -290,15 +527,16 @@ function agent(name: string, children: string[], canSpawn: boolean): AgentDefini
 
 function agentCatalog(): AgentCatalog {
   const thinker: AgentDefinition = {
-    ...agent("thinker", ["worker", "scout", "researcher"], true),
+    ...agent("thinker", ["planner", "scout", "researcher"], true),
     tools: TOOL_NAMES.filter((name) => name !== "report_to_parent" && name !== "ask_parent"),
     effort: "high",
     model: "gpt-5.6-sol",
   };
+  const planner = agent("planner", ["worker", "scout", "researcher"], true);
   const worker = agent("worker", ["scout", "researcher"], true);
   const scout = agent("scout", [], false);
   const researcher = agent("researcher", [], false);
-  const agents = [thinker, worker, scout, researcher];
+  const agents = [thinker, planner, worker, scout, researcher];
   return { root: thinker, agents, byName: new Map(agents.map((value) => [value.name, value])) };
 }
 

@@ -56,11 +56,10 @@ function createHarness(options: {
   };
 }
 
-test("default profiles are independent Sol high, Sol low, and Luna high choices", () => {
+test("default profiles are Sol high and Sol low", () => {
   assert.deepEqual(DEFAULT_MODEL_PROFILES, [
     { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
     { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
-    { name: "luna-high", provider: "openai-codex", model: "gpt-5.6-luna", effort: "high" },
   ]);
 });
 

@@ -63,6 +63,9 @@ const ORCHESTRATION_TOOLS = new Set([
   "child_status",
   "respond_to_child",
   "abandon_child",
+  "planner_workspace",
+  "integrate_planner_workspace",
+  "cleanup_planner_workspace",
 ]);
 const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "ask_parent"]);
 

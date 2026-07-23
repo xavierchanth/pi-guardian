@@ -54,18 +54,31 @@ lines.on("line", (line) => {
   }
   if (event.command === "get_commands") {
     const names = new Set(event.data?.commands?.map((command) => command.name) ?? []);
-    const legacy = ["mode", "mode:auto", "mode:plan", "mode:edit", "mode:read", "review-mode", "implement"];
+    const legacy = [
+      "mode",
+      "mode:auto",
+      "mode:plan",
+      "mode:edit",
+      "mode:read",
+      "review-mode",
+      "implement",
+      "cap:list",
+      "cap:subagents",
+      "cap:jj-workspaces",
+      "cap:git-worktrees",
+      "jj-workspaces",
+      "git-worktrees",
+    ];
     if (
       event.success !== true ||
       !names.has("continue") ||
-      !names.has("cap:list") ||
-      !names.has("cap:subagents") ||
-      !names.has("cap:jj-workspaces") ||
-      !names.has("cap:git-worktrees") ||
-      !names.has("model:designer") ||
-      !names.has("model:thinker") ||
-      !names.has("model:worker") ||
-      !names.has("model:mechanical") ||
+      !names.has("design") ||
+      !names.has("capabilities") ||
+      !names.has("subagents") ||
+      !names.has("plan-status") ||
+      !names.has("profile") ||
+      !names.has("effort") ||
+      !names.has("skill:workspace") ||
       names.has("sub-agents") ||
       legacy.some((name) => names.has(name))
     ) {
