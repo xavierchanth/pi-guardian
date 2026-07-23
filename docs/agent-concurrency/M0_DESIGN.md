@@ -1,6 +1,16 @@
 # M0 foundation design
 
-Status: accepted direction; exact TypeScript signatures remain subject to implementation review.
+Status: implemented and validated.
+
+Implemented checkpoints:
+
+- `swvmkrzptxzx` — semantic JJ operation and structured process-executor boundaries;
+- `tvrqsvqpqvvl` — reusable Real-JJ fixture and independent workspace assertions;
+- `qrslutvolxlp` — strict concurrency IDs, state unions, reducers, and migration quarantine;
+- `nnnrqsoptvlu` — concurrent private in-process Pi SDK session proof;
+- `npvnorvrvxtu` — opt-in concurrency benchmark runner.
+
+The production runtime still uses the pre-M0 subprocess child implementation; M0 proves and supplies foundations for B0/C0 rather than performing that migration.
 
 M0 should establish the boundaries that every later concurrency/JJ slice depends on without implementing the final tools prematurely. Its four DAG slices remain independently checkpointable:
 
