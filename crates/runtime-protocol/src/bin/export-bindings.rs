@@ -20,9 +20,10 @@ fn run() -> Result<(), String> {
         let current = fs::read_to_string(&target)
             .map_err(|error| format!("unable to read {}: {error}", target.display()))?;
         if current != output {
-            return Err(format!(
+            return Err(
                 "generated runtime bindings are stale; run cargo run -p pi-tai-runtime-protocol --bin export-bindings"
-            ));
+                    .to_string(),
+            );
         }
         return Ok(());
     }
