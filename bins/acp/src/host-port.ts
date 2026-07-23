@@ -3,6 +3,7 @@ import { z } from "zod";
 import { HostConnection, readAuthToken } from "@pi-tai/host-client";
 import {
   CURRENT_PROTOCOL_VERSION,
+  parseHostEvent,
   type HostCommand,
   type HostEvent,
 } from "@pi-tai/host-protocol";
@@ -47,7 +48,7 @@ export class HostBrokerPort implements BrokerPort {
   private readonly tokenFile: string;
   private readonly clientId: string;
   private readonly observers = new Map<string, HostConnection>();
-  private readonly prompts = new Map<string, { operationId: string; text: string; cancelled: boolean }>();
+  private readonly prompts = new Map<string, { operationId: string; cancelled: boolean }>();
 
   constructor(options: HostBrokerPortOptions) {
     this.socketPath = options.socketPath;
@@ -89,7 +90,7 @@ export class HostBrokerPort implements BrokerPort {
   async prompt(input: { sessionId: string; text: string }): Promise<void> {
     const current = await this.snapshot(input.sessionId);
     const operationId = randomUUID();
-    this.prompts.set(input.sessionId, { operationId, text: input.text, cancelled: false });
+    this.prompts.set(input.sessionId, { operationId, cancelled: false });
     await this.command(
       "session.prompt",
       input.sessionId,
@@ -116,12 +117,26 @@ export class HostBrokerPort implements BrokerPort {
     input: { sessionId: string; replayFromStart: boolean },
     onEvent: (event: BrokerSessionEvent) => void | Promise<void>,
   ): Promise<() => void> {
-    if (input.replayFromStart) {
-      throw new Error("Host replay-from-start is pending the durable broker integration.");
-    }
     this.observers.get(input.sessionId)?.close();
     const connection = await this.connect();
-    await connection.command(this.hostCommand("session.observe", input.sessionId, undefined, {}));
+    const result = await connection.command(this.hostCommand(
+      "session.observe",
+      input.sessionId,
+      undefined,
+      { replayFromStart: input.replayFromStart },
+    ));
+    if (input.replayFromStart) {
+      const replay = z.object({
+        snapshot: sessionSchema,
+        replay: z.array(z.unknown()),
+        highWaterSequence: z.number().int().nonnegative(),
+      }).parse(result);
+      for (const value of replay.replay) {
+        for (const event of this.mapEvent(parseHostEvent(value))) await onEvent(event);
+      }
+    } else {
+      sessionSchema.parse(result);
+    }
     this.observers.set(input.sessionId, connection);
     let disposed = false;
     void (async () => {
@@ -195,24 +210,29 @@ export class HostBrokerPort implements BrokerPort {
   private mapEvent(event: HostEvent): BrokerSessionEvent[] {
     const pending = this.prompts.get(event.sessionId);
     switch (event.type) {
+      case "user.message": {
+        const message = z.object({ messageId: z.string(), content: z.string() }).parse(event.payload);
+        return [{ type: "user_message", ...message }];
+      }
       case "foreground.running":
-        return [
-          ...(pending
-            ? [{ type: "user_message", messageId: `user-${pending.operationId}`, content: pending.text } as const]
-            : []),
-          { type: "foreground_running" },
-        ];
-      case "assistant.text_delta":
+        return [{ type: "foreground_running" }];
+      case "assistant.text_delta": {
+        const delta = z.object({
+          delta: z.string(),
+          operationId: z.string().optional(),
+        }).parse(event.payload);
         return [{
           type: "assistant_text_delta",
-          messageId: `assistant-${pending?.operationId ?? event.runtimeGeneration}`,
-          delta: z.object({ delta: z.string() }).parse(event.payload).delta,
+          messageId: `assistant-${delta.operationId ?? pending?.operationId ?? event.runtimeGeneration}`,
+          delta: delta.delta,
         }];
+      }
       case "session.idle": {
         this.prompts.delete(event.sessionId);
+        const idle = z.object({ stopReason: z.string().optional() }).parse(event.payload);
         return [{
           type: "foreground_idle",
-          stopReason: pending?.cancelled ? "cancelled" : "end_turn",
+          stopReason: idle.stopReason === "cancelled" || pending?.cancelled ? "cancelled" : "end_turn",
         }];
       }
       default:
