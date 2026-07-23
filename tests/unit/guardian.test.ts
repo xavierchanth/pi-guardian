@@ -14,6 +14,7 @@ import {
   REVIEWER_SYSTEM_PROMPT,
   buildReviewPrompt,
   parseReviewDecision,
+  preflightManagedSubagentCleanup,
 } from "../../packages/pi-tai/src/guardian/policy.ts";
 import { registerApprovalGuardian } from "../../packages/pi-tai/src/guardian/register.ts";
 import { createGuardianReviewRecorder } from "../../packages/pi-tai/src/guardian/records.ts";
@@ -28,7 +29,70 @@ import type { WorkContextSnapshot } from "../../packages/pi-tai/src/work-context
 
 const execFileAsync = promisify(execFile);
 
-test("every agent bash call gets a fresh review without command exceptions", async () => {
+test("managed subagent runtime cleanup bypasses review under a custom store root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-cleanup-"));
+  const stateRoot = join(root, "state");
+  const storeRoot = join(stateRoot, "delegations");
+  for (const directory of ["delegations", "logs", "control", "prompts"]) {
+    await mkdir(join(stateRoot, directory), { recursive: true });
+  }
+  const paths = [
+    join(stateRoot, "logs", "child_1.jsonl"),
+    join(stateRoot, "logs", "child_1.stderr.log"),
+    join(stateRoot, "control", "child_1.fifo"),
+    join(stateRoot, "prompts", "child_1.md"),
+  ];
+  for (const path of paths) await writeFile(path, "runtime");
+  await writeFile(join(storeRoot, "child_1.json"), JSON.stringify({ id: "child_1" }));
+
+  assert.deepEqual(await preflightManagedSubagentCleanup(
+    { command: `rm -f -- ${paths.map((path) => `'${path}'`).join(" ")}` },
+    root,
+    storeRoot,
+  ), { kind: "allow" });
+  assert.deepEqual(await preflightManagedSubagentCleanup(
+    { command: `unlink '${paths[0]}'` },
+    root,
+    storeRoot,
+  ), { kind: "allow" });
+
+  let reviews = 0;
+  let handler: (event: unknown, ctx: unknown) => Promise<unknown> = async () => undefined;
+  const pi = {
+    on(_name: string, received: typeof handler) { handler = received; },
+    events: { emit() {} },
+    getAllTools: () => [],
+  } as unknown as ExtensionAPI;
+  registerApprovalGuardian(pi, {
+    delegationStoreRoot: storeRoot,
+    reviewer: async () => { reviews++; return allow(); },
+  });
+  assert.equal(await handler(bashEvent(`rm -f '${paths[0]}'`), fakeContext()), undefined);
+  assert.equal(reviews, 0);
+});
+
+test("managed subagent state deletion outside exact artifacts is denied", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-cleanup-deny-"));
+  const stateRoot = join(root, "state");
+  const storeRoot = join(stateRoot, "delegations");
+  await mkdir(join(stateRoot, "logs"), { recursive: true });
+  await mkdir(storeRoot);
+  await writeFile(join(storeRoot, "child.json"), "{}");
+  await symlink(join(storeRoot, "child.json"), join(stateRoot, "logs", "child.jsonl"));
+
+  for (const command of [
+    `rm -f '${join(storeRoot, "child.json")}'`,
+    `rm -rf '${stateRoot}'`,
+    `rm -f '${join(stateRoot, "logs", "other.txt")}'`,
+    `rm -f '${join(stateRoot, "logs", "child.jsonl")}'`,
+  ]) {
+    const decision = await preflightManagedSubagentCleanup({ command }, root, storeRoot);
+    assert.equal(decision.kind, "deny", command);
+  }
+  assert.equal((await preflightManagedSubagentCleanup({ command: "pwd" }, root, storeRoot)).kind, "review");
+});
+
+test("ordinary agent bash calls get fresh reviews", async () => {
   const requests: ReviewRequest[] = [];
   const { handler } = registerWith(async (request) => {
     requests.push(request);

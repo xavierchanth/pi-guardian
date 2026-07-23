@@ -49,33 +49,38 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
   }
 });
 
-test("workspace is packaged as an automatic generic backend router", () => {
+test("workspace is packaged as a root-only JJ skill", () => {
   const directory = join(root, "packages/pi-tai/skills/workspace");
   const skill = readFileSync(join(directory, "SKILL.md"), "utf8");
-  const jj = readFileSync(join(directory, "references/jj-workspaces.md"), "utf8");
-  const git = readFileSync(join(directory, "references/git-worktrees.md"), "utf8");
-  const genericSkill = `${skill}\n${jj}\n${git}`;
+  const jj = readFileSync(join(directory, "references/jj.md"), "utf8");
+  const thinker = readFileSync(join(root, "packages/pi-tai/agents/thinker.md"), "utf8");
+  const planner = readFileSync(join(root, "packages/pi-tai/agents/planner.md"), "utf8");
   assert.match(skill, /name: workspace/);
-  assert.doesNotMatch(skill, /disable-model-invocation/);
-  assert.match(skill, /workspace, work tree, worktree, isolated checkout/);
-  assert.match(skill, /explicitly requests Git or says `git worktree`/);
-  assert.match(skill, /probe with `jj root`/);
-  assert.match(skill, /Never switch strategies after mutation starts/);
-  assert.match(skill, /references\/jj-workspaces\.md/);
-  assert.match(skill, /references\/git-worktrees\.md/);
-  assert.match(jj, /jj workspace add <path> --name <name>/);
-  assert.match(jj, /explicitly asks to include the current working-copy change/);
-  assert.match(jj, /-r @/);
-  assert.match(git, /explicit request for Git or the phrase `git worktree`/);
-  assert.doesNotMatch(genericSkill, /planner_workspace|managed planner|owning managed planner/);
-  assert.equal(existsSync(join(directory, "references/jj.md")), false);
+  assert.match(skill, /Pi-Tai supports Jujutsu workspaces only/);
+  assert.match(skill, /call `workspace_subagent`/);
+  assert.match(skill, /planner.*worker/s);
+  assert.match(skill, /Only the root thinker may create a workspace/);
+  assert.match(skill, /Explicit requests to inspect, create, enter, integrate, forget, remove, or clean up/);
+  assert.match(skill, /Manual `\/skill:workspace` invocation/);
+  assert.match(skill, /references\/jj\.md/);
   assert.equal(existsSync(join(directory, "references/git.md")), false);
+  assert.match(thinker, /planner or worker with `workspace_subagent`/);
+  assert.match(thinker, /never require source `@` to be empty/);
+  assert.match(planner, /must never launch another planner or create another workspace/);
+  assert.match(jj, /Never require source `@` to be empty/);
+  assert.match(jj, /Create an isolated workspace from source `@-`/);
 });
 
-test("continue is packaged as a visible prompt template", () => {
+test("subagent workflow prompts are packaged as visible templates", () => {
   const prompt = readFileSync(join(root, "packages/pi-tai/prompts/continue.md"), "utf8");
   assert.match(prompt, /description: Continue the agent's previous work/);
   assert.match(prompt, /Continue what you were doing\./);
+  const status = readFileSync(join(root, "packages/pi-tai/prompts/collect-status.md"), "utf8");
+  const parallelize = readFileSync(join(root, "packages/pi-tai/prompts/parallelize.md"), "utf8");
+  assert.match(status, /Call `collect_status` now/);
+  assert.match(status, /30 seconds/);
+  assert.match(parallelize, /workspace_subagent/);
+  assert.match(parallelize, /planner.*worker/s);
   assert.doesNotMatch(
     walkSource(join(root, "packages")).map((file) => readFileSync(file, "utf8")).join("\n"),
     /registerCommand\(["']continue["']/,

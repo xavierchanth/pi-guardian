@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdir, mkdtemp, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,7 +15,10 @@ import {
   composePiTaiInstructions,
   parseSubagentsCommand,
 } from "../../packages/pi-tai/src/subagents/domain.ts";
-import { PiChildProcessLauncher } from "../../packages/pi-tai/src/subagents/launcher.ts";
+import {
+  PiChildProcessLauncher,
+  managedChildRuntimePaths,
+} from "../../packages/pi-tai/src/subagents/launcher.ts";
 import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
 import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
 import {
@@ -27,8 +30,13 @@ import {
 import { normalizeTaskPacket, renderTaskPacket } from "../../packages/pi-tai/src/subagents/task.ts";
 import type { WorkspacePort } from "../../packages/pi-tai/src/workspaces/domain.ts";
 import {
+  delegationDepth,
+  delegationTree,
+  delegationTreePrefix,
   formatChildDetail,
+  intrinsicUsage,
   latestAssistantLine,
+  treeUsage,
 } from "../../packages/pi-tai/src/subagents/ui.ts";
 
 const execFileAsync = promisify(execFile);
@@ -39,12 +47,12 @@ const TOOL_NAMES = [
 
 test("subagent mode tools are exact and unified command parsing remains stable", () => {
   assert.deepEqual(parseSubagentsCommand(""), { action: "toggle" });
-  assert.deepEqual(parseSubagentsCommand("status"), { action: "status" });
+  assert.equal(parseSubagentsCommand("status"), undefined);
   assert.deepEqual(parseSubagentsCommand("off"), { action: "off" });
   assert.deepEqual(parseSubagentsCommand("force-off"), { action: "force-off" });
   assert.deepEqual(parseSubagentsCommand("list"), { action: "list" });
-  assert.deepEqual(parseSubagentsCommand("list child-1"), { action: "list", delegationId: "child-1" });
-  assert.equal(parseSubagentsCommand("list child-1 extra"), undefined);
+  assert.equal(parseSubagentsCommand("list child-1"), undefined);
+  assert.deepEqual(parseSubagentsCommand("inspect child-1"), { action: "inspect", delegationId: "child-1" });
   assert.equal(parseSubagentsCommand("bad"), undefined);
   assert.deepEqual(activeToolsForMode(["read", ...PARENT_TOOL_NAMES], "standalone"), ["read"]);
   assert.deepEqual(activeToolsForMode(["read"], "root", ["read", "subagent"]), ["read", "subagent"]);
@@ -155,7 +163,7 @@ test("orchestrator launches in the parent cwd and enforces the caller child allo
   );
 });
 
-test("planner workspace integration is explicit, durable, and cleanup follows integration", async () => {
+test("workspace integration is explicit and includes deterministic cleanup", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-"));
   const store = new FileDelegationStore(root);
   const orchestrator = new SubagentOrchestrator({
@@ -169,7 +177,7 @@ test("planner workspace integration is explicit, durable, and cleanup follows in
   const thinker = {
     ...agent("thinker", ["planner"], true),
     root: true,
-    tools: ["read", "subagent", "planner_workspace"],
+    tools: ["read", "subagent", "workspace_subagent"],
   };
   const planner = agent("planner", ["worker", "scout", "researcher"], true);
   const attachment = {
@@ -177,6 +185,7 @@ test("planner workspace integration is explicit, durable, and cleanup follows in
     purpose: "delegation" as const,
     repoRoot: "/repo",
     sourceWorkspace: "default",
+    sourcePath: "/repo",
     baseChangeId: "base",
     name: "planned",
     path: "/repo/.jj/workspaces/planned",
@@ -195,18 +204,21 @@ test("planner workspace integration is explicit, durable, and cleanup follows in
   const calls: string[] = [];
   const workspace = {
     kind: "jj",
-    captureTip: async () => { calls.push("tip"); return { id: "tip", clean: true }; },
-    integrate: async () => { calls.push("integrate"); return { conflicted: false, conflictFiles: [] }; },
-    finalize: async () => { calls.push("cleanup"); },
+    captureTip: async () => { calls.push("tip"); return { id: "tip" }; },
+    integrate: async () => {
+      calls.push("integrate");
+      return { conflicted: false, conflictFiles: [], integratedChangeIds: ["change"], undescribedChangeIds: ["change"], removedEmptyChangeIds: ["empty"], sourceChangeId: "source", workspaceRemoved: true };
+    },
+    describe: async () => { calls.push("describe"); return []; },
   } as unknown as WorkspacePort;
   const integrated = await orchestrator.integrateWorkspace(child.id, workspace);
   assert.equal(integrated.workspace?.phase, "integrated");
-  const cleaned = await orchestrator.cleanupWorkspace(child.id, workspace);
-  assert.equal(cleaned.workspace?.phase, "cleaned");
-  assert.deepEqual(calls, ["tip", "integrate", "cleanup"]);
+  const described = await orchestrator.describeWorkspaceChanges(child.id, workspace, [{ changeId: "change", description: "feat: implement change" }]);
+  assert.deepEqual(described.workspace?.phase === "integrated" ? described.workspace.result.undescribedChangeIds : [], []);
+  assert.deepEqual(calls, ["tip", "integrate", "describe"]);
 });
 
-test("planner workspace integration failure enters a non-retryable attention state", async () => {
+test("workspace integration failure enters a non-retryable attention state", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-stop-"));
   const store = new FileDelegationStore(root);
   const orchestrator = new SubagentOrchestrator({
@@ -220,7 +232,7 @@ test("planner workspace integration failure enters a non-retryable attention sta
   const thinker = {
     ...agent("thinker", ["planner"], true),
     root: true,
-    tools: ["read", "subagent", "planner_workspace"],
+    tools: ["read", "subagent", "workspace_subagent"],
   };
   const planner = agent("planner", ["worker"], true);
   const attachment = {
@@ -228,6 +240,7 @@ test("planner workspace integration failure enters a non-retryable attention sta
     purpose: "delegation" as const,
     repoRoot: "/repo",
     sourceWorkspace: "default",
+    sourcePath: "/repo",
     baseChangeId: "base",
     name: "planned",
     path: "/repo/.jj/workspaces/planned",
@@ -244,7 +257,7 @@ test("planner workspace integration failure enters a non-retryable attention sta
   await orchestrator.report(child.id, { outcome: "completed", summary: "done" });
   const workspace = {
     kind: "jj",
-    captureTip: async () => ({ id: "tip", clean: true }),
+    captureTip: async () => ({ id: "tip" }),
     integrate: async () => { throw new Error("unexpected graph"); },
   } as unknown as WorkspacePort;
 
@@ -258,9 +271,9 @@ test("wait next consumes one completion while status and later waits preserve th
   const store = new FileDelegationStore(root);
   await store.create(record("one", "completed"));
   await store.create(record("two", "completed"));
-  const first = await waitForChildren(store, "parent", { until: "next", pollIntervalMs: 1 });
+  const first = await waitForChildren(store, "parent", { pollIntervalMs: 1 });
   assert.equal(first.length, 1);
-  const second = await waitForChildren(store, "parent", { until: "next", pollIntervalMs: 1 });
+  const second = await waitForChildren(store, "parent", { pollIntervalMs: 1 });
   assert.equal(second.length, 1);
   assert.notEqual(first[0]?.id, second[0]?.id);
 });
@@ -269,13 +282,52 @@ test("wait allows a bounded grace period for a concurrently spawned child", asyn
   const root = await mkdtemp(join(tmpdir(), "pi-tai-wait-grace-"));
   const store = new FileDelegationStore(root);
   const waiting = waitForChildren(store, "parent", {
-    until: "next",
     pollIntervalMs: 2,
     initialGraceMs: 100,
   });
   setTimeout(() => void store.create(record("late", "completed")), 10);
   const records = await waiting;
   assert.equal(records[0]?.id, "late");
+});
+
+test("recursive status collection waits for every descendant and returns non-terminal reports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-status-"));
+  const store = new FileDelegationStore(root);
+  let orchestrator: SubagentOrchestrator;
+  const messaged: string[] = [];
+  orchestrator = new SubagentOrchestrator({
+    store,
+    launcher: {
+      launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+      message: async (child, message) => {
+        messaged.push(child.id);
+        const requestId = message.match(/Status request ([^.]+)/)?.[1] ?? "";
+        setTimeout(() => void orchestrator.reportStatus(child.id, { requestId, summary: `working ${child.id}` }), 1);
+      },
+      cleanup: async () => undefined,
+    },
+  });
+  await store.create(record("direct-status", "running", process.pid));
+  await store.create({ ...record("nested-status", "running", process.pid), parentSessionId: "child-session", parentDelegationId: "direct-status" });
+  const result = await orchestrator.collectStatus("parent", 100);
+  assert.deepEqual(messaged.sort(), ["direct-status", "nested-status"]);
+  assert.deepEqual(result.timedOutIds, []);
+  assert.equal(result.records.every((child) => child.execution.phase === "running"), true);
+  assert.equal(result.records.every((child) => child.statusReports?.some((report) => report.requestId === result.requestId)), true);
+});
+
+test("recursive status collection times out partially without resolving children", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-status-timeout-"));
+  const store = new FileDelegationStore(root);
+  await store.create(record("silent", "running", process.pid));
+  const orchestrator = new SubagentOrchestrator({ store, launcher: {
+    launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+    message: async () => undefined,
+    cleanup: async () => undefined,
+  } });
+  const result = await orchestrator.collectStatus("parent", 5);
+  assert.deepEqual(result.timedOutIds, ["silent"]);
+  assert.equal((await store.get("silent"))?.execution.phase, "running");
 });
 
 test("questions wake waiters and require a correlated parent response", async () => {
@@ -291,7 +343,7 @@ test("questions wake waiters and require a correlated parent response", async ()
     },
   });
   await store.create(record("question", "running", process.pid));
-  const waiting = waitForChildren(store, "parent", { until: "all", pollIntervalMs: 1 });
+  const waiting = waitForChildren(store, "parent", { pollIntervalMs: 1 });
   const asked = await orchestrator.askParent("question", {
     question: "Which API?",
     options: ["v1", "v2"],
@@ -303,6 +355,23 @@ test("questions wake waiters and require a correlated parent response", async ()
   const resumed = await orchestrator.respond("question", questionId, "v2");
   assert.equal(resumed.execution.phase, "running");
   assert.match(sent[0] ?? "", /Parent response/);
+});
+
+test("deterministic settlement completes only after descendants resolve", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-settlement-"));
+  const store = new FileDelegationStore(root);
+  const orchestrator = new SubagentOrchestrator({ store, launcher: {
+    launch: async () => ({ pid: process.pid, logPath: "log", controlPath: "fifo", promptPath: "prompt" }),
+    message: async () => undefined, cleanup: async () => undefined,
+  } });
+  await store.create(record("parent-child", "running", process.pid));
+  await store.create({ ...record("nested", "running", process.pid), parentSessionId: "child-session", parentDelegationId: "parent-child" });
+  assert.equal((await orchestrator.settle("parent-child", "finished")).execution.phase, "running");
+  await orchestrator.report("nested", { outcome: "completed", summary: "nested done" });
+  await waitForChildren(store, "child-session", { pollIntervalMs: 1 });
+  const settled = await orchestrator.settle("parent-child", "finished");
+  assert.equal(settled.execution.phase, "completed");
+  assert.equal(settled.execution.phase === "completed" ? settled.execution.report.summary : "", "finished");
 });
 
 test("force abandon terminates the full nested delegation tree but not unrelated children", async () => {
@@ -330,6 +399,108 @@ test("force abandon terminates the full nested delegation tree but not unrelated
   assert.equal((await store.get("unrelated"))?.execution.phase, "running");
 });
 
+test("abandonment recursively cleans managed runtime artifacts after preserving intrinsic tree usage", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-abandon-cleanup-"));
+  const storeRoot = join(stateRoot, "custom", "delegations");
+  const store = new FileDelegationStore(storeRoot);
+  const launcher = new PiChildProcessLauncher(store);
+  const orchestrator = new SubagentOrchestrator({ store, launcher });
+  const usage = (input: number, output: number, cacheRead: number, cost: number) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+  });
+  const directPaths = managedChildRuntimePaths(storeRoot, "direct");
+  const nestedPaths = managedChildRuntimePaths(storeRoot, "nested");
+  const unrelatedPaths = managedChildRuntimePaths(storeRoot, "unrelated");
+  for (const path of [...Object.values(directPaths), ...Object.values(nestedPaths), ...Object.values(unrelatedPaths)]) {
+    await mkdir(join(path, ".."), { recursive: true });
+    await writeFile(path, path.endsWith(".jsonl") ? "" : "runtime\n");
+  }
+  await writeFile(directPaths.logPath, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(10, 2, 3, .01) } })}\n`);
+  await writeFile(nestedPaths.logPath, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(20, 4, 5, .02) } })}\n`);
+  const sessionFile = join(stateRoot, "custom", "sessions", "durable-session.jsonl");
+  const outside = join(stateRoot, "outside.fifo");
+  await mkdir(join(sessionFile, ".."), { recursive: true });
+  await writeFile(sessionFile, "session metadata\n");
+  await writeFile(outside, "unrelated\n");
+  await store.create({
+    ...record("direct", "running"),
+    childLogPath: directPaths.logPath,
+    childControlPath: directPaths.controlPath,
+    childPromptPath: directPaths.promptPath,
+    childSessionFile: sessionFile,
+  });
+  await store.create({
+    ...record("nested", "running"),
+    parentSessionId: "child-session",
+    parentDelegationId: "direct",
+    childLogPath: nestedPaths.logPath,
+    childControlPath: outside,
+    childPromptPath: nestedPaths.promptPath,
+  });
+  await store.create({
+    ...record("unrelated", "running"),
+    parentSessionId: "other",
+    childLogPath: unrelatedPaths.logPath,
+    childControlPath: unrelatedPaths.controlPath,
+    childPromptPath: unrelatedPaths.promptPath,
+  });
+
+  const abandoned = await orchestrator.forceAbandonChildren("parent");
+  assert.deepEqual(abandoned.map((child) => child.id), ["nested", "direct"]);
+  for (const path of [...Object.values(directPaths), ...Object.values(nestedPaths)]) {
+    await assert.rejects(readFile(path), { code: "ENOENT" });
+  }
+  assert.equal(await readFile(outside, "utf8"), "unrelated\n");
+  assert.equal(await readFile(sessionFile, "utf8"), "session metadata\n");
+  assert.equal(await readFile(unrelatedPaths.logPath, "utf8"), "");
+
+  const direct = await store.get("direct");
+  const nested = await store.get("nested");
+  assert.equal(direct?.execution.phase, "abandoned");
+  assert.equal(nested?.execution.phase, "abandoned");
+  assert.equal(direct?.intrinsicUsage?.input, 10);
+  assert.equal(nested?.intrinsicUsage?.input, 20);
+  const collected = await waitForChildren(store, "parent", { pollIntervalMs: 1 });
+  assert.equal(collected[0]?.id, "direct");
+  const attributedUsage = await treeUsage(collected[0]!, await store.list());
+  assert.equal(attributedUsage.input, 30);
+  assert.equal(attributedUsage.cacheRead, 8);
+  assert.equal(attributedUsage.cost.total, .03);
+  await orchestrator.attributeUsage("direct");
+  assert.equal((await waitForChildren(store, "parent", { pollIntervalMs: 1 })).length, 0);
+  assert.match(await readFile(join(storeRoot, "direct.json"), "utf8"), /"intrinsicUsage"/);
+  assert.match(await readFile(join(storeRoot, "nested.json"), "utf8"), /"intrinsicUsage"/);
+
+  await orchestrator.abandon("direct");
+  const repeated = await store.get("direct");
+  assert.equal((await treeUsage(repeated!, [repeated!, (await store.get("nested"))!])).input, 30);
+});
+
+test("managed cleanup refuses symlink escapes even when record paths look expected", async () => {
+  const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-abandon-symlink-"));
+  const storeRoot = join(stateRoot, "delegations");
+  const outside = await mkdtemp(join(tmpdir(), "pi-tai-abandon-outside-"));
+  await mkdir(storeRoot);
+  await symlink(outside, join(stateRoot, "logs"));
+  await mkdir(join(stateRoot, "control"));
+  await mkdir(join(stateRoot, "prompts"));
+  const paths = managedChildRuntimePaths(storeRoot, "escaped");
+  await writeFile(paths.logPath, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: { input: 99 } } })}\n`);
+  await writeFile(paths.errorPath, "private\n");
+  const store = new FileDelegationStore(storeRoot);
+  await store.create({ ...record("escaped", "running"), childLogPath: paths.logPath });
+  const orchestrator = new SubagentOrchestrator({ store, launcher: new PiChildProcessLauncher(store) });
+
+  await orchestrator.abandon("escaped");
+  assert.equal(await readFile(paths.logPath, "utf8") !== "", true);
+  assert.equal(await readFile(paths.errorPath, "utf8"), "private\n");
+  assert.equal((await store.get("escaped"))?.intrinsicUsage?.input, 0);
+});
+
 test("child activity uses only the latest visible assistant text", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-child-activity-"));
   const logPath = join(root, "child.jsonl");
@@ -350,7 +521,34 @@ test("child activity uses only the latest visible assistant text", async () => {
   assert.doesNotMatch(detail, /private reasoning/);
 });
 
-test("persistent child control channel preserves RPC steer delivery for status-and-continue", async () => {
+test("tree projection and usage include every descendant exactly once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-tree-usage-"));
+  const plannerLog = join(root, "planner.jsonl");
+  const workerLog = join(root, "worker.jsonl");
+  const usage = (input: number, output: number, cost: number) => ({ input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output, cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } });
+  await writeFile(plannerLog, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(10, 2, .01) } })}\n`);
+  await writeFile(workerLog, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(20, 3, .02) } })}\n`);
+  const planner = { ...record("planner", "completed"), childLogPath: plannerLog, createdAt: new Date(0).toISOString() };
+  const worker = { ...record("worker", "completed"), parentSessionId: "planner-session", parentDelegationId: "planner", childLogPath: workerLog, createdAt: new Date(1).toISOString() };
+  const scout = { ...record("scout", "completed"), parentSessionId: "worker-session", parentDelegationId: "worker", createdAt: new Date(2).toISOString() };
+  const researcher = { ...record("researcher", "completed"), parentSessionId: "planner-session", parentDelegationId: "planner", createdAt: new Date(3).toISOString() };
+  const records = [researcher, scout, worker, planner];
+  const tree = delegationTree(records, "parent");
+  assert.deepEqual(tree.map((item) => item.id), ["planner", "worker", "scout", "researcher"]);
+  assert.equal(delegationDepth(scout, records), 2);
+  assert.deepEqual(tree.map((item) => delegationTreePrefix(item, records)), ["", "├── ", "│   └── ", "└── "]);
+  assert.deepEqual(
+    tree.slice(0, 3).map((item) => delegationTreePrefix(item, records, tree.slice(0, 3))),
+    ["", "└── ", "    └── "],
+  );
+  assert.equal((await intrinsicUsage(plannerLog)).input, 10);
+  const total = await treeUsage(planner, records);
+  assert.equal(total.input, 30);
+  assert.equal(total.output, 5);
+  assert.equal(total.cost.total, .03);
+});
+
+test("persistent child control channel writes RPC follow-up commands", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-control-"));
   const storeRoot = join(stateRoot, "delegations");
   const controlDir = join(stateRoot, "control");
@@ -361,14 +559,27 @@ test("persistent child control channel preserves RPC steer delivery for status-a
   const launcher = new PiChildProcessLauncher({ root: storeRoot } as DelegationStore);
   const child = { ...record("one", "running"), childControlPath: controlPath };
   try {
-    await launcher.message(child, "Give me a status report, then continue.", "steer");
+    await launcher.message(child, "Prioritize the regression", "followUp");
     const buffer = Buffer.alloc(4096);
     const { bytesRead } = await reader.read(buffer);
     assert.deepEqual(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").trim()), {
       type: "prompt",
-      message: "Give me a status report, then continue.",
-      streamingBehavior: "steer",
+      message: "Prioritize the regression",
+      streamingBehavior: "followUp",
     });
+
+    const logPath = join(stateRoot, "waiting.jsonl");
+    await writeFile(logPath, `${JSON.stringify({ type: "tool_execution_update", toolName: "wait_for_children" })}\n`);
+    await launcher.message({ ...child, childLogPath: logPath }, "Close the loop", "steer");
+    const second = Buffer.alloc(4096);
+    const nextRead = await reader.read(second);
+    assert.deepEqual(
+      second.subarray(0, nextRead.bytesRead).toString("utf8").trim().split("\n").map((line) => JSON.parse(line)),
+      [
+        { type: "abort" },
+        { type: "prompt", message: "Close the loop" },
+      ],
+    );
   } finally {
     await reader.close();
   }
@@ -379,6 +590,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const tools = new Map<string, any>();
   const entries: any[] = [];
+  const injectedMessages: string[] = [];
   let active = ["read"];
   let effort = "low";
   let selectedModel = "gpt-5.6-luna";
@@ -394,6 +606,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     getAllTools: () => TOOL_NAMES.map((name) => ({ name })),
     setActiveTools(next: string[]) { active = [...next]; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
+    sendUserMessage(message: string) { injectedMessages.push(message); },
     getThinkingLevel: () => effort,
     setThinkingLevel(next: string) { effort = next; },
     setModel: async (model: { id: string }) => { selectedModel = model.id; return true; },
@@ -402,16 +615,43 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   let forceAbandonCalls = 0;
   let plannerSpawn: Record<string, any> | undefined;
   let workspaceCreate: Record<string, any> | undefined;
-  let childRecords = [record("visible", "running")];
+  let childRecords: DelegationRecord[] = [{
+    ...record("visible", "running"),
+    agent: { ...record("visible", "running").agent, name: "planner" },
+    task: { objective: `task ${"overflow ".repeat(30)}`, uncertaintyHandling: "best-effort" as const },
+  }, {
+    ...record("active-worker", "running"),
+    parentSessionId: "planner-session",
+    parentDelegationId: "visible",
+    agent: { ...record("active-worker", "running").agent, name: "worker" },
+  }, {
+    ...record("active-scout", "running"),
+    parentSessionId: "worker-session",
+    parentDelegationId: "active-worker",
+    task: { objective: `nested ${"overflow ".repeat(30)}`, uncertaintyHandling: "best-effort" },
+  }, {
+    ...record("finished-descendant", "completed"),
+    parentSessionId: "planner-session",
+    parentDelegationId: "visible",
+    task: { objective: "completed descendant", uncertaintyHandling: "best-effort" },
+  }];
   let widgetFactory: ((tui: unknown, theme: { fg: (_color: string, text: string) => string }) => {
     render(width: number): string[];
   }) | undefined;
+  const customViews: { before: string[]; afterG: string[]; afterg: string[]; afterEnd: string[]; afterRight: string[]; options: unknown }[] = [];
+  let inspectChoices: string[] = [];
+  let waitProgress: { content?: Array<{ type: string; text?: string }>; details?: { nodes?: Array<{ id: string }> } } | undefined;
   capabilities.bindTools({ getActiveTools: () => active, setActiveTools: (next) => { active = next; } });
   const catalog = agentCatalog();
   registerSubagents(pi, {
     store: {} as DelegationStore,
     orchestrator: {
       children: async () => childRecords,
+      all: async () => childRecords,
+      wait: async (_parentSessionId: string, options: { onProgress?: (records: DelegationRecord[]) => Promise<void> }) => {
+        await options.onProgress?.(childRecords.filter((record) => record.parentSessionId === "parent"));
+        return [{ ...record("visible", "completed"), usageAttributedAt: new Date(0).toISOString() }];
+      },
       spawnChild: async (request: Record<string, any>) => {
         plannerSpawn = request;
         return {
@@ -424,6 +664,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
       forceAbandonChildren: async () => { forceAbandonCalls += 1; return []; },
     } as unknown as SubagentOrchestrator,
     capabilities,
+    childDelegationId: "",
     workspace: {
       kind: "jj",
       create: async (request: Record<string, any>) => {
@@ -433,6 +674,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
           purpose: "delegation" as const,
           repoRoot: "/repo",
           sourceWorkspace: "default",
+          sourcePath: "/repo",
           baseChangeId: "base",
           name: request.name,
           path: `/repo/.jj/workspaces/${request.name}`,
@@ -443,6 +685,23 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     discoverAgents: () => catalog,
     loadInstructions: () => ({ system: "" }),
   });
+  assert.match(
+    tools.get("subagent")?.promptGuidelines.join("\n") ?? "",
+    /Spawning is not completion.*repeatedly call wait_for_children/s,
+  );
+  assert.match(
+    tools.get("workspace_subagent")?.promptGuidelines.join("\n") ?? "",
+    /Launching a workspace child is not completion.*Repeatedly call wait_for_children/s,
+  );
+  assert.match(tools.get("wait_for_children")?.description ?? "", /Wait-any.*call repeatedly/);
+  assert.match(
+    tools.get("wait_for_children")?.promptGuidelines.join("\n") ?? "",
+    /each call returns after one.*not after all.*Keep calling until.*uncollected/s,
+  );
+  assert.match(
+    tools.get("report_to_parent")?.promptGuidelines.join("\n") ?? "",
+    /repeatedly call wait_for_children.*consume every direct-child terminal result/s,
+  );
   const notifications: string[] = [];
   const ctx = {
     mode: "tui",
@@ -460,6 +719,25 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     ui: {
       notify(message: string) { notifications.push(message); },
       setWidget(_key: string, value?: typeof widgetFactory) { widgetFactory = value; },
+      select(_title: string, choices: string[]) { inspectChoices = choices; return Promise.resolve(undefined); },
+      custom(factory: Function, options?: unknown) {
+        return new Promise<void>((resolve) => {
+          const tui = { requestRender() {} };
+          const theme = { fg: (_color: string, text: string) => text };
+          const component = factory(tui, theme, {}, resolve);
+          const before = component.render(100);
+          component.handleInput?.("G");
+          const afterG = component.render(100);
+          component.handleInput?.("g");
+          const afterg = component.render(100);
+          component.handleInput?.("\u001b[F");
+          const afterEnd = component.render(100);
+          component.handleInput?.("\u001b[C");
+          const afterRight = component.render(100);
+          customViews.push({ before, afterG, afterg, afterEnd, afterRight, options });
+          component.handleInput?.("\u001b");
+        });
+      },
     },
   };
   await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
@@ -474,14 +752,48 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   );
   assert.match(notifications.at(-1) ?? "", /thinker/);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.ok(widgetFactory);
-  const widgetLines = widgetFactory({}, { fg: (_color, text) => text }).render(100);
-  assert.match(widgetLines[0] ?? "", /subagent · scout · task visible/);
-  assert.match(widgetLines[1] ?? "", /running · Waiting for the first model update/);
+  assert.equal(widgetFactory, undefined);
 
-  await tools.get("planner_workspace")?.execute(
+  await commands.get("subagents")?.("list", ctx);
+  assert.equal(customViews[0]?.options, undefined);
+  assert.match(customViews[0]?.before.join("\n") ?? "", /\[Active \(3\)\]/);
+  assert.match(customViews[0]?.before.join("\n") ?? "", /planner · running[\s\S]*└── worker · running[\s\S]*    └── scout · running/);
+  assert.doesNotMatch(customViews[0]?.before.join("\n") ?? "", /completed descendant/);
+  assert.match(customViews[0]?.afterRight.join("\n") ?? "", /\[Inactive \(1\)\]/);
+  assert.match(customViews[0]?.afterRight.join("\n") ?? "", /completed descendant/);
+  const nestedLine = customViews[0]?.before.find((line) => line.includes("└── scout")) ?? "";
+  assert.match(nestedLine.replace(/\u001b\[[0-9;]*m/g, ""), /…$/);
+  assert.ok(customViews[0]?.before.every((line) => line.replace(/\u001b\[[0-9;]*m/g, "").length <= 100));
+  await commands.get("subagents")?.("inspect", ctx);
+  assert.match(inspectChoices.join("\n"), /visible · planner[\s\S]*├── active-worker · worker[\s\S]*│   └── active-scout · scout[\s\S]*└── finished-descendant · scout/);
+  await commands.get("subagents")?.("inspect visible", ctx);
+  assert.equal(customViews[1]?.options, undefined);
+  assert.match(customViews[1]?.before.join("\n") ?? "", /\[Inspect · planner · visible\]/);
+  assert.notDeepEqual(customViews[1]?.before, customViews[1]?.afterG);
+  assert.deepEqual(customViews[1]?.before, customViews[1]?.afterg);
+  assert.notDeepEqual(customViews[1]?.before, customViews[1]?.afterEnd);
+  await commands.get("subagents")?.("inspect finished-descendant", ctx);
+  assert.match(customViews[2]?.before.join("\n") ?? "", /\[Inspect · scout · finished-descendant\]/);
+  assert.match(customViews[2]?.before.join("\n") ?? "", /completed/);
+
+  await tools.get("wait_for_children")?.execute(
     "tool",
-    { name: "planned", task: { objective: "Plan isolated work" } },
+    {},
+    undefined,
+    (update: typeof waitProgress) => { waitProgress = update; },
+    ctx,
+  );
+  const waitText = waitProgress?.content?.map((part) => part.text ?? "").join("\n") ?? "";
+  assert.match(waitText, /planner · running[\s\S]*└── worker · running[\s\S]*    └── scout · running/);
+  assert.doesNotMatch(waitText, /completed descendant/);
+  assert.deepEqual(waitProgress?.details?.nodes?.map((node) => node.id), ["visible", "active-worker", "active-scout"]);
+
+  await handlers.get("agent_settled")?.[0]({}, ctx);
+  assert.match(injectedMessages.at(-1) ?? "", /call wait_for_children repeatedly/);
+
+  await tools.get("workspace_subagent")?.execute(
+    "tool",
+    { agent: "planner", name: "planned", task: { objective: "Plan isolated work" } },
     undefined,
     undefined,
     ctx,
@@ -490,6 +802,16 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   assert.equal(plannerSpawn?.agent.name, "planner");
   assert.equal(plannerSpawn?.parentCwd, "/repo/.jj/workspaces/planned");
   assert.equal(plannerSpawn?.workspace.backend, "jj");
+
+  await tools.get("workspace_subagent")?.execute(
+    "tool",
+    { agent: "worker", name: "bounded", task: { objective: "Implement bounded work" } },
+    undefined,
+    undefined,
+    ctx,
+  );
+  assert.equal(plannerSpawn?.agent.name, "worker");
+  assert.equal(plannerSpawn?.parentCwd, "/repo/.jj/workspaces/bounded");
 
   childRecords = [];
   await commands.get("subagents")?.("", ctx);
@@ -527,7 +849,7 @@ function agent(name: string, children: string[], canSpawn: boolean): AgentDefini
 
 function agentCatalog(): AgentCatalog {
   const thinker: AgentDefinition = {
-    ...agent("thinker", ["planner", "scout", "researcher"], true),
+    ...agent("thinker", ["planner", "worker", "scout", "researcher"], true),
     tools: TOOL_NAMES.filter((name) => name !== "report_to_parent" && name !== "ask_parent"),
     effort: "high",
     model: "gpt-5.6-sol",

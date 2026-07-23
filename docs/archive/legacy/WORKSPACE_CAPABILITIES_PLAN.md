@@ -1,6 +1,6 @@
 # Workspace capabilities and subagent backend implementation plan
 
-> Historical note: this plan is superseded by `docs/SUBAGENTS.md`. JJ and Git backends are no longer session capabilities; standalone workspace requests route through the packaged skill, normal subagents inherit cwd, and only thinker may launch a planner in a recorded isolated workspace.
+> Historical note: this plan is superseded by `docs/SUBAGENTS.md` and is retained only as implementation history. Current Pi-Tai supports JJ workspaces only; normal subagents inherit cwd, and the single root thinker may launch either a planner or worker with `workspace_subagent`.
 
 ## Status
 

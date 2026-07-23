@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -19,13 +19,13 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
     agentDir: "/tmp/pi-tai-no-user-agents",
   });
   assert.equal(catalog.root.name, "thinker");
-  assert.deepEqual(catalog.root.allowedChildren, ["planner", "scout", "researcher"]);
+  assert.deepEqual(catalog.root.allowedChildren, ["planner", "worker", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("planner")?.allowedChildren, ["worker", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("worker")?.allowedChildren, ["scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("scout")?.allowedChildren, []);
   assert.deepEqual(catalog.byName.get("researcher")?.allowedChildren, []);
-  assert.ok(catalog.root.tools.includes("planner_workspace"));
-  assert.equal(catalog.byName.get("planner")?.tools.includes("planner_workspace"), false);
+  assert.ok(catalog.root.tools.includes("workspace_subagent"));
+  assert.equal(catalog.byName.get("planner")?.tools.includes("workspace_subagent"), false);
   for (const name of ["thinker", "planner", "researcher"]) {
     assert.ok(catalog.byName.get(name)?.tools.includes("web_search"), name);
     assert.ok(catalog.byName.get(name)?.tools.includes("web_fetch"), name);
@@ -46,22 +46,45 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   );
 });
 
-test("packaged orchestration guidance covers interim status and dirty-source planner integration", async () => {
-  const [thinker, planner, worker] = await Promise.all(
-    ["thinker", "planner", "worker"].map((name) => readFile(join(PACKAGED, `${name}.md`), "utf8")),
-  );
-  for (const prompt of [planner, worker]) {
-    assert.match(prompt, /bounded interim status as visible assistant text/);
-    assert.match(prompt, /do not call `report_to_parent`/);
-    assert.match(prompt, /automatically resume the original objective without waiting for another prompt/);
-    assert.match(prompt, /`report_to_parent` exactly once only for the terminal outcome/);
+test("packaged delegating prompts require repeated wait-any collection before completion", () => {
+  const catalog = discoverAgentDefinitions({
+    cwd: "/tmp",
+    projectTrusted: false,
+    packagedDir: PACKAGED,
+    agentDir: "/tmp/pi-tai-no-user-agents",
+  });
+
+  for (const name of ["thinker", "planner", "worker"]) {
+    const prompt = catalog.byName.get(name)?.systemPrompt ?? "";
+    assert.match(prompt, /Delegation is not completion\./, name);
+    assert.match(prompt, /`wait_for_children` is wait-any/, name);
+    assert.match(prompt, /call it repeatedly/, name);
+    assert.match(prompt, /answer each question.*resume waiting/, name);
+    assert.match(prompt, /no direct child you own is unresolved/, name);
+    assert.match(prompt, /no terminal result remains uncollected/, name);
+    assert.match(prompt, /`child_status` is not a substitute.*`wait_for_children`/, name);
   }
-  assert.match(thinker, /status report from an active child.*`steer`/);
-  assert.match(thinker, /`followUp` instead queues a subsequent instruction/);
-  assert.match(thinker, /integrate even when the source `@` is dirty/);
-  assert.match(thinker, /inserts the complete rooted planner subtree serially immediately before the current source `@`/);
-  assert.match(thinker, /preserves the current source workspace and files/);
-  assert.doesNotMatch(thinker, /wait until your current source working-copy change is empty/);
+
+  assert.match(
+    catalog.root.systemPrompt,
+    /Before presenting delegated work as complete or ending your user-facing work/,
+  );
+  assert.match(
+    catalog.root.systemPrompt,
+    /substantial unrelated implementation slices.*use a separate `workspace_subagent` delegation for each slice/s,
+  );
+  assert.match(catalog.root.systemPrompt, /keeps each implementation history cleaner/);
+  assert.match(
+    catalog.root.systemPrompt,
+    /Do not use workspaces for simple tasks.*explicit workspace lifecycle administration/s,
+  );
+  for (const name of ["planner", "worker"]) {
+    assert.match(
+      catalog.byName.get(name)?.systemPrompt ?? "",
+      /Before calling `report_to_parent` or otherwise ending your run/,
+      name,
+    );
+  }
 });
 
 test("trusted project definitions override user and packaged definitions", async () => {

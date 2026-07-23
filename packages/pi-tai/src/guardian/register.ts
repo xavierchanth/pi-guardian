@@ -17,6 +17,7 @@ import {
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
 import { GUARDIAN_REVIEW_FAILED_EVENT } from "../notifications/events.ts";
+import { preflightManagedSubagentCleanup } from "./policy.ts";
 import {
   createGuardianReviewRecorder,
   type GuardianReviewRecorder,
@@ -28,6 +29,7 @@ export interface GuardianOptions {
   reviewer?: ActionReviewer;
   recorder?: GuardianReviewRecorder;
   workContext?: () => WorkContextSnapshot | undefined;
+  delegationStoreRoot?: string;
 }
 
 export function registerApprovalGuardian(
@@ -39,6 +41,17 @@ export function registerApprovalGuardian(
 
   pi.on("tool_call", async (event, ctx) => {
     let reviewEvidence: PathReviewEvidence | WebFetchReviewEvidence | undefined;
+    if (event.toolName === "bash") {
+      const cleanupDecision = await preflightManagedSubagentCleanup(
+        event.input as Record<string, unknown>,
+        ctx.cwd,
+        options.delegationStoreRoot,
+      );
+      if (cleanupDecision.kind === "allow") return undefined;
+      if (cleanupDecision.kind === "deny") {
+        return { block: true, reason: autonomousBlockReason(cleanupDecision.reason) };
+      }
+    }
     if (event.toolName === WEB_FETCH_TOOL_NAME) {
       const networkDecision = preflightWebFetch(event.input as Record<string, unknown>);
       if (networkDecision.kind === "deny") {

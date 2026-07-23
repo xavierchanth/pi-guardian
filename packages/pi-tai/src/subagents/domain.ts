@@ -8,19 +8,21 @@ export const PARENT_TOOL_NAMES = [
   "message_child",
   "wait_for_children",
   "child_status",
+  "collect_status",
   "respond_to_child",
   "abandon_child",
-  "planner_workspace",
-  "integrate_planner_workspace",
-  "cleanup_planner_workspace",
+  "workspace_subagent",
+  "integrate_workspace",
+  "describe_integrated_changes",
 ] as const;
-export const CHILD_PROTOCOL_TOOL_NAMES = ["report_to_parent", "ask_parent"] as const;
+export const CHILD_PROTOCOL_TOOL_NAMES = ["report_to_parent", "report_status", "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;
 
 export type SubagentsCommand =
   | { action: "toggle" }
-  | { action: "on" | "off" | "force-off" | "status" }
-  | { action: "list"; delegationId?: string };
+  | { action: "on" | "off" | "force-off" }
+  | { action: "list" }
+  | { action: "inspect"; delegationId?: string };
 
 export interface PersistedSubagentState {
   mode: SubagentMode;
@@ -38,13 +40,11 @@ export function parseSubagentsCommand(input: string): SubagentsCommand | undefin
   const parts = input.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return { action: "toggle" };
   const action = parts[0].toLowerCase();
-  if (action === "list" && parts.length <= 2) {
+  if (action === "list" && parts.length === 1) return { action };
+  if (action === "inspect" && parts.length <= 2) {
     return { action, ...(parts[1] ? { delegationId: parts[1] } : {}) };
   }
-  if (
-    parts.length === 1
-    && (action === "on" || action === "off" || action === "force-off" || action === "status")
-  ) {
+  if (parts.length === 1 && (action === "on" || action === "off" || action === "force-off")) {
     return { action };
   }
   return undefined;

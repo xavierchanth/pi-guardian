@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { WorkspaceAttachment, WorkspaceTip } from "../workspaces/domain.ts";
+import type { WorkspaceAttachment, WorkspaceIntegrationResult, WorkspaceTip } from "../workspaces/domain.ts";
 import type {
   AgentDefinition,
   AgentDefinitionSource,
@@ -67,6 +67,30 @@ export interface ParentMessage {
   questionId?: string;
 }
 
+export interface ChildStatusReport {
+  requestId: string;
+  summary: string;
+  completed?: string[];
+  current?: string;
+  remaining?: string[];
+  blockers?: string[];
+  reportedAt: string;
+}
+
+export interface DelegationUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}
+
 export type DelegatedWorkspaceState =
   | { phase: "active"; attachment: WorkspaceAttachment }
   | {
@@ -74,15 +98,7 @@ export type DelegatedWorkspaceState =
       attachment: WorkspaceAttachment;
       operation: "integration";
       tip: WorkspaceTip;
-      reason: string;
-      stoppedAt: string;
-    }
-  | {
-      phase: "attention_required";
-      attachment: WorkspaceAttachment;
-      operation: "cleanup";
-      tip: WorkspaceTip;
-      integratedAt: string;
+      workspaceRemoved: boolean;
       reason: string;
       stoppedAt: string;
     }
@@ -90,14 +106,8 @@ export type DelegatedWorkspaceState =
       phase: "integrated";
       attachment: WorkspaceAttachment;
       tip: WorkspaceTip;
+      result: WorkspaceIntegrationResult;
       integratedAt: string;
-    }
-  | {
-      phase: "cleaned";
-      attachment: WorkspaceAttachment;
-      tip: WorkspaceTip;
-      integratedAt: string;
-      cleanedAt: string;
     };
 
 export interface DelegationRecord {
@@ -117,7 +127,12 @@ export interface DelegationRecord {
   childPromptPath?: string;
   parentMessages?: ParentMessage[];
   answeredQuestions?: AnsweredParentQuestion[];
+  statusReports?: ChildStatusReport[];
   parentCollectedAt?: string;
+  /** Immutable intrinsic usage retained when disposable runtime logs are removed. */
+  intrinsicUsage?: DelegationUsage;
+  /** Set only when this direct child's complete descendant-tree usage was returned to its parent. */
+  usageAttributedAt?: string;
   workspace?: DelegatedWorkspaceState;
   legacyWorkspace?: WorkspaceAttachment;
   createdAt: string;
@@ -271,8 +286,7 @@ export interface WaitForChildrenOptions {
   pollIntervalMs?: number;
   initialGraceMs?: number;
   childIds?: readonly string[];
-  until?: "next" | "all";
-  onProgress?: (records: readonly DelegationRecord[]) => void;
+  onProgress?: (records: readonly DelegationRecord[]) => void | Promise<void>;
 }
 
 export function isResolvedDelegation(record: DelegationRecord): boolean {
@@ -301,20 +315,16 @@ export async function waitForChildren(
   } while (true);
   const snapshot = available.map((record) => record.id);
   if (snapshot.length === 0) return [];
-  const until = options.until ?? "next";
   while (true) {
     if (options.signal?.aborted) throw new Error("Waiting for children was cancelled.");
     const records = (await Promise.all(snapshot.map((id) => store.get(id))))
       .filter((record): record is DelegationRecord => Boolean(record));
-    options.onProgress?.(records);
+    await options.onProgress?.(records);
     const attention = records.filter((record) => record.execution.phase === "awaiting_parent");
     if (attention.length > 0) return attention;
     const uncollected = records.filter((record) => isResolvedDelegation(record) && !record.parentCollectedAt);
-    if (until === "next" && uncollected.length > 0) return collect(store, [uncollected[0]]);
-    if (until === "next" && records.length === snapshot.length && records.every(isResolvedDelegation)) return [];
-    if (until === "all" && records.length === snapshot.length && records.every(isResolvedDelegation)) {
-      return collect(store, records.filter((record) => !record.parentCollectedAt));
-    }
+    if (uncollected.length > 0) return collect(store, [uncollected[0]]);
+    if (records.length === snapshot.length && records.every(isResolvedDelegation)) return [];
     await delay(interval, options.signal);
   }
 }
@@ -334,6 +344,9 @@ function parseRecord(value: unknown): DelegationRecord {
   if (!isRecord(value)) throw new Error("Invalid delegation record.");
   if (value.version === 3) {
     const record = value as unknown as DelegationRecord;
+    if (record.workspace?.attachment.backend === "jj" && !record.workspace.attachment.sourcePath) {
+      record.workspace.attachment.sourcePath = record.workspace.attachment.repoRoot;
+    }
     validateRecord(record);
     return record;
   }
@@ -400,7 +413,9 @@ function migrateLegacyRecord(record: Record<string, unknown>): DelegationRecord 
     ...(typeof record.childControlPath === "string" ? { childControlPath: record.childControlPath } : {}),
     ...(typeof record.childPromptPath === "string" ? { childPromptPath: record.childPromptPath } : {}),
     ...(Array.isArray(record.parentMessages) ? { parentMessages: record.parentMessages as ParentMessage[] } : {}),
+    ...(Array.isArray(record.statusReports) ? { statusReports: record.statusReports as ChildStatusReport[] } : {}),
     ...(typeof record.parentCollectedAt === "string" ? { parentCollectedAt: record.parentCollectedAt } : {}),
+    ...(isDelegationUsage(record.intrinsicUsage) ? { intrinsicUsage: record.intrinsicUsage } : {}),
     legacyWorkspace: workspace,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date(0).toISOString(),
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date(0).toISOString(),
@@ -412,8 +427,8 @@ function migrateLegacyRecord(record: Record<string, unknown>): DelegationRecord 
 function legacyWorkspace(record: Record<string, unknown>): WorkspaceAttachment {
   if (record.version === 2 && isRecord(record.workspace)) {
     const workspace = record.workspace as unknown as WorkspaceAttachment;
-    if (workspace.backend !== "jj" && workspace.backend !== "git") {
-      throw new Error("Invalid legacy delegation workspace.");
+    if (workspace.backend !== "jj") {
+      throw new Error("Legacy Git workspace records are unsupported; Pi-Tai now requires JJ.");
     }
     return workspace;
   }
@@ -430,6 +445,7 @@ function legacyWorkspace(record: Record<string, unknown>): WorkspaceAttachment {
     purpose: "delegation",
     repoRoot: record.repoRoot as string,
     sourceWorkspace: record.parentWorkspace as string,
+    sourcePath: record.repoRoot as string,
     baseChangeId: record.baseChangeId as string,
     name: record.childWorkspace as string,
     path: record.childWorkspacePath as string,
@@ -442,6 +458,12 @@ function validateRecord(record: DelegationRecord): void {
     throw new Error("Invalid delegation record.");
   }
   if (!record.task?.objective || !record.execution?.phase) throw new Error("Invalid delegation record.");
+  if (record.intrinsicUsage && !isDelegationUsage(record.intrinsicUsage)) {
+    throw new Error("Invalid delegation intrinsic usage snapshot.");
+  }
+  if (record.statusReports?.some((report) => !report.requestId || !report.summary.trim() || !report.reportedAt)) {
+    throw new Error("Invalid child status report.");
+  }
   if (record.execution.phase === "awaiting_parent" && !record.execution.question?.id) {
     throw new Error("Awaiting-parent delegation is missing its question.");
   }
@@ -456,14 +478,8 @@ function validateRecord(record: DelegationRecord): void {
       if (!record.workspace.reason.trim() || !record.workspace.tip?.id) {
         throw new Error("Attention-required workspace state must include its reason and captured tip.");
       }
-      if (record.workspace.operation === "cleanup" && !record.workspace.integratedAt) {
-        throw new Error("Cleanup attention state must retain its integration timestamp.");
-      }
     }
-    if (
-      (record.workspace.phase === "integrated" || record.workspace.phase === "cleaned")
-      && (!record.workspace.tip?.id || !record.workspace.integratedAt)
-    ) {
+    if (record.workspace.phase === "integrated" && (!record.workspace.tip?.id || !record.workspace.integratedAt)) {
       throw new Error("Integrated workspace state must retain its tip and integration timestamp.");
     }
   }
@@ -479,6 +495,13 @@ function legacyOutcome(state: string): ChildReport["outcome"] {
 function requiredLegacyString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value) throw new Error(`Invalid legacy delegation field: ${field}`);
   return value;
+}
+
+function isDelegationUsage(value: unknown): value is DelegationUsage {
+  if (!isRecord(value) || !isRecord(value.cost)) return false;
+  return [value.input, value.output, value.cacheRead, value.cacheWrite,
+    value.cost.input, value.cost.output, value.cost.cacheRead, value.cost.cacheWrite, value.cost.total]
+    .every((amount) => typeof amount === "number" && Number.isFinite(amount) && amount >= 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

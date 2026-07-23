@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { WorkspaceAttachment, WorkspacePort, WorkspaceTip } from "../workspaces/domain.ts";
 import type { AgentDefinition } from "./agents.ts";
-import type { ChildLauncher } from "./launcher.ts";
+import { isManagedChildLogPath, type ChildLauncher } from "./launcher.ts";
 import { normalizeTaskPacket, type TaskPacket } from "./task.ts";
+import { intrinsicUsage } from "./ui.ts";
 import {
   childReport,
   isResolvedDelegation,
@@ -10,6 +11,7 @@ import {
   waitForChildren,
   type ChildMessageDelivery,
   type ChildReport,
+  type ChildStatusReport,
   type DelegatedWorkspaceState,
   type DelegationRecord,
   type DelegationStore,
@@ -105,8 +107,7 @@ export class SubagentOrchestrator {
     options: {
       signal?: AbortSignal;
       childIds?: readonly string[];
-      until?: "next" | "all";
-      onProgress?: (records: readonly DelegationRecord[]) => void;
+      onProgress?: (records: readonly DelegationRecord[]) => void | Promise<void>;
     } = {},
   ): Promise<DelegationRecord[]> {
     return waitForChildren(this.store, parentSessionId, options);
@@ -208,6 +209,11 @@ export class SubagentOrchestrator {
       if (existing) return record;
       throw new Error(`Delegation is already resolved: ${record.execution.phase}`);
     }
+    const directChildren = (await this.store.list()).filter((candidate) => candidate.parentDelegationId === id);
+    const outstanding = directChildren.filter((candidate) => !isResolvedDelegation(candidate) || !candidate.parentCollectedAt);
+    if (outstanding.length > 0) {
+      throw new Error(`Collect all ${outstanding.length} outstanding direct child result(s) before reporting to the parent.`);
+    }
     return this.store.update(id, (current) => ({
       ...current,
       execution: {
@@ -217,54 +223,104 @@ export class SubagentOrchestrator {
     }));
   }
 
-  async abandon(id: string): Promise<DelegationRecord> {
+  async settle(id: string, summary: string): Promise<DelegationRecord> {
+    const record = await this.child(id);
+    if (isResolvedDelegation(record) || record.execution.phase === "awaiting_parent") return record;
+    const descendants = (await this.store.list()).filter((candidate) => candidate.parentDelegationId === id);
+    if (descendants.some((candidate) => !isResolvedDelegation(candidate) || !candidate.parentCollectedAt)) return record;
+    return this.report(id, {
+      outcome: "completed",
+      summary: summary.trim() || "Child agent settled without an explicit report.",
+    });
+  }
+
+  async attributeUsage(id: string): Promise<DelegationRecord> {
+    const attributedAt = new Date().toISOString();
+    return this.store.update(id, (current) => ({
+      ...current,
+      usageAttributedAt: current.usageAttributedAt ?? attributedAt,
+    }));
+  }
+
+  async all(): Promise<DelegationRecord[]> {
+    return this.store.list();
+  }
+
+  async reportStatus(id: string, report: Omit<ChildStatusReport, "reportedAt">): Promise<DelegationRecord> {
     const record = await this.child(id);
     if (isResolvedDelegation(record)) return record;
-    const abandoned = await this.store.update(id, (current) => isResolvedDelegation(current)
-      ? current
-      : {
-          ...current,
-          execution: { phase: "abandoned", reason: "Abandoned by parent." },
-        });
-    if (abandoned.execution.phase !== "abandoned") return abandoned;
-    await terminateProcess(abandoned.childPid);
-    await this.launcher.cleanup(abandoned);
-    return abandoned;
+    const summary = report.summary.trim();
+    if (!report.requestId.trim() || !summary) throw new Error("Status reports require a request ID and summary.");
+    return this.store.update(id, (current) => ({
+      ...current,
+      statusReports: [
+        ...(current.statusReports ?? []).filter((candidate) => candidate.requestId !== report.requestId),
+        { ...report, summary, reportedAt: new Date().toISOString() },
+      ],
+    }));
+  }
+
+  async collectStatus(parentSessionId: string, timeoutMs = 30_000): Promise<{
+    requestId: string;
+    records: DelegationRecord[];
+    timedOutIds: string[];
+  }> {
+    const requestId = `status-${randomUUID()}`;
+    const initial = await this.store.list();
+    const selected = delegationDescendants(initial, parentSessionId).filter((record) => !isResolvedDelegation(record));
+    const deadline = Date.now() + timeoutMs;
+    const prompt = [
+      `Status request ${requestId}.`,
+      "Pause only long enough to report a concise factual snapshot with report_status, then continue your prior work.",
+      "If you own unresolved children, return to wait_for_children after reporting.",
+    ].join(" ");
+    await Promise.all(selected.map(async (record) => {
+      if (record.execution.phase !== "running") return;
+      this.requireLiveProcess(record);
+      await this.launcher.message(record, prompt, "steer");
+      await this.store.update(record.id, (current) => ({
+        ...current,
+        parentMessages: [...(current.parentMessages ?? []), { message: prompt, delivery: "steer", sentAt: new Date().toISOString() }],
+      }));
+    }));
+    while (Date.now() < deadline) {
+      const current = (await Promise.all(selected.map((record) => this.store.get(record.id))))
+        .filter((record): record is DelegationRecord => Boolean(record));
+      if (current.every((record) => isResolvedDelegation(record) || record.statusReports?.some((report) => report.requestId === requestId))) {
+        return { requestId, records: current, timedOutIds: [] };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const records = (await Promise.all(selected.map((record) => this.store.get(record.id))))
+      .filter((record): record is DelegationRecord => Boolean(record));
+    return {
+      requestId,
+      records,
+      timedOutIds: records.filter((record) => !isResolvedDelegation(record) && !record.statusReports?.some((report) => report.requestId === requestId)).map((record) => record.id),
+    };
+  }
+
+  async abandon(id: string): Promise<DelegationRecord> {
+    const abandoned = await this.abandonTree(id);
+    const root = abandoned.find((record) => record.id === id) ?? await this.child(id);
+    return root;
   }
 
   async forceAbandonChildren(parentSessionId: string): Promise<DelegationRecord[]> {
     const records = await this.store.list();
-    const directIds = new Set(records
-      .filter((record) => record.parentSessionId === parentSessionId)
-      .map((record) => record.id));
-    const selectedIds = new Set(directIds);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const record of records) {
-        if (record.parentDelegationId && selectedIds.has(record.parentDelegationId) && !selectedIds.has(record.id)) {
-          selectedIds.add(record.id);
-          changed = true;
-        }
+    const direct = records.filter((record) =>
+      record.parentSessionId === parentSessionId
+      && (!isResolvedDelegation(record) || record.execution.phase === "abandoned")
+    );
+    const abandoned: DelegationRecord[] = [];
+    const seen = new Set<string>();
+    for (const record of direct) {
+      for (const candidate of await this.abandonTree(record.id)) {
+        if (candidate.execution.phase !== "abandoned" || seen.has(candidate.id)) continue;
+        seen.add(candidate.id);
+        abandoned.push(candidate);
       }
     }
-    const selected = records.filter((record) => selectedIds.has(record.id) && !isResolvedDelegation(record));
-    const depth = (record: DelegationRecord): number => {
-      let current = record;
-      let value = 0;
-      const seen = new Set<string>();
-      while (current.parentDelegationId && !seen.has(current.id)) {
-        seen.add(current.id);
-        const parent = records.find((candidate) => candidate.id === current.parentDelegationId);
-        if (!parent) break;
-        value += 1;
-        current = parent;
-      }
-      return value;
-    };
-    selected.sort((left, right) => depth(right) - depth(left));
-    const abandoned: DelegationRecord[] = [];
-    for (const record of selected) abandoned.push(await this.abandon(record.id));
     return abandoned;
   }
 
@@ -275,54 +331,54 @@ export class SubagentOrchestrator {
       throw new Error(`Planner workspace integration requires a completed child; current phase is ${record.execution.phase}.`);
     }
     const tip = await workspace.captureTip(state.attachment);
-    if (!tip.clean) {
-      throw new Error(`Planner workspace has uncommitted Git changes at ${state.attachment.path}.`);
-    }
     try {
       const integrated = await workspace.integrate(state.attachment);
       if (integrated.conflicted) {
         const reason = `Workspace integration produced conflicts: ${integrated.conflictFiles.join(", ") || "unknown paths"}.`;
-        await this.stopWorkspaceIntegration(id, state.attachment, tip, reason);
-        throw new Error(`${reason} Stop and ask the user to inspect JJ/Git history; do not attempt repair.`);
+        await this.stopWorkspaceIntegration(id, state.attachment, tip, integrated.workspaceRemoved, reason);
+        throw new Error(`${reason} Stop and ask the user to inspect JJ history; do not attempt repair.`);
       }
+      return this.store.update(id, (current) => ({
+        ...current,
+        workspace: {
+          phase: "integrated",
+          attachment: state.attachment,
+          tip,
+          result: integrated,
+          integratedAt: new Date().toISOString(),
+        },
+      }));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const current = await this.store.get(id);
       if (current?.workspace?.phase !== "attention_required") {
-        await this.stopWorkspaceIntegration(id, state.attachment, tip, reason);
+        const workspaceRemoved = Boolean((error as { workspaceRemoved?: unknown })?.workspaceRemoved);
+        await this.stopWorkspaceIntegration(id, state.attachment, tip, workspaceRemoved, reason);
       }
-      throw new Error(`Workspace integration stopped: ${reason} Preserve the workspace and ask the user to intervene.`);
+      throw new Error(`Workspace integration stopped: ${reason} Inspect the JJ operation log and ask the user to intervene.`);
     }
-    return this.store.update(id, (current) => ({
-      ...current,
-      workspace: {
-        phase: "integrated",
-        attachment: state.attachment,
-        tip,
-        integratedAt: new Date().toISOString(),
-      },
-    }));
   }
 
-  async cleanupWorkspace(id: string, workspace: WorkspacePort): Promise<DelegationRecord> {
+  async describeWorkspaceChanges(
+    id: string,
+    workspace: WorkspacePort,
+    descriptions: readonly { changeId: string; description: string }[],
+  ): Promise<DelegationRecord> {
     const record = await this.child(id);
     const state = requireWorkspacePhase(record, "integrated");
-    try {
-      await workspace.finalize(state.attachment);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      await this.stopWorkspaceCleanup(id, state, reason);
-      throw new Error(`Workspace cleanup stopped: ${reason} Preserve the workspace and ask the user to intervene.`);
+    const integrated = new Set(state.result.integratedChangeIds);
+    if (descriptions.some((change) => !integrated.has(change.changeId))) {
+      throw new Error("Descriptions may target only changes integrated from this workspace.");
     }
+    const remaining = await workspace.describe(state.attachment, descriptions);
+    const describedIds = new Set(descriptions.map((change) => change.changeId));
+    const undescribedChangeIds = [
+      ...state.result.undescribedChangeIds.filter((changeId) => !describedIds.has(changeId)),
+      ...remaining,
+    ].filter((changeId, index, values) => values.indexOf(changeId) === index);
     return this.store.update(id, (current) => ({
       ...current,
-      workspace: {
-        phase: "cleaned",
-        attachment: state.attachment,
-        tip: state.tip,
-        integratedAt: state.integratedAt,
-        cleanedAt: new Date().toISOString(),
-      },
+      workspace: { ...state, result: { ...state.result, undescribedChangeIds } },
     }));
   }
 
@@ -331,10 +387,76 @@ export class SubagentOrchestrator {
     if (record) await this.launcher.cleanup(record);
   }
 
+  private async abandonTree(id: string): Promise<DelegationRecord[]> {
+    const root = await this.child(id);
+    if (isResolvedDelegation(root) && root.execution.phase !== "abandoned") return [root];
+
+    const records = await this.store.list();
+    const selectedIds = new Set([id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const record of records) {
+        if (record.parentDelegationId && selectedIds.has(record.parentDelegationId) && !selectedIds.has(record.id)) {
+          selectedIds.add(record.id);
+          changed = true;
+        }
+      }
+    }
+    const byId = new Map(records.map((record) => [record.id, record]));
+    byId.set(root.id, root);
+    const depth = (record: DelegationRecord): number => {
+      let value = 0;
+      let parent = record.parentDelegationId;
+      const seen = new Set<string>();
+      while (parent && !seen.has(parent)) {
+        seen.add(parent);
+        const ancestor = byId.get(parent);
+        if (!ancestor) break;
+        value += 1;
+        parent = ancestor.parentDelegationId;
+      }
+      return value;
+    };
+    const selected = [...byId.values()]
+      .filter((record) => selectedIds.has(record.id))
+      .sort((left, right) => depth(right) - depth(left));
+    const abandoned: DelegationRecord[] = [];
+    for (const selectedRecord of selected) {
+      const current = await this.store.get(selectedRecord.id);
+      if (!current || (isResolvedDelegation(current) && current.execution.phase !== "abandoned")) continue;
+      let durable = current.execution.phase === "abandoned"
+        ? current
+        : await this.store.update(current.id, (latest) => isResolvedDelegation(latest)
+          ? latest
+          : {
+              ...latest,
+              execution: { phase: "abandoned", reason: "Abandoned by parent." },
+            });
+      if (durable.execution.phase !== "abandoned") continue;
+      await terminateProcess(durable.childPid);
+      if (!durable.intrinsicUsage) {
+        const managedLogPath = this.store.root
+          && await isManagedChildLogPath(this.store.root, durable.id, durable.childLogPath)
+          ? durable.childLogPath
+          : undefined;
+        const usage = await intrinsicUsage(managedLogPath);
+        durable = await this.store.update(durable.id, (latest) => ({
+          ...latest,
+          intrinsicUsage: latest.intrinsicUsage ?? usage,
+        }));
+      }
+      await this.launcher.cleanup(durable, { runtimeArtifacts: true });
+      abandoned.push(durable);
+    }
+    return abandoned;
+  }
+
   private async stopWorkspaceIntegration(
     id: string,
     attachment: WorkspaceAttachment,
     tip: WorkspaceTip,
+    workspaceRemoved: boolean,
     reason: string,
   ): Promise<DelegationRecord> {
     return this.store.update(id, (current) => ({
@@ -344,25 +466,7 @@ export class SubagentOrchestrator {
         attachment,
         operation: "integration",
         tip,
-        reason,
-        stoppedAt: new Date().toISOString(),
-      },
-    }));
-  }
-
-  private async stopWorkspaceCleanup(
-    id: string,
-    state: Extract<DelegatedWorkspaceState, { phase: "integrated" }>,
-    reason: string,
-  ): Promise<DelegationRecord> {
-    return this.store.update(id, (current) => ({
-      ...current,
-      workspace: {
-        phase: "attention_required",
-        attachment: state.attachment,
-        operation: "cleanup",
-        tip: state.tip,
-        integratedAt: state.integratedAt,
+        workspaceRemoved,
         reason,
         stoppedAt: new Date().toISOString(),
       },
@@ -409,6 +513,21 @@ function requireWorkspacePhase<P extends DelegatedWorkspaceState["phase"]>(
     throw new Error(`Workspace operation requires phase ${phase}; current phase is ${state.phase}.`);
   }
   return state as Extract<DelegatedWorkspaceState, { phase: P }>;
+}
+
+function delegationDescendants(records: readonly DelegationRecord[], parentSessionId: string): DelegationRecord[] {
+  const selected = new Set(records.filter((record) => record.parentSessionId === parentSessionId).map((record) => record.id));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const record of records) {
+      if (record.parentDelegationId && selected.has(record.parentDelegationId) && !selected.has(record.id)) {
+        selected.add(record.id);
+        changed = true;
+      }
+    }
+  }
+  return records.filter((record) => selected.has(record.id));
 }
 
 function delegationId(objective: string): string {

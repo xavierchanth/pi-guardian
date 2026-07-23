@@ -10,9 +10,7 @@ import { Key, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import type { WorkspacePort } from "../workspaces/domain.ts";
-import { GitWorktreePort } from "../workspaces/git.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
-import { PreferredWorkspacePort } from "../workspaces/preferred.ts";
 import {
   discoverAgentDefinitions,
   validateAgentTools,
@@ -42,8 +40,14 @@ import {
 } from "./store.ts";
 import { TASK_RESOURCE_TYPES } from "./task.ts";
 import {
+  delegationTree,
+  delegationTreePrefix,
+  finalVisibleAssistantText,
   formatChildDetail,
+  formatUsage,
+  readTranscript,
   summarizeChildActivity,
+  treeUsage,
   type ChildActivitySummary,
 } from "./ui.ts";
 
@@ -79,10 +83,7 @@ export function registerSubagents(
     launcher: new PiChildProcessLauncher(store),
   });
   const capabilities = dependencies.capabilities;
-  const workspace = dependencies.workspace ?? new PreferredWorkspacePort(
-    new JjWorkspacePort(),
-    new GitWorktreePort(join(agentDir, "pi-tai", "workspaces", "git")),
-  );
+  const workspace = dependencies.workspace ?? new JjWorkspacePort();
   capabilities?.register({
     id: "subagents",
     label: "Subagents",
@@ -113,45 +114,7 @@ export function registerSubagents(
 
   const isRootMode = (): boolean => mode === "root";
 
-  const refreshChildWidget = (ctx: ExtensionContext): Promise<void> => {
-    if (ctx.mode !== "tui" || !isRootMode()) return Promise.resolve();
-    if (childWidgetRefresh) return childWidgetRefresh;
-    const generation = childWidgetGeneration;
-    childWidgetRefresh = (async () => {
-      const records = (await orchestrator.children(ctx.sessionManager.getSessionId()))
-        .filter((record) => !isResolvedDelegation(record) || !record.parentCollectedAt);
-      if (records.length === 0 || !isRootMode() || generation !== childWidgetGeneration) {
-        ctx.ui.setWidget(CHILD_WIDGET_KEY, undefined);
-        return;
-      }
-      const summaries = await Promise.all(records.map(summarizeChildActivity));
-      if (!isRootMode() || generation !== childWidgetGeneration) return;
-      ctx.ui.setWidget(
-        CHILD_WIDGET_KEY,
-        (_tui, theme) => ({
-          render(width: number) {
-            return summaries.flatMap(({ record, activity }) => [
-              truncateToWidth(
-                `${theme.fg("accent", "subagent")} · ${theme.fg("muted", record.agent.name)} · ${singleDisplayLine(record.task.objective)}`,
-                width,
-                "…",
-              ),
-              truncateToWidth(
-                `  ${theme.fg(childPhaseColor(record), record.execution.phase)} · ${theme.fg("dim", singleDisplayLine(activity))}`,
-                width,
-                "…",
-              ),
-            ]);
-          },
-          invalidate() {},
-        }),
-        { placement: "belowEditor" },
-      );
-    })().catch(() => undefined).finally(() => {
-      childWidgetRefresh = undefined;
-    });
-    return childWidgetRefresh;
-  };
+  const refreshChildWidget = (_ctx: ExtensionContext): Promise<void> => Promise.resolve();
 
   const stopChildWidget = (ctx?: ExtensionContext) => {
     childWidgetGeneration += 1;
@@ -161,16 +124,82 @@ export function registerSubagents(
   };
 
   const startChildWidget = (ctx: ExtensionContext) => {
+    // Child state is intentionally available only in explicit list/inspect/wait views.
     stopChildWidget(ctx);
-    if (ctx.mode !== "tui" || mode !== "root") return;
-    void refreshChildWidget(ctx);
-    childWidgetTimer = setInterval(() => void refreshChildWidget(ctx), CHILD_WIDGET_INTERVAL_MS);
-    childWidgetTimer.unref();
+  };
+
+  const showInlinePane = async (
+    ctx: ExtensionContext,
+    tabs: readonly { label: string; content: string; truncateLines?: boolean }[],
+  ): Promise<void> => {
+    await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+      let tabIndex = 0;
+      let offset = 0;
+      let cachedWidth: number | undefined;
+      let cachedTab: number | undefined;
+      let bodyLines: string[] = [];
+      const viewportRows = () => Math.max(6, Math.min(16, (process.stdout.rows ?? 32) - 12));
+      const rebuild = (width: number) => {
+        if (cachedWidth === width && cachedTab === tabIndex) return;
+        const tab = tabs[tabIndex];
+        bodyLines = tab?.truncateLines
+          ? tab.content.split("\n").map((line) => truncateToWidth(` ${line}`, width, "…"))
+          : new Text(tab?.content ?? "", 1, 0).render(width);
+        cachedWidth = width;
+        cachedTab = tabIndex;
+        offset = Math.min(offset, Math.max(0, bodyLines.length - viewportRows()));
+      };
+      const move = (delta: number) => {
+        const maximum = Math.max(0, bodyLines.length - viewportRows());
+        offset = Math.max(0, Math.min(maximum, offset + delta));
+        tui.requestRender();
+      };
+      return {
+        render(width: number) {
+          rebuild(width);
+          const rows = viewportRows();
+          const maximum = Math.max(0, bodyLines.length - rows);
+          offset = Math.min(offset, maximum);
+          const tabLine = tabs.map((tab, index) => index === tabIndex
+            ? theme.fg("accent", `[${tab.label}]`)
+            : theme.fg("muted", ` ${tab.label} `)).join(" ");
+          const position = bodyLines.length > rows
+            ? `${offset + 1}-${Math.min(bodyLines.length, offset + rows)}/${bodyLines.length}`
+            : `${bodyLines.length} lines`;
+          return [
+            ...new Text(tabLine, 1, 1).render(width),
+            ...bodyLines.slice(offset, offset + rows),
+            ...new Text(theme.fg("dim", `↑/↓ scroll · PgUp/PgDn page · Home/g top · End/G bottom${tabs.length > 1 ? " · ←/→ tabs" : ""} · Esc close · ${position}`), 1, 1).render(width),
+          ];
+        },
+        invalidate() {
+          cachedWidth = undefined;
+          cachedTab = undefined;
+        },
+        handleInput(data: string) {
+          if (matchesKey(data, Key.escape)) return done();
+          if (matchesKey(data, Key.up)) return move(-1);
+          if (matchesKey(data, Key.down)) return move(1);
+          if (matchesKey(data, Key.pageUp)) return move(-viewportRows());
+          if (matchesKey(data, Key.pageDown)) return move(viewportRows());
+          if (matchesKey(data, Key.home) || data === "g") { offset = 0; return tui.requestRender(); }
+          if (matchesKey(data, Key.end) || data === "G") { offset = Math.max(0, bodyLines.length - viewportRows()); return tui.requestRender(); }
+          if (tabs.length > 1 && (matchesKey(data, Key.left) || matchesKey(data, Key.right))) {
+            tabIndex = matchesKey(data, Key.left)
+              ? (tabIndex - 1 + tabs.length) % tabs.length
+              : (tabIndex + 1) % tabs.length;
+            offset = 0;
+            cachedTab = undefined;
+            tui.requestRender();
+          }
+        },
+      };
+    });
   };
 
   const showSubagentView = async (requestedId: string | undefined, ctx: ExtensionContext) => {
-    const records = (await orchestrator.children(ctx.sessionManager.getSessionId()))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const allRecords = await orchestrator.all();
+    const records = delegationTree(allRecords, ctx.sessionManager.getSessionId());
     if (records.length === 0) {
       ctx.ui.notify("No child delegations for this session.", "info");
       return;
@@ -183,32 +212,25 @@ export function registerSubagents(
       return;
     }
     if (!selected && ctx.mode === "tui") {
-      const choices = records.map(
-        (record) => `${record.id} · ${record.agent.name} · ${record.execution.phase} · ${record.task.objective}`,
-      );
+      const choiceWidth = Math.max(24, (process.stdout.columns ?? 80) - 8);
+      const choices = records.map((record) => truncateToWidth(
+        `${delegationTreePrefix(record, allRecords, records)}${record.id} · ${record.agent.name} · ${record.execution.phase} · ${singleDisplayLine(record.task.objective)}`,
+        choiceWidth,
+        "…",
+      ));
       const choice = await ctx.ui.select("Inspect subagent", choices);
       selected = choice ? records[choices.indexOf(choice)] : undefined;
     }
-    selected ??= records[0];
+    if (!selected && ctx.mode !== "tui") selected = records[0];
     if (!selected) return;
-    const detail = formatChildDetail(await summarizeChildActivity(selected));
+    const transcript = selected.childLogPath ? await readTranscript(selected.childLogPath) : [];
+    const usage = await treeUsage(selected, allRecords);
+    const detail = `${formatChildDetail(await summarizeChildActivity(selected))}\n\nTREE USAGE\n${formatUsage(usage)}${transcript.length ? `\n\nTHREAD\n${transcript.map((entry) => `${entry.kind.toUpperCase()}\n${entry.text}`).join("\n\n")}` : ""}`;
     if (ctx.mode !== "tui") {
       ctx.ui.notify(detail, "info");
       return;
     }
-    await ctx.ui.custom<void>((_tui, _theme, _keybindings, done) => {
-      const text = new Text(`${detail}\n\nEsc, Enter, or q to close`, 1, 1);
-      return {
-        render: (width: number) => text.render(width),
-        invalidate: () => text.invalidate(),
-        handleInput(data: string) {
-          if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data === "q") done();
-        },
-      };
-    }, {
-      overlay: true,
-      overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center", margin: 1 },
-    });
+    await showInlinePane(ctx, [{ label: `Inspect · ${selected.agent.name} · ${selected.id}`, content: detail }]);
   };
 
   const availableToolNames = () => new Set(pi.getAllTools().map((tool) => tool.name));
@@ -380,6 +402,30 @@ export function registerSubagents(
     };
   });
 
+  let settledAssistantText: string | undefined;
+  pi.on("agent_end", (event) => {
+    if (mode === "child") settledAssistantText = finalVisibleAssistantText(event.messages);
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    if ((mode === "root" || mode === "child") && currentAgent?.tools.includes("subagent")) {
+      const outstanding = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+        .filter((record) => !isResolvedDelegation(record) || !record.parentCollectedAt);
+      if (outstanding.length > 0) {
+        pi.sendUserMessage(
+          `You still own ${outstanding.length} unresolved or uncollected direct child result(s). Continue the orchestration loop now: handle questions and call wait_for_children repeatedly until all are resolved and collected.`,
+        );
+        return;
+      }
+    }
+    if (mode !== "child" || !childDelegation) return;
+    childDelegation = await orchestrator.settle(
+      childDelegation.id,
+      (settledAssistantText ?? "Child agent settled without an explicit report.").slice(0, 16_000),
+    );
+    if (isResolvedDelegation(childDelegation)) ctx.shutdown();
+  });
+
   pi.on("session_shutdown", async (event, ctx) => {
     stopChildWidget(ctx);
     if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
@@ -392,20 +438,26 @@ export function registerSubagents(
     handler: async (args, ctx) => {
       const command = parseSubagentsCommand(args);
       if (!command) {
-        ctx.ui.notify("Usage: /subagents [on|off|force-off|status|list [delegation-id]]", "warning");
+        ctx.ui.notify("Usage: /subagents [on|off|force-off|list|inspect [delegation-id]]", "warning");
         return;
       }
       if (command.action === "list") {
-        await showSubagentView(command.delegationId, ctx);
+        const all = await orchestrator.all();
+        const tree = delegationTree(all, ctx.sessionManager.getSessionId());
+        const active = tree.filter((record) => !isResolvedDelegation(record));
+        const inactive = tree.filter(isResolvedDelegation);
+        const render = (records: readonly DelegationRecord[]) => records.length
+          ? records.map((record) => `${delegationTreePrefix(record, all, records)}${record.agent.name} · ${record.execution.phase} · ${singleDisplayLine(record.task.objective)}`).join("\n")
+          : "No delegations.";
+        if (ctx.mode !== "tui") ctx.ui.notify(`Active (${active.length})\n${render(active)}\n\nInactive (${inactive.length})\n${render(inactive)}`, "info");
+        else await showInlinePane(ctx, [
+          { label: `Active (${active.length})`, content: render(active), truncateLines: true },
+          { label: `Inactive (${inactive.length})`, content: render(inactive), truncateLines: true },
+        ]);
         return;
       }
-      if (command.action === "status") {
-        const children = await orchestrator.children(ctx.sessionManager.getSessionId());
-        const unresolved = children.filter((record) => !isResolvedDelegation(record)).length;
-        ctx.ui.notify(
-          `Subagents: ${mode}${currentAgent ? ` (${currentAgent.name})` : ""}; ${children.length} children, ${unresolved} unresolved.`,
-          "info",
-        );
+      if (command.action === "inspect") {
+        await showSubagentView(command.delegationId, ctx);
         return;
       }
       if (command.action === "off" || command.action === "force-off") {
@@ -448,7 +500,8 @@ export function registerSubagents(
     promptSnippet: "Delegate a self-contained task packet to an allowed specialized child",
     promptGuidelines: [
       "Use subagent only with a self-contained task packet; children share cwd but receive no conversation history.",
-      "After spawning children, continue independent parent work when useful, but do not duplicate their assignments; use wait_for_children or child_status when you need their results.",
+      "Spawning is not completion. Continue independent parent work when useful, but do not duplicate child assignments.",
+      "Before completing the delegated work, repeatedly call wait_for_children and handle each returned question or result until every direct child is resolved and every terminal result is collected; child_status does not collect results.",
     ],
     parameters: Type.Object({
       agent: Type.String({ description: "Allowed child agent name" }),
@@ -477,76 +530,90 @@ export function registerSubagents(
   });
 
   pi.registerTool({
-    name: "planner_workspace",
-    label: "Planner Workspace",
-    description: "Create an isolated preferred workspace (JJ before Git) and launch one planner there. Only the root thinker may call this tool.",
-    promptSnippet: "Launch a planner for a substantial subtask in an isolated workspace",
+    name: "workspace_subagent",
+    label: "Workspace Subagent",
+    description: "Create an isolated JJ workspace and launch a planner or worker there. Only the root thinker may call this tool.",
+    promptSnippet: "Launch a planner or worker in an isolated JJ workspace",
     promptGuidelines: [
-      "Use planner_workspace only from the root thinker, only for a substantial self-contained planner task, and only when workspace isolation is useful.",
-      "planner_workspace may branch from source @- while source @ contains ongoing work; it never moves or rewrites source files during creation and never falls back from a partially failed JJ mutation to Git.",
+      "Use workspace_subagent only from the root thinker and choose planner for decomposition or worker for bounded implementation.",
+      "Launching a workspace child is not completion. Repeatedly call wait_for_children until its terminal result is collected, then call integrate_workspace.",
+      "workspace_subagent branches from source @- while source @ may contain ongoing work; creation does not move or rewrite source files.",
     ],
     parameters: Type.Object({
+      agent: StringEnum(["planner", "worker"] as const),
       name: Type.Optional(Type.String({ description: "Optional lowercase workspace name" })),
       task: taskPacketSchema(),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const caller = requireWorkspaceThinker(currentAgent);
       const effectiveCatalog = loadCatalog(ctx);
-      const planner = effectiveCatalog.byName.get("planner");
-      if (!planner) throw new Error("The agent catalog has no planner definition.");
-      if (!caller.allowedChildren.includes(planner.name)) {
-        throw new Error(`Agent "${caller.name}" cannot create "${planner.name}".`);
-      }
-      validateAgentTools(planner, availableToolNames());
-      const name = plannerWorkspaceName(params.name, params.task.objective);
-      const attachment = await workspace.create({
-        cwd: ctx.cwd,
-        name,
-        purpose: "delegation",
-      });
+      const target = effectiveCatalog.byName.get(params.agent);
+      if (!target) throw new Error(`The agent catalog has no ${params.agent} definition.`);
+      if (!caller.allowedChildren.includes(target.name)) throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
+      validateAgentTools(target, availableToolNames());
+      const name = workspaceName(params.name, params.task.objective, params.agent);
+      const attachment = await workspace.create({ cwd: ctx.cwd, name, purpose: "delegation" });
       const record = await orchestrator.spawnChild({
         task: params.task,
-        agent: planner,
+        agent: target,
         caller,
         parentCwd: attachment.path,
         parentSessionId: ctx.sessionManager.getSessionId(),
         workspace: attachment,
       });
       await refreshChildWidget(ctx);
+      return result(`Spawned ${target.name} ${record.id} in JJ workspace ${attachment.path}.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "integrate_workspace",
+    label: "Integrate Workspace",
+    description: "Update stale, detach and remove a completed child workspace, strip all empty delegated revisions, and insert the remaining JJ changes before source @.",
+    promptGuidelines: [
+      "After integrate_workspace, inspect and describe every change ID listed as undescribed before presenting the delegated work as complete.",
+      "integrate_workspace permits a dirty source @ and preserves its Change ID and file content, while its commit ID and parent may be rewritten.",
+    ],
+    parameters: Type.Object({ delegationId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      requireDelegatedWorkspace(child);
+      const record = await orchestrator.integrateWorkspace(child.id, workspace);
+      await refreshChildWidget(ctx);
+      const state = record.workspace?.phase === "integrated" ? record.workspace : undefined;
+      const undescribed = state?.result.undescribedChangeIds ?? [];
       return result(
-        `Spawned planner ${record.id} in ${attachment.backend} workspace ${attachment.path}.`,
+        `Integrated and removed workspace for ${record.id}. ${undescribed.length ? `Describe these changes before completion: ${undescribed.join(", ")}.` : "All retained changes are described."}`,
         record,
       );
     },
   });
 
   pi.registerTool({
-    name: "integrate_planner_workspace",
-    label: "Integrate Planner Workspace",
-    description: "Integrate one completed direct planner workspace into the thinker workspace. Any uncertainty or conflict stops for user intervention.",
-    parameters: Type.Object({ delegationId: Type.String() }),
+    name: "describe_integrated_changes",
+    label: "Describe Integrated Changes",
+    description: "Apply thinker-chosen descriptions to retained changes from one integrated workspace and verify none of the supplied revisions remain undescribed.",
+    promptGuidelines: [
+      "After integrate_workspace reports undescribed changes, inspect them and call describe_integrated_changes with meaningful Conventional Commit descriptions before completion.",
+    ],
+    parameters: Type.Object({
+      delegationId: Type.String(),
+      changes: Type.Array(Type.Object({
+        changeId: Type.String(),
+        description: Type.String({ minLength: 1, maxLength: 1_000 }),
+      }), { minItems: 1 }),
+    }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireWorkspaceThinker(currentAgent);
       const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
-      requirePlannerWorkspace(child);
-      const record = await orchestrator.integrateWorkspace(child.id, workspace);
-      await refreshChildWidget(ctx);
-      return result(`Integrated planner workspace for ${record.id}; cleanup remains explicit.`, record);
-    },
-  });
-
-  pi.registerTool({
-    name: "cleanup_planner_workspace",
-    label: "Cleanup Planner Workspace",
-    description: "Forget and remove a planner workspace only after its integration was recorded as clean.",
-    parameters: Type.Object({ delegationId: Type.String() }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireWorkspaceThinker(currentAgent);
-      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
-      requirePlannerWorkspace(child);
-      const record = await orchestrator.cleanupWorkspace(child.id, workspace);
-      await refreshChildWidget(ctx);
-      return result(`Cleaned planner workspace for ${record.id}.`, record);
+      requireDelegatedWorkspace(child);
+      const record = await orchestrator.describeWorkspaceChanges(child.id, workspace, params.changes);
+      const remaining = record.workspace?.phase === "integrated" ? record.workspace.result.undescribedChangeIds : [];
+      return result(
+        remaining.length ? `Descriptions applied; still undescribed: ${remaining.join(", ")}.` : "All retained integrated changes are described.",
+        record,
+      );
     },
   });
 
@@ -570,23 +637,88 @@ export function registerSubagents(
   pi.registerTool({
     name: "wait_for_children",
     label: "Wait for Children",
-    description: "Wait for the next direct-child completion or question, or for all selected children.",
-    promptSnippet: "Wait without model churn for the next child completion/question or all children",
+    description: "Wait-any for the next direct-child completion or question; call repeatedly to collect all delegated results.",
+    promptSnippet: "Wait for one child event, then repeat until all direct-child results are collected",
+    promptGuidelines: [
+      "wait_for_children is wait-any: each call returns after one selected direct child completes or asks a question, not after all children finish.",
+      "Handle a returned question, then call wait_for_children again. Keep calling until no owned direct child is unresolved and no terminal result is uncollected.",
+      "Do not report completion, end delegated user-facing work, or call report_to_parent while a child result remains unresolved or uncollected.",
+    ],
     parameters: Type.Object({
       delegationIds: Type.Optional(Type.Array(Type.String())),
-      until: Type.Optional(StringEnum(["next", "all"] as const)),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       const records = await orchestrator.wait(ctx.sessionManager.getSessionId(), {
         signal,
         ...(params.delegationIds ? { childIds: params.delegationIds } : {}),
-        until: params.until ?? "next",
-        onProgress(current) {
-          onUpdate?.(result(`Waiting: ${current.filter(isResolvedDelegation).length}/${current.length} resolved.`, current));
+        async onProgress(current) {
+          const all = await orchestrator.all();
+          const directIds = new Set(current.map((record) => record.id));
+          const byId = new Map(all.map((candidate) => [candidate.id, candidate]));
+          const visible = delegationTree(all, ctx.sessionManager.getSessionId()).filter((record) => {
+            let root = record;
+            while (root.parentDelegationId && byId.has(root.parentDelegationId)) root = byId.get(root.parentDelegationId)!;
+            return directIds.has(root.id) && !isResolvedDelegation(record);
+          });
+          const lines = visible.map((record) => `${delegationTreePrefix(record, all, visible)}${record.agent.name} · ${record.execution.phase} · ${singleDisplayLine(record.task.objective)}`);
+          const text = `Waiting: ${current.filter(isResolvedDelegation).length}/${current.length} direct children resolved.\n${lines.join("\n")}`;
+          onUpdate?.(result(text, { nodes: visible.map((record) => ({ id: record.id, parentDelegationId: record.parentDelegationId, phase: record.execution.phase })) }));
         },
       });
-      return result(formatRecords(records), records);
+      if (records.length !== 1 || records[0]?.execution.phase === "awaiting_parent" || records[0]?.usageAttributedAt) {
+        return result(formatRecords(records), records.map(compactRecord));
+      }
+      const all = await orchestrator.all();
+      const usage = await treeUsage(records[0], all);
+      const attributed = await orchestrator.attributeUsage(records[0].id);
+      return { ...result(`${formatRecords([attributed])}\nTree usage: ${formatUsage(usage)}`, [compactRecord(attributed)]), usage };
+    },
+    renderResult(toolResult) {
+      const text = toolResult.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      const details = toolResult.details as { nodes?: unknown } | undefined;
+      if (!Array.isArray(details?.nodes)) return new Text(text, 0, 0);
+      return {
+        render(width: number) {
+          return text.split("\n").map((line) => truncateToWidth(line, width, "…"));
+        },
+        invalidate() {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "collect_status",
+    label: "Collect Status",
+    description: "Request fresh non-terminal reports from every unresolved descendant and aggregate replies for up to 30 seconds.",
+    promptSnippet: "Collect a fresh status tree without stopping child work",
+    promptGuidelines: [
+      "Use collect_status for a fresh recursive progress snapshot; it does not collect terminal results or replace wait_for_children.",
+      "After collect_status, return to wait_for_children whenever owned children remain outstanding.",
+    ],
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      const collected = await orchestrator.collectStatus(ctx.sessionManager.getSessionId(), 30_000);
+      const all = await orchestrator.all();
+      const selected = delegationTree(all, ctx.sessionManager.getSessionId()).filter((record) =>
+        collected.records.some((candidate) => candidate.id === record.id),
+      );
+      const text = selected.length === 0 ? "No unresolved descendants." : selected.map((record) => {
+        const report = record.statusReports?.find((candidate) => candidate.requestId === collected.requestId);
+        const state = isResolvedDelegation(record)
+          ? `completed while collecting (${record.execution.phase})`
+          : report?.summary ?? "timed out";
+        return `${delegationTreePrefix(record, all, selected)}${record.agent.name} · ${record.id} · ${state}`;
+      }).join("\n");
+      return result(`${text}${collected.timedOutIds.length ? `\nTimed out after 30s: ${collected.timedOutIds.join(", ")}` : ""}`, {
+        requestId: collected.requestId,
+        timedOutIds: collected.timedOutIds,
+        records: selected.map(compactRecord),
+      });
     },
   });
 
@@ -636,6 +768,28 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "report_status",
+    label: "Report Status",
+    description: "Submit a non-terminal status response and continue the current delegated task.",
+    promptGuidelines: [
+      "Use report_status only for the request ID supplied by a status request, then resume prior work and return to wait_for_children if children remain outstanding.",
+    ],
+    parameters: Type.Object({
+      requestId: Type.String({ minLength: 1 }),
+      summary: Type.String({ minLength: 1, maxLength: 4_000 }),
+      completed: Type.Optional(Type.Array(Type.String({ maxLength: 2_000 }))),
+      current: Type.Optional(Type.String({ maxLength: 2_000 })),
+      remaining: Type.Optional(Type.Array(Type.String({ maxLength: 2_000 }))),
+      blockers: Type.Optional(Type.Array(Type.String({ maxLength: 2_000 }))),
+    }),
+    async execute(_id, params) {
+      if (mode !== "child" || !childDelegation) throw new Error("report_status requires a delegated child.");
+      childDelegation = await orchestrator.reportStatus(childDelegation.id, params);
+      return result(`Reported status for ${params.requestId}; continue the prior task.`, { requestId: params.requestId });
+    },
+  });
+
+  pi.registerTool({
     name: "ask_parent",
     label: "Ask Parent",
     description: "Pause for a correlated parent decision when configured uncertainty handling is ask-parent.",
@@ -662,7 +816,10 @@ export function registerSubagents(
   pi.registerTool({
     name: "report_to_parent",
     label: "Report to Parent",
-    description: "Resolve the delegated task, wake its direct parent, and terminate the child run.",
+    description: "Resolve the delegated task, wake its direct parent, and terminate the child run after all child results are collected.",
+    promptGuidelines: [
+      "Before report_to_parent, repeatedly call wait_for_children, handle questions, and consume every direct-child terminal result; delegation or child_status alone is not completion.",
+    ],
     parameters: Type.Object({
       outcome: StringEnum(["completed", "blocked", "failed", "cancelled"] as const),
       summary: Type.String(),
@@ -672,9 +829,9 @@ export function registerSubagents(
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       if (mode !== "child" || !childDelegation) throw new Error("report_to_parent requires a delegated child.");
-      const unresolved = (await orchestrator.children(ctx.sessionManager.getSessionId()))
-        .filter((record) => !isResolvedDelegation(record));
-      if (unresolved.length > 0) throw new Error(`Resolve ${unresolved.length} child delegation(s) before reporting.`);
+      const outstanding = (await orchestrator.children(ctx.sessionManager.getSessionId()))
+        .filter((record) => !isResolvedDelegation(record) || !record.parentCollectedAt);
+      if (outstanding.length > 0) throw new Error(`Resolve and collect ${outstanding.length} child delegation(s) before reporting.`);
       const record = await orchestrator.report(childDelegation.id, params);
       childDelegation = record;
       ctx.shutdown();
@@ -729,19 +886,19 @@ function requireOrchestrator(agent: AgentDefinition | undefined): AgentDefinitio
 }
 
 function requireWorkspaceThinker(agent: AgentDefinition | undefined): AgentDefinition {
-  if (!agent?.root || !agent.tools.includes("planner_workspace")) {
-    throw new Error("Only the root thinker can manage planner workspaces.");
+  if (!agent?.root || !agent.tools.includes("workspace_subagent")) {
+    throw new Error("Only the root thinker can manage delegated workspaces.");
   }
   return agent;
 }
 
-function requirePlannerWorkspace(record: DelegationRecord): void {
-  if (record.agent.name !== "planner" || !record.workspace) {
-    throw new Error(`Delegation ${record.id} is not an isolated planner workspace.`);
+function requireDelegatedWorkspace(record: DelegationRecord): void {
+  if (!record.workspace || (record.agent.name !== "planner" && record.agent.name !== "worker")) {
+    throw new Error(`Delegation ${record.id} is not an isolated planner or worker workspace.`);
   }
 }
 
-function plannerWorkspaceName(requested: string | undefined, objective: string): string {
+function workspaceName(requested: string | undefined, objective: string, agent: "planner" | "worker"): string {
   if (requested) {
     const normalized = requested.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(normalized)) {
@@ -753,7 +910,7 @@ function plannerWorkspaceName(requested: string | undefined, objective: string):
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 24) || "task";
-  return `planner-${slug}-${randomUUID().slice(0, 8)}`;
+  return `${agent}-${slug}-${randomUUID().slice(0, 8)}`;
 }
 
 async function requireDirectChild(
@@ -781,6 +938,17 @@ function formatRecords(records: readonly DelegationRecord[]): string {
 
 function result(text: string, details: unknown) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function compactRecord(record: DelegationRecord) {
+  return {
+    id: record.id,
+    agent: record.agent.name,
+    objective: record.task.objective,
+    phase: record.execution.phase,
+    ...(record.parentDelegationId ? { parentDelegationId: record.parentDelegationId } : {}),
+    ...(childReport(record) ? { report: childReport(record) } : {}),
+  };
 }
 
 function singleDisplayLine(value: string): string {

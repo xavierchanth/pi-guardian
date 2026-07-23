@@ -61,13 +61,14 @@ const ORCHESTRATION_TOOLS = new Set([
   "message_child",
   "wait_for_children",
   "child_status",
+  "collect_status",
   "respond_to_child",
   "abandon_child",
-  "planner_workspace",
-  "integrate_planner_workspace",
-  "cleanup_planner_workspace",
+  "workspace_subagent",
+  "integrate_workspace",
+  "describe_integrated_changes",
 ]);
-const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "ask_parent"]);
+const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "report_status", "ask_parent"]);
 
 export function discoverAgentDefinitions(options: DiscoverAgentDefinitionsOptions): AgentCatalog {
   const packagedDir = options.packagedDir

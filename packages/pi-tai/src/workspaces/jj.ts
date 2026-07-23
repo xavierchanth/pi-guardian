@@ -4,6 +4,7 @@ import {
   type WorkspaceAbandonResult,
   type WorkspaceAttachment,
   type WorkspaceAvailability,
+  type WorkspaceChangeDescription,
   type WorkspaceCreateRequest,
   type WorkspaceIntegrationResult,
   type WorkspacePort,
@@ -36,7 +37,7 @@ export class JjWorkspacePort implements WorkspacePort {
       purpose: request.purpose,
       repoRoot: created.repoRoot,
       sourceWorkspace: created.parentWorkspace,
-      sourceChangeId: created.parentChangeId,
+      sourcePath: created.parentWorkspacePath,
       baseChangeId: created.baseChangeId,
       name: created.childWorkspace,
       path: created.childWorkspacePath,
@@ -46,18 +47,15 @@ export class JjWorkspacePort implements WorkspacePort {
 
   async captureTip(workspace: WorkspaceAttachment): Promise<WorkspaceTip> {
     const jj = requireJjWorkspace(workspace);
-    return { id: await this.service.currentChangeId(jj.path), clean: true };
+    return { id: await this.service.currentChangeId(jj.path) };
   }
 
   async integrate(workspace: WorkspaceAttachment): Promise<WorkspaceIntegrationResult> {
     const jj = requireJjWorkspace(workspace);
-    if (!jj.sourceChangeId) {
-      throw new Error("Planner workspace integration requires the recorded source change identity.");
-    }
     return this.service.integrateChildWorkspace({
       repoRoot: jj.repoRoot,
       parentWorkspace: jj.sourceWorkspace,
-      parentChangeId: jj.sourceChangeId,
+      parentWorkspacePath: jj.sourcePath,
       childWorkspace: jj.name,
       childWorkspacePath: jj.path,
       baseChangeId: jj.baseChangeId,
@@ -65,23 +63,14 @@ export class JjWorkspacePort implements WorkspacePort {
     });
   }
 
-  async finalize(workspace: WorkspaceAttachment): Promise<void> {
+  async describe(workspace: WorkspaceAttachment, changes: readonly WorkspaceChangeDescription[]): Promise<string[]> {
     const jj = requireJjWorkspace(workspace);
-    await this.service.finalizeChildWorkspace({
-      repoRoot: jj.repoRoot,
-      parentWorkspace: jj.sourceWorkspace,
-      childWorkspace: jj.name,
-      childWorkspacePath: jj.path,
-    });
+    return this.service.describeChanges(jj.sourcePath, changes);
   }
 
   async abandon(workspace: WorkspaceAttachment): Promise<WorkspaceAbandonResult> {
     const jj = requireJjWorkspace(workspace);
-    const removed = await this.service.abandonChildWorkspace({
-      repoRoot: jj.repoRoot,
-      childWorkspace: jj.name,
-      childWorkspacePath: jj.path,
-    });
-    return removed ? { removed: true } : { removed: false, recoveryPath: jj.path };
+    await this.service.abandonChildWorkspace({ repoRoot: jj.repoRoot, childWorkspace: jj.name, childWorkspacePath: jj.path });
+    return { removed: true };
   }
 }
