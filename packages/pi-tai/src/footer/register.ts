@@ -2,12 +2,10 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WorkContextStore } from "../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
-import type { AgentRoleState } from "../subagents/state.ts";
 
 export function registerFooter(
   pi: ExtensionAPI,
   workContext: WorkContextStore,
-  agentRole?: AgentRoleState,
 ): void {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -15,7 +13,7 @@ export function registerFooter(
     ctx.ui.setFooter((_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
-        return renderFooterRows(createSnapshot(pi, ctx, workContext, agentRole), width).map(
+        return renderFooterRows(createSnapshot(pi, ctx, workContext), width).map(
           (row) =>
             theme.fg(row.leftColor, row.left) +
             theme.fg("text", row.padding + row.right),
@@ -29,7 +27,6 @@ function createSnapshot(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   workContext: WorkContextStore,
-  agentRole?: AgentRoleState,
 ): FooterSnapshot {
   const usage: FooterUsage = {
     input: 0,
@@ -70,6 +67,5 @@ function createSnapshot(
     model: model?.id ?? "no-model",
     reasoning: model?.reasoning ?? false,
     thinkingLevel: pi.getThinkingLevel(),
-    agentRole: agentRole?.current() ?? "standalone",
   };
 }

@@ -161,4 +161,4 @@ Configure ordered profiles in global or trusted-project `pi-tai.json`:
 }
 ```
 
-A configured array replaces the lower-scope/default array and preserves cycle order. Shift+Tab cycles it; `/profile [name]` selects a profile; `/effort [level]` changes effort independently. Model selection must succeed before a profile changes effort. The footer shows effective role, actual model ID, and applied effort, for example `Thinker · gpt-5.6-sol · high`.
+A configured array replaces the lower-scope/default array and preserves cycle order. Shift+Tab cycles it; `/profile [name]` selects a profile; `/effort [level]` changes effort independently. Model selection must succeed before a profile changes effort. The footer shows the actual model ID and applied effort, for example `gpt-5.6-sol · high`. Agent roles are not presented as model profiles.

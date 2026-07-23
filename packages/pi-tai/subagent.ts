@@ -1,7 +1,6 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
 import { registerSubagents } from "./src/subagents/register.ts";
-import { createAgentRoleState } from "./src/subagents/state.ts";
 import { createPiSessionWorkContextStore } from "./src/work-context/persistence.ts";
 import { registerWorkContext } from "./src/work-context/register.ts";
 
@@ -10,7 +9,6 @@ export default function registerPiTaiSubagentRuntime(pi: ExtensionAPI): void {
   registerWorkContext(pi, workContext);
   registerSubagents(pi, {
     agentDir: getAgentDir(),
-    roleState: createAgentRoleState(),
   });
   registerApprovalGuardian(pi, { workContext: () => workContext.current() });
 }

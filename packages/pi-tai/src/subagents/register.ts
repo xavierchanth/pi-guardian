@@ -35,7 +35,6 @@ import {
   type DelegationStore,
 } from "./store.ts";
 import { TASK_RESOURCE_TYPES } from "./task.ts";
-import type { AgentRoleState } from "./state.ts";
 
 const ROLE_ENTRY = "pi-tai-subagent-role";
 const CHILD_ENV = "PI_TAI_DELEGATION_ID";
@@ -51,7 +50,6 @@ export interface SubagentDependencies {
   childDelegationId?: string;
   capabilities?: SessionCapabilityController;
   agentDir?: string;
-  roleState?: AgentRoleState;
 }
 
 export function registerSubagents(
@@ -67,7 +65,6 @@ export function registerSubagents(
     launcher: new PiChildProcessLauncher(store),
   });
   const capabilities = dependencies.capabilities;
-  const roleState = dependencies.roleState;
   capabilities?.register({
     id: "subagents",
     label: "Subagents",
@@ -139,7 +136,6 @@ export function registerSubagents(
     }
     if (!await applyAgentModel(agent, ctx)) return false;
     currentAgent = agent;
-    roleState?.set(agent.name);
     applyTools(agent);
     return true;
   };
@@ -160,7 +156,6 @@ export function registerSubagents(
       if (!delegationId) throw new Error("Child session is missing its durable delegation identity.");
       childDelegation = await orchestrator.child(delegationId);
       currentAgent = definitionFromSnapshot(childDelegation.agent);
-      roleState?.set(currentAgent.name);
       verifyChildEnvironment(childDelegation);
       if (reconstructSubagentState(ctx.sessionManager.getEntries()).mode !== "child") {
         state = { mode: "child", agentName: currentAgent.name, delegationId };
@@ -179,7 +174,6 @@ export function registerSubagents(
         : effectiveCatalog.root;
       if (!root || !root.root || !await activateAgent(root, ctx)) {
         mode = "standalone";
-        roleState?.set();
         state = { mode: "standalone" };
         capabilities?.disable("subagents", "user");
         pi.appendEntry(ROLE_ENTRY, state);
@@ -187,7 +181,6 @@ export function registerSubagents(
       return;
     }
     currentAgent = undefined;
-    roleState?.set();
     applyTools();
   });
 
@@ -311,7 +304,6 @@ export function registerSubagents(
       }
       mode = "standalone";
       currentAgent = undefined;
-      roleState?.set();
       state = { mode };
       capabilities?.disable("subagents", "user");
       pi.appendEntry(ROLE_ENTRY, state);

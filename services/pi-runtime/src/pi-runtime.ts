@@ -31,7 +31,6 @@ import type {
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
-import { createAgentRoleState } from "../../../packages/pi-tai/src/subagents/state.ts";
 import { createPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
@@ -279,7 +278,6 @@ export class PiSdkRuntimePort implements RuntimePort {
         notificationSender: () => {},
         capabilities,
         agentDir,
-        agentRole: createAgentRoleState(),
       };
     });
     const factory: CreateAgentSessionRuntimeFactory = async (options) => {
