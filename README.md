@@ -68,7 +68,7 @@ Use `/continue` after interrupting the agent. It expands to the visible prompt `
 
 ### Contextual external editor
 
-In the interactive TUI, Ctrl-G opens the external editor with a non-submitted preview of the last assistant message followed by an empty `<response>` block. Only text inside that block returns to Pi; if the closing tag is removed, the response continues to end-of-file. Removing the opening tag safely leaves the original draft unchanged. Existing editor text is placed inside the response block, while sessions without an assistant message retain Pi's normal plain-document behavior.
+In the interactive TUI, Ctrl-G opens the external editor with a non-submitted preview of the last assistant message followed by an empty `<response>` block. Only text inside that block returns to Pi; if the closing tag is removed, the response continues to end-of-file. If no opening response tag is detected, the entire edited document returns to Pi as the response. Existing editor text is placed inside the response block, while sessions without an assistant message retain Pi's normal plain-document behavior.
 
 When the effective editor command launches NeoVim (`nvim`, an executable path, or an `env`-wrapped command), Pi-Tai adds a startup command that places the cursor on the response line. Other editors receive no extra arguments.
 
@@ -80,7 +80,7 @@ After the first meaningful request settles, Pi-Tai names an unnamed session with
 
 Workspace capabilities are disabled by default. In a standalone session, `/cap:jj-workspaces new <name>` or `/cap:git-worktrees new <name>` creates an isolated checkout, forks the complete Pi session, and continues the same logical agent there as a standalone successor session. `on`, `off`, `status`, and `create-only` are also available under each namespace.
 
-The shared model profiles are always available, including when subagents are disabled. Use `/model:thinker`, `/model:worker`, or `/model:mechanical` to switch the current session directly to that profile's model and thinking effort.
+The shared model profiles are always available, including when subagents are disabled. Use `/model:designer`, `/model:thinker`, `/model:worker`, or `/model:mechanical` to switch the current session directly to that profile's model and thinking effort. The built-in `designer` profile uses `opencode-go/kimi-k3` at its supported `max` effort for open-ended design work.
 
 Subagents are disabled by default. Run `/cap:subagents on` to make the current session a parent, `/cap:subagents status` to inspect it, or `/cap:subagents off` after every child is resolved. New and ordinary forked sessions start standalone.
 
@@ -88,7 +88,7 @@ A parent delegates workspace work with `spawn_child`; direct `jj workspace add`,
 
 - an independent persistent Pi session and detached process;
 - a dedicated JJ workspace always rooted at the parent's `@-` change—without requiring or modifying parent `@`—when JJ is available, otherwise a dedicated Git branch/worktree;
-- one shared model profile (`thinker`, `worker`, or `mechanical`);
+- one shared model profile (`designer`, `thinker`, `worker`, or `mechanical`);
 - only `report_to_parent`, with no ability to delegate further.
 
 Parents receive `spawn_child`, `message_child`, `wait_for_children`, `child_status`, `integrate_child`, and `abandon_child`. The child exclusively owns its delegated workspace and performs all repository reading, editing, testing, and VCS work there. While a child is active, parent work tools are blocked: the parent can message, inspect status through child controls, wait for, or abandon the child, but it cannot touch or duplicate the child's work in the main thread. Persistent RPC children receive steering or follow-up instructions through private FIFOs, and `wait_for_children` waits without parent model calls until its snapshot reports. JJ child stacks preserve all descendants through subtree rebase; Git children report a clean committed branch and preserve commits through reviewed non-squash integration. Dirty Git worktrees are retained for recovery rather than force-removed.

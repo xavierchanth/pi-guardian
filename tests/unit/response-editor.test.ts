@@ -17,7 +17,7 @@ test("response document shows a fenced preview and a blank response block", () =
   assert.equal(
     formatResponseDocument("Last answer"),
     [
-      "<!-- pi-tai: preview only; content outside the response block is never submitted -->",
+      "<!-- pi-tai: only the response block is submitted; without an opening response tag, the whole document is submitted -->",
       "## Last agent message (preview only)",
       "",
       "<agent-message>",
@@ -61,9 +61,10 @@ test("response extraction uses the shipped final closing tag", () => {
   );
 });
 
-test("response extraction refuses documents without an opening tag", () => {
+test("response extraction returns the whole document without an opening tag", () => {
   assert.deepEqual(extractResponse("preview only\nuser text"), {
-    kind: "missing-opening-tag",
+    kind: "response",
+    text: "preview only\nuser text",
   });
 });
 

@@ -62,6 +62,7 @@ lines.on("line", (line) => {
       !names.has("cap:subagents") ||
       !names.has("cap:jj-workspaces") ||
       !names.has("cap:git-worktrees") ||
+      !names.has("model:designer") ||
       !names.has("model:thinker") ||
       !names.has("model:worker") ||
       !names.has("model:mechanical") ||

@@ -45,16 +45,17 @@ const PARENT_TOOLS = [
   "abandon_child",
 ];
 
-test("default semantic model preferences are unique thinker, worker, and mechanical choices", () => {
+test("default semantic model preferences include unique designer, thinker, worker, and mechanical choices", () => {
   assert.deepEqual(DEFAULT_MODEL_PREFERENCES.map((entry) => entry.id), [
+    "designer",
     "thinker",
     "worker",
     "mechanical",
   ]);
-  assert.equal(new Set(DEFAULT_MODEL_PREFERENCES.map((entry) => entry.id)).size, 3);
+  assert.equal(new Set(DEFAULT_MODEL_PREFERENCES.map((entry) => entry.id)).size, 4);
   assert.deepEqual(
     DEFAULT_MODEL_PREFERENCES.map((entry) => `${entry.model}:${entry.effort}`),
-    ["gpt-5.6-sol:high", "gpt-5.6-sol:low", "gpt-5.6-luna:high"],
+    ["kimi-k3:max", "gpt-5.6-sol:high", "gpt-5.6-sol:low", "gpt-5.6-luna:high"],
   );
 });
 
@@ -103,8 +104,8 @@ test("instruction composition skips empty authored files and injects factual rol
   assert.match(parent, /child_workspace_owner="child_exclusive"/);
   assert.match(parent, /parent_work_while_child_active="forbidden"/);
   assert.match(parent, /next_action_after_spawn="wait_for_children"/);
-  assert.match(parent, /id="thinker"/);
-  assert.match(parent, /gpt-5\.6-sol/);
+  assert.match(parent, /id="designer"/);
+  assert.match(parent, /provider="opencode-go" model="kimi-k3" effort="max"/);
 
   const child = composePiTaiInstructions({
     basePrompt: "base",

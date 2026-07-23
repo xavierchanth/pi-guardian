@@ -46,6 +46,7 @@ Child tool:
 
 The semantic model definitions are always-available Pi-Tai profiles, independent of whether subagents are enabled. Each profile registers an exact slash command that switches the current session's model and thinking effort:
 
+- `/model:designer`
 - `/model:thinker`
 - `/model:worker`
 - `/model:mechanical`
@@ -54,6 +55,7 @@ The semantic model definitions are always-available Pi-Tai profiles, independent
 
 | ID | Intended work | Provider/model | Effort |
 | --- | --- | --- | --- |
+| `designer` | Open-ended product, system, and architecture design | `opencode-go/kimi-k3` | max |
 | `thinker` | Investigation, planning, architecture, substantial judgment | `openai-codex/gpt-5.6-sol` | high |
 | `worker` | Planned work requiring trusted engineering judgment | `openai-codex/gpt-5.6-sol` | low |
 | `mechanical` | Explicit repetitive transformations | `openai-codex/gpt-5.6-luna` | high |

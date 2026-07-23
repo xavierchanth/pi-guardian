@@ -86,13 +86,6 @@ export class ResponseEditor extends CustomEditor {
       }
 
       const extraction = extractResponse(editedDocument);
-      if (extraction.kind === "missing-opening-tag") {
-        this.options.notify(
-          "Response was not imported because the <response> opening tag was removed.",
-          "warning",
-        );
-        return;
-      }
       this.setText(extraction.text);
     } catch (error) {
       this.options.notify(

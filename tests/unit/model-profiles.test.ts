@@ -54,6 +54,7 @@ test("subagents reuse the always-available model profile definitions", () => {
   assert.strictEqual(DEFAULT_MODEL_PREFERENCES, MODEL_PROFILES);
   assert.strictEqual(MODEL_PREFERENCE_IDS, MODEL_PROFILE_IDS);
   assert.deepEqual(MODEL_PROFILES.map(({ id, provider, model, effort }) => ({ id, provider, model, effort })), [
+    { id: "designer", provider: "opencode-go", model: "kimi-k3", effort: "max" },
     { id: "thinker", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
     { id: "worker", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
     { id: "mechanical", provider: "openai-codex", model: "gpt-5.6-luna", effort: "high" },
@@ -61,17 +62,17 @@ test("subagents reuse the always-available model profile definitions", () => {
 });
 
 test("model profile commands register exact names and switch model plus effort", async () => {
-  const targetModel = { provider: "openai-codex", id: "gpt-5.6-sol" };
+  const targetModel = { provider: "opencode-go", id: "kimi-k3" };
   const harness = createHarness({ model: targetModel });
   registerModelProfiles(harness.pi);
 
-  assert.deepEqual([...harness.commands.keys()], ["model:thinker", "model:worker", "model:mechanical"]);
-  await harness.commands.get("model:thinker")?.("", harness.ctx);
+  assert.deepEqual([...harness.commands.keys()], ["model:designer", "model:thinker", "model:worker", "model:mechanical"]);
+  await harness.commands.get("model:designer")?.("", harness.ctx);
 
   assert.deepEqual(harness.selectedModels, [targetModel]);
-  assert.deepEqual(harness.selectedEfforts, ["high"]);
+  assert.deepEqual(harness.selectedEfforts, ["max"]);
   assert.deepEqual(harness.notifications, [{
-    message: "Switched to model profile \"thinker\": openai-codex/gpt-5.6-sol (high thinking).",
+    message: "Switched to model profile \"designer\": opencode-go/kimi-k3 (max thinking).",
     level: "info",
   }]);
 });

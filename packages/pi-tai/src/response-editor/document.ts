@@ -3,9 +3,10 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 export const RESPONSE_OPEN_TAG = "<response>";
 export const RESPONSE_CLOSE_TAG = "</response>";
 
-export type ResponseExtraction =
-  | { kind: "response"; text: string }
-  | { kind: "missing-opening-tag" };
+export interface ResponseExtraction {
+  kind: "response";
+  text: string;
+}
 
 export function findLastAssistantText(entries: readonly SessionEntry[]): string | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -26,7 +27,7 @@ export function findLastAssistantText(entries: readonly SessionEntry[]): string 
 export function formatResponseDocument(preview: string, draft = ""): string {
   const safePreview = escapeResponseTags(preview.trim());
   return [
-    "<!-- pi-tai: preview only; content outside the response block is never submitted -->",
+    "<!-- pi-tai: only the response block is submitted; without an opening response tag, the whole document is submitted -->",
     "## Last agent message (preview only)",
     "",
     "<agent-message>",
@@ -43,7 +44,7 @@ export function formatResponseDocument(preview: string, draft = ""): string {
 
 export function extractResponse(document: string): ResponseExtraction {
   const openingIndex = document.indexOf(RESPONSE_OPEN_TAG);
-  if (openingIndex < 0) return { kind: "missing-opening-tag" };
+  if (openingIndex < 0) return { kind: "response", text: document };
 
   const responseStart = openingIndex + RESPONSE_OPEN_TAG.length;
   const closingIndex = document.lastIndexOf(RESPONSE_CLOSE_TAG);

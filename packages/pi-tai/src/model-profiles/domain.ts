@@ -1,4 +1,4 @@
-export const MODEL_PROFILE_IDS = ["thinker", "worker", "mechanical"] as const;
+export const MODEL_PROFILE_IDS = ["designer", "thinker", "worker", "mechanical"] as const;
 export type ModelProfileId = (typeof MODEL_PROFILE_IDS)[number];
 export type ThinkingEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -11,6 +11,13 @@ export interface ModelProfile {
 }
 
 export const MODEL_PROFILES: readonly ModelProfile[] = Object.freeze([
+  Object.freeze({
+    id: "designer",
+    description: "Open-ended product, system, and architecture design work.",
+    provider: "opencode-go",
+    model: "kimi-k3",
+    effort: "max",
+  }),
   Object.freeze({
     id: "thinker",
     description: "Work requiring investigation, planning, architecture, or substantial judgment.",
