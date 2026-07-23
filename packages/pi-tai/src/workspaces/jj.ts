@@ -1,4 +1,4 @@
-import { JjWorkspaceService, runJjCommand } from "./jj-service.ts";
+import { JjWorkspaceService } from "./jj-service.ts";
 import {
   requireJjWorkspace,
   type WorkspaceAbandonResult,
@@ -21,7 +21,7 @@ export class JjWorkspacePort implements WorkspacePort {
 
   async probe(cwd: string): Promise<WorkspaceAvailability> {
     try {
-      const repoRoot = (await runJjCommand(cwd, ["root"])).trim();
+      const repoRoot = await this.service.repositoryRoot(cwd);
       return repoRoot ? { available: true, repoRoot } : { available: false, reason: "Unable to resolve JJ repository root." };
     } catch {
       return { available: false, reason: "The cwd is not a JJ repository or jj is unavailable." };

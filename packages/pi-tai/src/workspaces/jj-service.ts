@@ -1,14 +1,15 @@
-import { execFile } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { join, resolve } from "node:path";
+import { absolutePath } from "../jj/domain.ts";
+import {
+  JjProcessExecutor,
+  renderJjExecutionFailure,
+  type JjAccess,
+  type JjExecutor,
+} from "../jj/executor.ts";
 const CHANGE_ID_TEMPLATE = 'change_id ++ "\\n"';
 const WORKSPACE_TEMPLATE = 'name ++ "|" ++ target.change_id() ++ "\\n"';
 const CHANGE_ROW_TEMPLATE = 'change_id ++ "|" ++ if(empty, "empty", "nonempty") ++ "|" ++ description.first_line() ++ "\\n"';
-
-export type JjCommandRunner = (cwd: string, args: string[]) => Promise<string>;
 
 export interface JjFileOperations {
   mkdir(path: string): Promise<void>;
@@ -56,18 +57,22 @@ export interface IntegrateChildWorkspaceResult {
 }
 
 export class JjWorkspaceService {
-  private readonly run: JjCommandRunner;
+  private readonly executor: JjExecutor;
   private readonly files: JjFileOperations;
 
   constructor(
-    run: JjCommandRunner = runJjCommand,
+    executor: JjExecutor = new JjProcessExecutor(),
     files: JjFileOperations = {
       mkdir: async (path) => { await mkdir(path, { recursive: true, mode: 0o700 }); },
       rm: async (path) => { await rm(path, { recursive: true, force: true }); },
     },
   ) {
-    this.run = run;
+    this.executor = executor;
     this.files = files;
+  }
+
+  async repositoryRoot(cwd: string): Promise<string> {
+    return line(await this.run(cwd, ["root"]), "Jujutsu repository root");
   }
 
   async createChildWorkspace(parentCwd: string, childWorkspace: string): Promise<CreatedChildWorkspace> {
@@ -81,17 +86,17 @@ export class JjWorkspaceService {
   private async createWorkspace(sourceCwd: string, workspaceName: string, cleanupOnFailure: boolean): Promise<CreatedChildWorkspace> {
     validateWorkspaceName(workspaceName);
     const repoRoot = line(await this.run(sourceCwd, ["root"]), "Jujutsu repository root");
-    const sourceChangeId = line(await this.run(sourceCwd, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "source working-copy change ID");
-    const sourceWorkspace = currentWorkspace(await this.run(sourceCwd, ["workspace", "list", "-T", WORKSPACE_TEMPLATE]), sourceChangeId);
-    const baseChangeId = line(await this.run(sourceCwd, ["log", "-r", "@-", "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "source @- change ID");
+    const sourceChangeId = line(await this.run(sourceCwd, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "source working-copy change ID");
+    const sourceWorkspace = currentWorkspace(await this.run(sourceCwd, ["workspace", "list", "--template", WORKSPACE_TEMPLATE]), sourceChangeId);
+    const baseChangeId = line(await this.run(sourceCwd, ["log", "--revision", "@-", "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "source @- change ID");
     const workspacesRoot = join(repoRoot, ".jj", "workspaces");
     const workspacePath = join(workspacesRoot, workspaceName);
     await this.files.mkdir(workspacesRoot);
-    await this.run(sourceCwd, ["workspace", "add", workspacePath, "--name", workspaceName, "-r", exactChange(baseChangeId)]);
+    await this.run(sourceCwd, ["workspace", "add", workspacePath, "--name", workspaceName, "--revision", exactChange(baseChangeId)], "write");
     try {
       await this.verifySourceSibling(sourceCwd, sourceWorkspace, sourceChangeId, baseChangeId);
-      const rootChangeId = line(await this.run(workspacePath, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "workspace root change ID");
-      const actualBase = line(await this.run(workspacePath, ["log", "-r", "@-", "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "workspace root parent change ID");
+      const rootChangeId = line(await this.run(workspacePath, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "workspace root change ID");
+      const actualBase = line(await this.run(workspacePath, ["log", "--revision", "@-", "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "workspace root parent change ID");
       if (actualBase !== baseChangeId) throw new Error(`Workspace parent mismatch: expected ${baseChangeId}, received ${actualBase}.`);
       return {
         repoRoot,
@@ -104,7 +109,7 @@ export class JjWorkspaceService {
       };
     } catch (error) {
       if (cleanupOnFailure) {
-        await this.run(sourceCwd, ["workspace", "forget", workspaceName]).catch(() => undefined);
+        await this.run(sourceCwd, ["workspace", "forget", workspaceName], "write").catch(() => undefined);
         await this.files.rm(workspacePath).catch(() => undefined);
       }
       const reason = error instanceof Error ? error.message : String(error);
@@ -113,12 +118,12 @@ export class JjWorkspaceService {
   }
 
   async currentChangeId(cwd: string): Promise<string> {
-    return line(await this.run(cwd, ["log", "-r", "@", "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "working-copy change ID");
+    return line(await this.run(cwd, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "working-copy change ID");
   }
 
   async integrateChildWorkspace(input: IntegrateChildWorkspaceInput): Promise<IntegrateChildWorkspaceResult> {
-    const childUpdate = await this.run(input.childWorkspacePath, ["workspace", "update-stale"]);
-    const parentUpdate = await this.run(input.parentWorkspacePath, ["workspace", "update-stale"]);
+    const childUpdate = await this.run(input.childWorkspacePath, ["workspace", "update-stale"], "write");
+    const parentUpdate = await this.run(input.parentWorkspacePath, ["workspace", "update-stale"], "write");
     if (/recovery/i.test(`${childUpdate}\n${parentUpdate}`)) {
       throw new Error("Updating stale workspaces created recovery history.");
     }
@@ -131,37 +136,42 @@ export class JjWorkspaceService {
     const baseRevision = exactChange(input.baseChangeId);
     const childTipRevision = exactChange(childTipChangeId);
 
-    const linkedRoot = line(await this.run(input.childWorkspacePath, ["log", "-r", `${rootRevision} & ::${childTipRevision}`, "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "recorded child root");
+    const linkedRoot = line(await this.run(input.childWorkspacePath, ["log", "--revision", `${rootRevision} & ::${childTipRevision}`, "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "recorded child root");
     if (linkedRoot !== input.childRootChangeId) throw new Error(`Workspace no longer descends from recorded root ${input.childRootChangeId}.`);
-    const linkedBase = line(await this.run(input.childWorkspacePath, ["log", "-r", `parents(${rootRevision}) & ${baseRevision}`, "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "recorded child base");
+    const linkedBase = line(await this.run(input.childWorkspacePath, ["log", "--revision", `parents(${rootRevision}) & ${baseRevision}`, "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "recorded child base");
     if (linkedBase !== input.baseChangeId) throw new Error(`Workspace root no longer descends directly from base ${input.baseChangeId}.`);
-    const foreign = await this.run(input.childWorkspacePath, ["log", "-r", `${rootRevision}:: ~ ::${childTipRevision}`, "--no-graph", "-T", CHANGE_ID_TEMPLATE]);
+    const foreign = await this.run(input.childWorkspacePath, ["log", "--revision", `${rootRevision}:: ~ ::${childTipRevision}`, "--no-graph", "--template", CHANGE_ID_TEMPLATE]);
     if (foreign.trim()) throw new Error("Delegated subtree has descendants outside its workspace ancestry.");
 
     const range = `${rootRevision}::${childTipRevision}`;
-    const rows = parseChangeRows(await this.run(input.childWorkspacePath, ["log", "-r", range, "--no-graph", "-T", CHANGE_ROW_TEMPLATE]));
+    const rows = parseChangeRows(await this.run(input.childWorkspacePath, ["log", "--revision", range, "--no-graph", "--template", CHANGE_ROW_TEMPLATE]));
     if (rows.length === 0) throw new Error("Delegated workspace range is empty or unresolved.");
     const emptyIds = rows.filter((row) => row.empty).map((row) => row.id);
     const nonemptyIds = rows.filter((row) => !row.empty).map((row) => row.id);
 
-    await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace]);
+    await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace], "write");
     await this.files.rm(input.childWorkspacePath);
 
     try {
-      if (emptyIds.length > 0) {
-        await this.run(input.repoRoot, ["--ignore-working-copy", "abandon", changeUnion(emptyIds)]);
+      for (const emptyId of emptyIds) {
+        try {
+          await this.run(input.repoRoot, ["--ignore-working-copy", "abandon", exactChange(emptyId)], "write");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/fewer than the expected 1 revisions \(got 0\)/.test(message)) throw error;
+        }
       }
       if (nonemptyIds.length > 0) {
-        await this.run(input.repoRoot, ["--ignore-working-copy", "rebase", "-r", changeUnion(nonemptyIds), "-B", exactChange(sourceChangeId)]);
+        await this.run(input.repoRoot, ["--ignore-working-copy", "rebase", "--revision", changeUnion(nonemptyIds), "--insert-before", exactChange(sourceChangeId)], "write");
       }
 
       const integratedIds = nonemptyIds.length === 0 ? [] : lines(await this.run(input.repoRoot, [
-        "--ignore-working-copy", "log", "-r", `${changeUnion(nonemptyIds)} & ::${exactChange(sourceChangeId)}`, "--no-graph", "-T", CHANGE_ID_TEMPLATE,
+        "--ignore-working-copy", "log", "--revision", `${changeUnion(nonemptyIds)} & ::${exactChange(sourceChangeId)}`, "--no-graph", "--template", CHANGE_ID_TEMPLATE,
       ]));
       if (new Set(integratedIds).size !== new Set(nonemptyIds).size) throw new Error("Rebase completed but not every delegated change is an ancestor of the source workspace.");
       const conflictFiles = await this.listConflicts(input.repoRoot, exactChange(sourceChangeId));
       const descriptions = nonemptyIds.length === 0 ? [] : parseDescriptionRows(await this.run(input.repoRoot, [
-        "--ignore-working-copy", "log", "-r", changeUnion(nonemptyIds), "--no-graph", "-T", 'change_id ++ "|" ++ description.first_line() ++ "\\n"',
+        "--ignore-working-copy", "log", "--revision", changeUnion(nonemptyIds), "--no-graph", "--template", 'change_id ++ "|" ++ description.first_line() ++ "\\n"',
       ]));
       return {
         conflicted: conflictFiles.length > 0,
@@ -184,53 +194,53 @@ export class JjWorkspaceService {
     for (const change of changes) {
       const description = change.description.trim();
       if (!description) throw new Error(`Description for ${change.changeId} must not be empty.`);
-      await this.run(cwd, ["--ignore-working-copy", "describe", "-r", exactChange(change.changeId), "-m", description]);
+      await this.run(cwd, ["--ignore-working-copy", "describe", "--message", description, exactChange(change.changeId)], "write");
     }
     if (changes.length === 0) return [];
     const rows = parseDescriptionRows(await this.run(cwd, [
-      "--ignore-working-copy", "log", "-r", changeUnion(changes.map((change) => change.changeId)), "--no-graph", "-T", 'change_id ++ "|" ++ description.first_line() ++ "\\n"',
+      "--ignore-working-copy", "log", "--revision", changeUnion(changes.map((change) => change.changeId)), "--no-graph", "--template", 'change_id ++ "|" ++ description.first_line() ++ "\\n"',
     ]));
     return rows.filter((row) => !row.description.trim()).map((row) => row.id);
   }
 
   async abandonChildWorkspace(input: { repoRoot: string; childWorkspace: string; childWorkspacePath: string }): Promise<void> {
-    await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace]);
+    await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace], "write");
     await this.files.rm(input.childWorkspacePath);
   }
 
   private async verifySourceSibling(cwd: string, workspace: string, sourceChangeId: string, baseChangeId: string): Promise<void> {
     const sourceTarget = await this.workspaceTargetChangeId(cwd, `${workspace}@`);
     if (sourceTarget !== sourceChangeId) throw new Error(`Source workspace target changed during allocation: expected ${sourceChangeId}, received ${sourceTarget}.`);
-    const sourceParent = line(await this.run(cwd, ["--ignore-working-copy", "log", "-r", `parents(${exactChange(sourceChangeId)})`, "--no-graph", "-T", CHANGE_ID_TEMPLATE]), "source working-copy parent change ID");
+    const sourceParent = line(await this.run(cwd, ["--ignore-working-copy", "log", "--revision", `parents(${exactChange(sourceChangeId)})`, "--no-graph", "--template", CHANGE_ID_TEMPLATE]), "source working-copy parent change ID");
     if (sourceParent !== baseChangeId) throw new Error(`Source workspace parent changed during allocation: expected ${baseChangeId}, received ${sourceParent}.`);
   }
 
   private async workspaceTargetChangeId(cwd: string, revision: string): Promise<string> {
-    return line(await this.run(cwd, ["--ignore-working-copy", "log", "-r", revision, "--no-graph", "-T", CHANGE_ID_TEMPLATE]), `${revision} workspace target change ID`);
+    return line(await this.run(cwd, ["--ignore-working-copy", "log", "--revision", revision, "--no-graph", "--template", CHANGE_ID_TEMPLATE]), `${revision} workspace target change ID`);
   }
 
   private async listConflicts(cwd: string, revision: string): Promise<string[]> {
     try {
-      return lines(await this.run(cwd, ["--ignore-working-copy", "resolve", "--list", "-r", revision]));
+      return lines(await this.run(cwd, ["--ignore-working-copy", "resolve", "--list", "--revision", revision]));
     } catch (error) {
       if ((error instanceof Error ? error.message : String(error)).includes("No conflicts found at this revision")) return [];
       throw error;
     }
   }
-}
 
-export async function runJjCommand(cwd: string, args: string[]): Promise<string> {
-  try {
-    const result = await execFileAsync("jj", args, { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, env: { ...process.env, JJ_NO_PAGER: "1" } });
-    return result.stdout;
-  } catch (error) {
-    const failure = error as Error & { stderr?: string };
-    throw new Error(`jj ${args.join(" ")} failed: ${failure.stderr?.trim() || failure.message}`);
+  private async run(cwd: string, args: readonly string[], access: JjAccess = "read"): Promise<string> {
+    const result = await this.executor.execute({ cwd: absolutePath(resolve(cwd)), args, access });
+    if (result.kind === "success") return result.stdout;
+    const detail = result.stderr.trim() || renderJjExecutionFailure(result.failure);
+    throw new Error(`jj argv ${JSON.stringify(args)} failed: ${detail}`);
   }
 }
 
-function exactChange(id: string): string { return `exactly(change_id(${id}), 1)`; }
-function changeUnion(ids: readonly string[]): string { return ids.map((id) => `change_id(${id})`).join(" | "); }
+function exactChange(id: string): string {
+  if (!/^[a-z]{32}$/.test(id)) throw new Error(`Invalid full JJ Change ID: ${id}`);
+  return `exactly(change_id(${id}), 1)`;
+}
+function changeUnion(ids: readonly string[]): string { return ids.map(exactChange).join(" | "); }
 function parseChangeRows(output: string): Array<{ id: string; empty: boolean }> {
   return lines(output).map((row) => { const [id, state] = row.split("|", 3); if (!id || (state !== "empty" && state !== "nonempty")) throw new Error("Invalid JJ change row."); return { id, empty: state === "empty" }; });
 }
