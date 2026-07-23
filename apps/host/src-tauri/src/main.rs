@@ -152,8 +152,9 @@ fn main() {
                 runtime: runtime_process_spec(),
                 agent_dir: data_dir.join("pi-agent"),
                 session_dir: data_dir.join("pi-sessions"),
+                database_path: data_dir.join("broker.sqlite3"),
                 faux: std::env::var("PI_TAI_RUNTIME_FAKE_PORT").as_deref() == Ok("1"),
-            });
+            })?;
             let server = HostIpcServer::new(listener, kernel.clone());
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = server.run().await {

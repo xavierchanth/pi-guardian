@@ -126,7 +126,19 @@ pub enum RuntimeEventDisposition {
     Stale,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub struct BrokerRecovery {
+    pub id: BrokerSessionId,
+    pub revision: u64,
+    pub runtime_generation: u64,
+    pub pi_session: PiSessionBinding,
+    pub interrupted_foreground: bool,
+    pub last_stop_reason: Option<StopReason>,
+    pub active_client: Option<ClientId>,
+    pub control_epoch: u64,
+}
+
+#[derive(Debug, Clone)]
 pub struct BrokerSession {
     id: BrokerSessionId,
     revision: u64,
@@ -156,44 +168,35 @@ impl BrokerSession {
         }
     }
 
-    pub fn recover(
-        id: BrokerSessionId,
-        revision: u64,
-        runtime_generation: u64,
-        pi_session: PiSessionBinding,
-        interrupted_foreground: bool,
-        last_stop_reason: Option<StopReason>,
-        active_client: Option<ClientId>,
-        control_epoch: u64,
-    ) -> Result<Self, BrokerError> {
-        if runtime_generation == 0
-            || (active_client.is_some() && control_epoch == 0)
-            || (active_client.is_none() && control_epoch > 0)
+    pub fn recover(recovery: BrokerRecovery) -> Result<Self, BrokerError> {
+        if recovery.runtime_generation == 0
+            || (recovery.active_client.is_some() && recovery.control_epoch == 0)
+            || (recovery.active_client.is_none() && recovery.control_epoch > 0)
         {
             return Err(BrokerError::InvalidRecoveryState);
         }
         Ok(Self {
-            id,
-            revision,
-            runtime_generation,
-            runtime_health: if interrupted_foreground {
+            id: recovery.id,
+            revision: recovery.revision,
+            runtime_generation: recovery.runtime_generation,
+            runtime_health: if recovery.interrupted_foreground {
                 RuntimeHealth::Interrupted {
-                    generation: runtime_generation,
+                    generation: recovery.runtime_generation,
                 }
             } else {
                 RuntimeHealth::Unloaded
             },
             foreground: ForegroundState::Idle {
-                last_stop_reason: if interrupted_foreground {
+                last_stop_reason: if recovery.interrupted_foreground {
                     Some(StopReason::Interrupted)
                 } else {
-                    last_stop_reason
+                    recovery.last_stop_reason
                 },
             },
-            pi_session: Some(pi_session),
+            pi_session: Some(recovery.pi_session),
             attachments: BTreeSet::new(),
-            active_client,
-            control_epoch,
+            active_client: recovery.active_client,
+            control_epoch: recovery.control_epoch,
         })
     }
 

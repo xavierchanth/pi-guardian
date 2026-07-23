@@ -2588,6 +2588,7 @@ name = "pi-tai-host-kernel"
 version = "0.1.0"
 dependencies = [
  "pi-tai-broker",
+ "pi-tai-event-store",
  "pi-tai-host-protocol",
  "pi-tai-runtime-protocol",
  "pi-tai-runtime-supervisor",

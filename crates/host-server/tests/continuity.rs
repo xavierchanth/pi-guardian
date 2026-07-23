@@ -79,8 +79,10 @@ async fn reconnecting_observer_receives_the_rest_of_a_detached_turn() {
         runtime: runtime_spec(),
         agent_dir: temporary.path().join("agent"),
         session_dir: temporary.path().join("sessions"),
+        database_path: temporary.path().join("broker.sqlite3"),
         faux: true,
-    });
+    })
+    .unwrap();
     let socket = temporary.path().join("host.sock");
     let token = AuthToken::generate();
     let listener = IpcListener::bind(&socket, token.clone(), implementation("host")).unwrap();
@@ -139,14 +141,26 @@ async fn reconnecting_observer_receives_the_rest_of_a_detached_turn() {
             Some(created.session_id.clone()),
             Some(running.revision),
             "session.observe",
-            json!({}),
+            json!({ "replayFromStart": true }),
         ))
         .await
         .unwrap();
-    let _: SessionSnapshot = serde_json::from_value(response(&mut observer).await).unwrap();
+    let observed = response(&mut observer).await;
+    let _: SessionSnapshot = serde_json::from_value(observed["snapshot"].clone()).unwrap();
+    let replay: Vec<pi_tai_host_protocol::HostEvent> =
+        serde_json::from_value(observed["replay"].clone()).unwrap();
+    let high_water = observed["highWaterSequence"].as_u64().unwrap();
+    assert_eq!(replay.last().map(|event| event.sequence), Some(high_water));
 
-    let mut text = String::new();
-    loop {
+    let mut text = replay
+        .iter()
+        .filter(|event| event.event_type == "assistant.text_delta")
+        .filter_map(|event| event.payload["delta"].as_str())
+        .collect::<String>();
+    let mut idle = replay
+        .iter()
+        .any(|event| event.event_type == "session.idle");
+    while !idle {
         let frame = tokio::time::timeout(Duration::from_secs(3), observer.read::<ServerFrame>())
             .await
             .unwrap()
@@ -154,12 +168,11 @@ async fn reconnecting_observer_receives_the_rest_of_a_detached_turn() {
         let ServerFrame::Event { event } = frame else {
             continue;
         };
+        assert!(event.sequence > high_water);
         if event.event_type == "assistant.text_delta" {
             text.push_str(event.payload["delta"].as_str().unwrap());
         }
-        if event.event_type == "session.idle" {
-            break;
-        }
+        idle = event.event_type == "session.idle";
     }
     assert_eq!(text, "slow response");
     drop(observer);

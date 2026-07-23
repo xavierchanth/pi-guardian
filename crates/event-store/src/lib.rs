@@ -282,16 +282,38 @@ impl EventStore {
         .collect()
     }
 
-    pub fn operation_response(&self, operation_id: &str) -> Result<Option<Value>, StoreError> {
+    pub fn operation(&self, operation_id: &str) -> Result<Option<OperationCommit>, StoreError> {
         self.connection
             .query_row(
-                "SELECT response_json FROM operations WHERE operation_id = ?1",
+                "SELECT session_id, kind, expected_revision, response_json
+                 FROM operations WHERE operation_id = ?1",
                 [operation_id],
-                |row| row.get::<_, String>(0),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<u64>>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
             )
             .optional()?
-            .map(|value| serde_json::from_str(&value).map_err(StoreError::Json))
+            .map(|(session_id, kind, expected_revision, response_json)| {
+                Ok(OperationCommit {
+                    operation_id: operation_id.into(),
+                    session_id,
+                    kind,
+                    expected_revision,
+                    response: serde_json::from_str(&response_json)?,
+                })
+            })
             .transpose()
+    }
+
+    pub fn operation_response(&self, operation_id: &str) -> Result<Option<Value>, StoreError> {
+        Ok(self
+            .operation(operation_id)?
+            .map(|operation| operation.response))
     }
 }
 

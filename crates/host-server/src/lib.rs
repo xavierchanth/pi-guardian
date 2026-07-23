@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use pi_tai_host_kernel::{
-    CancelSession, CreateSession, HostKernel, HostKernelError, PromptSession, SessionSnapshot,
+    CancelSession, CreateSession, HostKernel, HostKernelError, PromptSession,
 };
 use pi_tai_host_protocol::{
     CURRENT_PROTOCOL_VERSION, ClientFrame, HostCommand, HostProtocolError, HostResponse,
@@ -75,6 +75,7 @@ async fn serve_connection(
             continue;
         };
         let request_id = command.request_id.clone();
+        let observe_events = (command.kind == "session.observe").then(|| kernel.subscribe());
         match execute_command(&kernel, &command).await {
             Ok(CommandResult::Reply { result, attachment }) => {
                 if let Some(attachment) = attachment {
@@ -85,21 +86,22 @@ async fn serve_connection(
                     .await?;
             }
             Ok(CommandResult::Observe {
-                snapshot,
+                result,
+                high_water_sequence,
                 attachment,
             }) => {
                 attachments.insert(attachment.clone());
-                let mut events = kernel.subscribe();
+                let mut events =
+                    observe_events.expect("observer subscribes before command dispatch");
                 connection
-                    .write(&success_response(
-                        request_id,
-                        serde_json::to_value(snapshot)
-                            .map_err(|error| IpcError::InvalidFrame(error.to_string()))?,
-                    ))
+                    .write(&success_response(request_id, result))
                     .await?;
                 loop {
                     match events.recv().await {
-                        Ok(event) if event.session_id == attachment.1 => {
+                        Ok(event)
+                            if event.session_id == attachment.1
+                                && event.sequence > high_water_sequence =>
+                        {
                             if connection
                                 .write(&ServerFrame::Event { event })
                                 .await
@@ -132,7 +134,8 @@ enum CommandResult {
         attachment: Option<(String, String)>,
     },
     Observe {
-        snapshot: SessionSnapshot,
+        result: Value,
+        high_water_sequence: u64,
         attachment: (String, String),
     },
 }
@@ -218,12 +221,28 @@ async fn execute_command(
             })
         }
         "session.observe" => {
+            let payload: ObservePayload = decode_payload(&command.payload)?;
             let session_id = require_session_id(command)?;
             let snapshot = kernel
                 .attach(command.client_id.clone(), session_id.clone())
                 .await?;
+            let (result, high_water_sequence) = if payload.replay_from_start {
+                let replay = kernel.replay(session_id.clone(), 0, 10_000).await?;
+                let high_water_sequence = replay.last().map_or(0, |event| event.sequence);
+                (
+                    json!({
+                        "snapshot": snapshot,
+                        "replay": replay,
+                        "highWaterSequence": high_water_sequence,
+                    }),
+                    high_water_sequence,
+                )
+            } else {
+                (serde_json::to_value(snapshot)?, 0)
+            };
             Ok(CommandResult::Observe {
-                snapshot,
+                result,
+                high_water_sequence,
                 attachment: (command.client_id.clone(), session_id),
             })
         }
@@ -247,6 +266,13 @@ struct PromptPayload {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CancelPayload {
     operation_id: String,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ObservePayload {
+    #[serde(default)]
+    replay_from_start: bool,
 }
 
 fn decode_payload<T: for<'de> Deserialize<'de>>(payload: &Value) -> Result<T, CommandError> {

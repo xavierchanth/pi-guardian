@@ -1,6 +1,6 @@
 use pi_tai_broker::{
-    BrokerSession, BrokerSessionId, ClientId, ForegroundState, OperationId, PiSessionBinding,
-    RuntimeEventDisposition, RuntimeHealth, StopReason,
+    BrokerRecovery, BrokerSession, BrokerSessionId, ClientId, ForegroundState, OperationId,
+    PiSessionBinding, RuntimeEventDisposition, RuntimeHealth, StopReason,
 };
 
 fn session() -> BrokerSession {
@@ -167,46 +167,55 @@ fn cancellation_transfers_control_but_waits_for_runtime_completion() {
 fn recovery_reconstructs_only_valid_unloaded_or_interrupted_states() {
     let binding = PiSessionBinding::new("pi-1", "/tmp/pi.jsonl", "/repo").unwrap();
     let active_client = ClientId::parse("client-1").unwrap();
-    let mut recovered = BrokerSession::recover(
-        BrokerSessionId::parse("broker-1").unwrap(),
-        12,
-        4,
-        binding.clone(),
-        true,
-        None,
-        Some(active_client.clone()),
-        2,
-    )
+    let mut recovered = BrokerSession::recover(BrokerRecovery {
+        id: BrokerSessionId::parse("broker-1").unwrap(),
+        revision: 12,
+        runtime_generation: 4,
+        pi_session: binding.clone(),
+        interrupted_foreground: true,
+        last_stop_reason: None,
+        active_client: Some(active_client.clone()),
+        control_epoch: 2,
+    })
     .unwrap();
-    assert_eq!(recovered.runtime_health(), RuntimeHealth::Interrupted { generation: 4 });
+    assert_eq!(
+        recovered.runtime_health(),
+        RuntimeHealth::Interrupted { generation: 4 }
+    );
     assert_eq!(
         recovered.foreground(),
-        &ForegroundState::Idle { last_stop_reason: Some(StopReason::Interrupted) }
+        &ForegroundState::Idle {
+            last_stop_reason: Some(StopReason::Interrupted)
+        }
     );
     assert_eq!(recovered.begin_runtime_start().unwrap(), 5);
 
-    assert!(BrokerSession::recover(
-        BrokerSessionId::parse("broker-2").unwrap(),
-        0,
-        0,
-        binding.clone(),
-        false,
-        None,
-        None,
-        0,
-    )
-    .is_err());
-    assert!(BrokerSession::recover(
-        BrokerSessionId::parse("broker-3").unwrap(),
-        1,
-        1,
-        binding,
-        false,
-        None,
-        Some(active_client),
-        0,
-    )
-    .is_err());
+    assert!(
+        BrokerSession::recover(BrokerRecovery {
+            id: BrokerSessionId::parse("broker-2").unwrap(),
+            revision: 0,
+            runtime_generation: 0,
+            pi_session: binding.clone(),
+            interrupted_foreground: false,
+            last_stop_reason: None,
+            active_client: None,
+            control_epoch: 0,
+        })
+        .is_err()
+    );
+    assert!(
+        BrokerSession::recover(BrokerRecovery {
+            id: BrokerSessionId::parse("broker-3").unwrap(),
+            revision: 1,
+            runtime_generation: 1,
+            pi_session: binding,
+            interrupted_foreground: false,
+            last_stop_reason: None,
+            active_client: Some(active_client),
+            control_epoch: 0,
+        })
+        .is_err()
+    );
 }
 
 #[test]

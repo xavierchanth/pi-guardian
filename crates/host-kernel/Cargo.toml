@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 pi-tai-broker = { path = "../broker" }
 pi-tai-host-protocol = { path = "../host-protocol" }
+pi-tai-event-store = { path = "../event-store" }
 pi-tai-runtime-protocol = { path = "../runtime-protocol" }
 pi-tai-runtime-supervisor = { path = "../runtime-supervisor" }
 serde.workspace = true

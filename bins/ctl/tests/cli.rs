@@ -53,8 +53,10 @@ async fn cli_starts_detaches_and_reobserves_a_host_owned_turn() {
         runtime: runtime_spec(),
         agent_dir: temporary.path().join("agent"),
         session_dir: temporary.path().join("sessions"),
+        database_path: temporary.path().join("broker.sqlite3"),
         faux: true,
-    });
+    })
+    .unwrap();
     let socket = temporary.path().join("host.sock");
     let token_file = temporary.path().join("host.token");
     let token = AuthToken::load_or_create(&token_file).unwrap();
