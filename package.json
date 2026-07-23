@@ -45,7 +45,9 @@
     "smoke:isolated": "node tests/smoke/isolated-load.mjs",
     "eval:workspace": "node --experimental-strip-types evals/workspace-skill/run.ts",
     "eval:workspace:dry": "node --experimental-strip-types evals/workspace-skill/run.ts --dry-run",
-    "eval:subagents": "node --experimental-strip-types evals/subagents/run.ts"
+    "eval:subagents": "node --experimental-strip-types evals/subagents/run.ts",
+    "eval:agent-concurrency": "node --experimental-strip-types evals/agent-concurrency/run.ts",
+    "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
