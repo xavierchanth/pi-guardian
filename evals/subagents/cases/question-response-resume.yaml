@@ -1,0 +1,12 @@
+version: 1
+suite: subagents
+id: question-response-resume
+title: "A parent response resumes a child that asked a question"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: running }
+interaction:
+  kind: question-response-resume
+  question: "Which compatibility target should I preserve?"
+  response: "Preserve the current public API."
+assertions:
+  - { kind: protocol-invariant, invariant: question-resumes-child }

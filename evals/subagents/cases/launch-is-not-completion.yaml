@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: launch-is-not-completion
+title: "Launching a child does not complete or collect it"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: running }
+interaction: { kind: launch-without-collection, childCount: 1 }
+assertions:
+  - { kind: protocol-invariant, invariant: launch-not-completion }

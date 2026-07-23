@@ -6,6 +6,7 @@ export interface JjWorkspaceAttachment {
   purpose: WorkspacePurpose;
   repoRoot: string;
   sourceWorkspace: string;
+  sourceChangeId?: string;
   baseChangeId: string;
   name: string;
   path: string;

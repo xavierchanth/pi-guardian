@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: failed-child-inspectable
+title: "Failed child retains an inspectable record"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: failed }
+interaction: { kind: inspect-child-record, outcome: failed }
+assertions:
+  - { kind: protocol-invariant, invariant: terminal-record-inspectable }

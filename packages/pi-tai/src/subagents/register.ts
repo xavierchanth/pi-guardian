@@ -553,7 +553,7 @@ export function registerSubagents(
   pi.registerTool({
     name: "message_child",
     label: "Message Child",
-    description: "Steer a running direct child or queue a follow-up instruction.",
+    description: "Steer a running direct child (including status-then-continue) or queue a subsequent instruction with followUp.",
     parameters: Type.Object({
       delegationId: Type.String(),
       message: Type.String({ minLength: 1, maxLength: 16_000 }),

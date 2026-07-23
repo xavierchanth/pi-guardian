@@ -36,6 +36,7 @@ export class JjWorkspacePort implements WorkspacePort {
       purpose: request.purpose,
       repoRoot: created.repoRoot,
       sourceWorkspace: created.parentWorkspace,
+      sourceChangeId: created.parentChangeId,
       baseChangeId: created.baseChangeId,
       name: created.childWorkspace,
       path: created.childWorkspacePath,
@@ -50,9 +51,13 @@ export class JjWorkspacePort implements WorkspacePort {
 
   async integrate(workspace: WorkspaceAttachment): Promise<WorkspaceIntegrationResult> {
     const jj = requireJjWorkspace(workspace);
+    if (!jj.sourceChangeId) {
+      throw new Error("Planner workspace integration requires the recorded source change identity.");
+    }
     return this.service.integrateChildWorkspace({
       repoRoot: jj.repoRoot,
       parentWorkspace: jj.sourceWorkspace,
+      parentChangeId: jj.sourceChangeId,
       childWorkspace: jj.name,
       childWorkspacePath: jj.path,
       baseChangeId: jj.baseChangeId,
@@ -72,11 +77,11 @@ export class JjWorkspacePort implements WorkspacePort {
 
   async abandon(workspace: WorkspaceAttachment): Promise<WorkspaceAbandonResult> {
     const jj = requireJjWorkspace(workspace);
-    await this.service.abandonChildWorkspace({
+    const removed = await this.service.abandonChildWorkspace({
       repoRoot: jj.repoRoot,
       childWorkspace: jj.name,
       childWorkspacePath: jj.path,
     });
-    return { removed: true };
+    return removed ? { removed: true } : { removed: false, recoveryPath: jj.path };
   }
 }

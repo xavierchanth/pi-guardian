@@ -350,7 +350,7 @@ test("child activity uses only the latest visible assistant text", async () => {
   assert.doesNotMatch(detail, /private reasoning/);
 });
 
-test("persistent child control channel writes RPC follow-up commands", async () => {
+test("persistent child control channel preserves RPC steer delivery for status-and-continue", async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), "pi-tai-control-"));
   const storeRoot = join(stateRoot, "delegations");
   const controlDir = join(stateRoot, "control");
@@ -361,13 +361,13 @@ test("persistent child control channel writes RPC follow-up commands", async () 
   const launcher = new PiChildProcessLauncher({ root: storeRoot } as DelegationStore);
   const child = { ...record("one", "running"), childControlPath: controlPath };
   try {
-    await launcher.message(child, "Prioritize the regression", "followUp");
+    await launcher.message(child, "Give me a status report, then continue.", "steer");
     const buffer = Buffer.alloc(4096);
     const { bytesRead } = await reader.read(buffer);
     assert.deepEqual(JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").trim()), {
       type: "prompt",
-      message: "Prioritize the regression",
-      streamingBehavior: "followUp",
+      message: "Give me a status report, then continue.",
+      streamingBehavior: "steer",
     });
   } finally {
     await reader.close();

@@ -1,0 +1,12 @@
+version: 1
+suite: subagents
+id: interim-planner-resumes
+title: "Planner emits bounded interim status and automatically resumes"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: root, childRole: planner, childOutcome: running }
+interaction: { kind: interim-status-resume, role: planner, parentMessage: "Steer: report current scope, then continue planning." }
+assertions:
+  - kind: transcript-sequence
+    events: [parent-steer, visible-bounded-status, subsequent-work, tool-activity, terminal-report]
+  - { kind: report-count, phase: interim, count: 0 }
+  - { kind: report-count, phase: terminal, count: 1 }

@@ -49,19 +49,27 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
   }
 });
 
-test("workspace is packaged as an automatic JJ-first routed skill", () => {
+test("workspace is packaged as an automatic generic backend router", () => {
   const directory = join(root, "packages/pi-tai/skills/workspace");
   const skill = readFileSync(join(directory, "SKILL.md"), "utf8");
-  const jj = readFileSync(join(directory, "references/jj.md"), "utf8");
-  const git = readFileSync(join(directory, "references/git.md"), "utf8");
+  const jj = readFileSync(join(directory, "references/jj-workspaces.md"), "utf8");
+  const git = readFileSync(join(directory, "references/git-worktrees.md"), "utf8");
+  const genericSkill = `${skill}\n${jj}\n${git}`;
   assert.match(skill, /name: workspace/);
   assert.doesNotMatch(skill, /disable-model-invocation/);
   assert.match(skill, /workspace, work tree, worktree, isolated checkout/);
-  assert.match(skill, /references\/jj\.md/);
-  assert.match(skill, /references\/git\.md/);
-  assert.match(jj, /source `@` to be empty/);
-  assert.match(jj, /Create the isolated workspace from the source `@-`/);
-  assert.match(git, /Use this strategy only when `jj root` failed/);
+  assert.match(skill, /explicitly requests Git or says `git worktree`/);
+  assert.match(skill, /probe with `jj root`/);
+  assert.match(skill, /Never switch strategies after mutation starts/);
+  assert.match(skill, /references\/jj-workspaces\.md/);
+  assert.match(skill, /references\/git-worktrees\.md/);
+  assert.match(jj, /jj workspace add <path> --name <name>/);
+  assert.match(jj, /explicitly asks to include the current working-copy change/);
+  assert.match(jj, /-r @/);
+  assert.match(git, /explicit request for Git or the phrase `git worktree`/);
+  assert.doesNotMatch(genericSkill, /planner_workspace|managed planner|owning managed planner/);
+  assert.equal(existsSync(join(directory, "references/jj.md")), false);
+  assert.equal(existsSync(join(directory, "references/git.md")), false);
 });
 
 test("continue is packaged as a visible prompt template", () => {

@@ -122,22 +122,22 @@ Because cwd is shared for normal delegation, the packaged planner and worker pro
 
 This operating model follows JJ 0.43 command help and the official [working-copy](https://docs.jj-vcs.dev/latest/working-copy/), [revset](https://docs.jj-vcs.dev/latest/revsets/), and [operation-log](https://docs.jj-vcs.dev/latest/operation-log/) documentation. In particular, each workspace has its own working-copy commit, cross-workspace rewrites can make a working copy stale, Change IDs survive rewrites unless they diverge, and the operation log preserves concurrent repository operations.
 
-Workspace and worktree backends are not session capabilities. The packaged `workspace` skill is visible for automatic model matching when the user asks for a workspace, work tree, worktree, isolated checkout, or non-interference with the main working directory. Its small `SKILL.md` probes JJ and loads exactly one detailed backend reference. JJ is preferred, Git is loaded only if JJ was unavailable before mutation, and backend fallback never occurs after mutation starts. `/skill:workspace` remains available to force loading but is not required.
+Workspace and worktree backends are not session capabilities. The packaged generic `workspace` skill is visible for automatic model matching when the user asks for a workspace, work tree, worktree, isolated checkout, or non-interference with the main working directory. An explicit request for Git or `git worktree` loads the Git linked-worktree reference even in a JJ/colocated repository. Otherwise its small `SKILL.md` probes JJ and loads the JJ workspace reference when available, falling back to Git only before mutation. It never changes backend after mutation starts. `/skill:workspace` remains available to force loading but is not required. The generic backend references are independent of the managed planner lifecycle below.
 
-Subagent workspace use is narrower: only thinker may call `planner_workspace`, and that tool always launches the `planner` definition. Creation does not require an empty source working-copy change: the isolated root branches from recorded `@-`, leaving source `@` and its files in place. Integration later requires source `@` to be empty so insertion does not rewrite a live source working copy. The durable record stores the backend attachment, source workspace, base Change ID or commit, delegated root Change ID or branch, path, and one exclusive phase:
+Subagent workspace use is narrower: only thinker may call `planner_workspace`, and that tool always launches the `planner` definition. Creation does not require an empty source working-copy change: the isolated root branches from recorded `@-`, leaving source `@` and its files in place. Integration also permits concurrent work in source `@`: it inserts the complete delegated subtree between the recorded base and the same source working-copy change, preserving the source workspace identity, current marker, and on-disk files. The durable record stores the backend attachment, source workspace and current Change ID, base Change ID or commit, delegated root Change ID or branch, path, and one exclusive phase:
 
 - `active`: planner work is isolated and not integrated;
 - `integrated`: the complete recorded subtree/range was integrated without detected conflicts;
 - `cleaned`: the integrated workspace was forgotten and removed;
 - `attention_required`: integration or cleanup encountered uncertainty and is permanently stopped for user intervention.
 
-For JJ, creation makes the delegated root a sibling of the potentially dirty source working-copy change over the recorded `@-` base. It may snapshot normal JJ working-copy state but does not move, rewrite, discard, or edit source files. Integration runs `workspace update-stale` in both workspaces, rejects recovery output, requires the source working-copy change to be empty at integration time, resolves the recorded Change IDs uniquely, verifies the delegated root’s direct base and complete workspace ancestry, rejects foreign descendants, and runs:
+For JJ, creation makes the delegated root a sibling of the potentially dirty source working-copy change over the recorded `@-` base. It may snapshot normal JJ working-copy state but does not move, rewrite, discard, or edit source files. Integration runs `workspace update-stale` in both workspaces, rejects recovery output, resolves the recorded source/base/root Change IDs uniquely, verifies that source `@` still has the recorded base as its sole parent, verifies the delegated root’s direct base and complete workspace ancestry, rejects foreign descendants, and runs:
 
 ```text
 jj rebase -s 'exactly(change_id(<root-change-id>), 1)' -B '<source-workspace>@'
 ```
 
-This moves the complete rooted subtree without assuming how many changes the planner created. Integration then verifies ancestry and checks conflicts on the source workspace revision. Cleanup is a separate operation after verified integration.
+This inserts the complete rooted subtree before source `@` without assuming how many changes the planner created. JJ rebases the same source working-copy change over the delegated tip, yielding `recorded base -> delegated subtree -> original source @` while retaining its working-copy diff on disk. Integration verifies that the source workspace still targets the same Change ID, that the delegated tip is now its direct parent, and that no conflicts or unexpected descendants appeared. Cleanup is a separate operation after verified integration.
 
 Any unexpected graph, divergent Change ID, stale recovery, conflict, partial integration, or cleanup error enters `attention_required`. Thinker must preserve the operation log, workspace, files, and record; report the exact failure; and stop all JJ mutation. It must never attempt its own undo, abandon, conflict resolution, second rebase, or history repair.
 
@@ -152,6 +152,8 @@ Any unexpected graph, divergent Change ID, stale recovery, conflict, partial int
 - `planner_workspace`: create a JJ-preferred isolated workspace and launch exactly one planner;
 - `integrate_planner_workspace`: integrate a completed planner workspace and stop on any uncertainty;
 - `cleanup_planner_workspace`: forget and remove only a cleanly integrated planner workspace.
+
+`message_child` delivery is intentional: `steer` reaches the active run, while `followUp` queues a subsequent instruction. For `Give me a status report, then continue.`, use `steer`. Packaged planners and workers emit a bounded visible interim status, do not call `report_to_parent` for it, and resume the original objective without another prompt. Their later terminal report still occurs exactly once and only after their descendants resolve. The JSONL child log and activity UI expose the interim assistant text without inventing a terminal protocol state.
 
 `wait_for_children` uses a 1.5-second initial discovery grace when no matching child is visible. This covers Pi's parallel tool execution race where `subagent` and `wait_for_children` begin as sibling tool calls and waiting reaches durable storage just before spawning does.
 

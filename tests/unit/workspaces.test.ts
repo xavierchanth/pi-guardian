@@ -53,6 +53,25 @@ test("JJ relocation creates a successor workspace above the source @-", async ()
   );
 });
 
+test("JJ abandonment preserves a workspace with valuable working-copy changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-jj-abandon-"));
+  const repo = join(root, "repo");
+  await execFileAsync("jj", ["git", "init", repo]);
+  await execFileAsync("jj", ["config", "set", "--repo", "user.name", "Pi Tai"], { cwd: repo });
+  await execFileAsync("jj", ["config", "set", "--repo", "user.email", "pi@example.invalid"], { cwd: repo });
+  await writeFile(join(repo, "base.txt"), "base\n");
+  await execFileAsync("jj", ["describe", "-m", "base"], { cwd: repo });
+  await execFileAsync("jj", ["new"], { cwd: repo });
+
+  const port = new JjWorkspacePort();
+  const workspace = await port.create({ cwd: repo, name: "valuable", purpose: "relocation" });
+  await writeFile(join(workspace.path, "recover-me.txt"), "valuable work\n");
+
+  assert.deepEqual(await port.abandon(workspace), { removed: false, recoveryPath: workspace.path });
+  assert.equal(await readFile(join(workspace.path, "recover-me.txt"), "utf8"), "valuable work\n");
+  assert.match((await execFileAsync("jj", ["workspace", "list"], { cwd: repo })).stdout, /valuable:/);
+});
+
 test("JJ planner workspace leaves dirty source work in place and later rebases a multi-change subtree", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-jj-integration-"));
   const repo = join(root, "repo");
@@ -67,6 +86,7 @@ test("JJ planner workspace leaves dirty source work in place and later rebases a
   const sourceChangeId = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout.trim();
   const sourceBaseChangeId = (await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout.trim();
   const sourceDiffBefore = (await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout;
+  const sourceWorkspaceBefore = (await execFileAsync("jj", ["workspace", "list", "-T", 'name ++ "\\n"'], { cwd: repo })).stdout.trim();
 
   const port = new JjWorkspacePort();
   const workspace = await port.create({ cwd: repo, name: "planner", purpose: "delegation" });
@@ -85,8 +105,6 @@ test("JJ planner workspace leaves dirty source work in place and later rebases a
   );
   await assert.rejects(access(join(workspace.path, "source-in-progress.txt")));
 
-  await execFileAsync("jj", ["describe", "-m", "source work"], { cwd: repo });
-  await execFileAsync("jj", ["new"], { cwd: repo });
   await writeFile(join(workspace.path, "one.txt"), "one\n");
   await execFileAsync("jj", ["status"], { cwd: workspace.path });
   await execFileAsync("jj", ["describe", "-m", "first planner change"], { cwd: workspace.path });
@@ -95,9 +113,26 @@ test("JJ planner workspace leaves dirty source work in place and later rebases a
   await execFileAsync("jj", ["status"], { cwd: workspace.path });
   await execFileAsync("jj", ["describe", "-m", "second planner change"], { cwd: workspace.path });
   await execFileAsync("jj", ["new"], { cwd: workspace.path });
+  const delegatedTipChangeId = (await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: workspace.path })).stdout.trim();
 
   assert.deepEqual(await port.integrate(workspace), { conflicted: false, conflictFiles: [] });
   assert.equal(await readFile(join(repo, "source-in-progress.txt"), "utf8"), "source work\n");
+  assert.equal((await execFileAsync("jj", ["workspace", "list", "-T", 'name ++ "\\n"'], { cwd: repo })).stdout.split(/\r?\n/).find((name) => name === sourceWorkspaceBefore), sourceWorkspaceBefore);
+  assert.equal((await execFileAsync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout.trim(), sourceChangeId);
+  assert.equal((await execFileAsync("jj", ["diff", "-r", "@", "--git"], { cwd: repo })).stdout, sourceDiffBefore);
+  assert.equal((await execFileAsync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id"], { cwd: repo })).stdout.trim(), delegatedTipChangeId);
+  assert.equal((await execFileAsync("jj", ["log", "-r", `parents(change_id(${workspace.rootChangeId}))`, "--no-graph", "-T", "change_id"], { cwd: repo })).stdout.trim(), sourceBaseChangeId);
+  const serialChangeIds = (await execFileAsync("jj", [
+    "log",
+    "-r",
+    `change_id(${sourceBaseChangeId})::change_id(${sourceChangeId})`,
+    "--no-graph",
+    "-T",
+    'change_id ++ "\\n"',
+  ], { cwd: repo })).stdout.trim().split(/\r?\n/);
+  assert.equal(serialChangeIds[0], sourceChangeId);
+  assert.equal(serialChangeIds.at(-1), sourceBaseChangeId);
+  assert.equal(serialChangeIds.length, 5, "base, three delegated changes, and dirty source @ form one serial range");
   assert.equal(await readFile(join(repo, "one.txt"), "utf8"), "one\n");
   assert.equal(await readFile(join(repo, "two.txt"), "utf8"), "two\n");
   const history = (await execFileAsync("jj", [

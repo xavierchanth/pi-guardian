@@ -17,6 +17,7 @@ export interface JjFileOperations {
 export interface CreatedChildWorkspace {
   repoRoot: string;
   parentWorkspace: string;
+  parentChangeId: string;
   baseChangeId: string;
   childWorkspace: string;
   childWorkspacePath: string;
@@ -26,6 +27,7 @@ export interface CreatedChildWorkspace {
 export interface IntegrateChildWorkspaceInput {
   repoRoot: string;
   parentWorkspace: string;
+  parentChangeId: string;
   childWorkspace: string;
   childWorkspacePath: string;
   baseChangeId: string;
@@ -100,6 +102,7 @@ export class JjWorkspaceService {
       return {
         repoRoot,
         parentWorkspace,
+        parentChangeId,
         baseChangeId,
         childWorkspace,
         childWorkspacePath,
@@ -159,15 +162,17 @@ export class JjWorkspaceService {
       return {
         repoRoot,
         parentWorkspace: sourceWorkspace,
+        parentChangeId: sourceChangeId,
         baseChangeId,
         childWorkspace: workspaceName,
         childWorkspacePath: workspacePath,
         childRootChangeId: rootChangeId,
       };
     } catch (error) {
-      await this.run(sourceCwd, ["workspace", "forget", workspaceName]).catch(() => undefined);
-      await this.files.rm(workspacePath).catch(() => undefined);
-      throw error;
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Workspace creation stopped after allocation at ${workspacePath}: ${reason} Preserve the workspace and ask the user to intervene.`,
+      );
     }
   }
 
@@ -185,6 +190,9 @@ export class JjWorkspaceService {
     const childRevision = `${input.childWorkspace}@`;
     const childTargetBefore = await this.workspaceTargetChangeId(input.repoRoot, childRevision);
     const parentTargetBefore = await this.workspaceTargetChangeId(input.repoRoot, parentRevision);
+    if (parentTargetBefore !== input.parentChangeId) {
+      throw new Error(`Source workspace target changed before integration: expected ${input.parentChangeId}, received ${parentTargetBefore}.`);
+    }
     const childUpdate = await this.run(input.childWorkspacePath, ["workspace", "update-stale"]);
     const parentUpdate = await this.run(input.repoRoot, ["workspace", "update-stale"]);
     const childTargetAfter = await this.workspaceTargetChangeId(input.repoRoot, childRevision);
@@ -199,9 +207,17 @@ export class JjWorkspaceService {
 
     const rootRevision = `exactly(change_id(${input.childRootChangeId}), 1)`;
     const baseRevision = `exactly(change_id(${input.baseChangeId}), 1)`;
-    const parentDiff = await this.run(input.repoRoot, ["diff", "-r", parentRevision, "--summary"]);
-    if (parentDiff.trim()) {
-      throw new Error("Planner workspace integration requires a fresh empty source working-copy change.");
+    const parentChangeRevision = `exactly(change_id(${input.parentChangeId}), 1)`;
+    const sourceDiffBefore = await this.run(input.repoRoot, ["diff", "-r", parentRevision, "--git"]);
+    const sourceParent = line(
+      await this.run(input.repoRoot, [
+        "--ignore-working-copy", "log", "-r", `parents(${parentChangeRevision})`,
+        "--no-graph", "-T", CHANGE_ID_TEMPLATE,
+      ]),
+      "source working-copy parent change ID",
+    );
+    if (sourceParent !== input.baseChangeId) {
+      throw new Error(`Source workspace parent changed before integration: expected ${input.baseChangeId}, received ${sourceParent}.`);
     }
 
     const linkedRoot = line(
@@ -265,7 +281,34 @@ export class JjWorkspaceService {
     if (integratedRoot !== input.childRootChangeId) {
       throw new Error("Rebase completed but the child subtree is not an ancestor of the source workspace.");
     }
+    const parentTargetIntegrated = await this.workspaceTargetChangeId(input.repoRoot, parentRevision);
+    if (parentTargetIntegrated !== input.parentChangeId) {
+      throw new Error(`Rebase changed source workspace identity: expected ${input.parentChangeId}, received ${parentTargetIntegrated}.`);
+    }
+    const integratedTip = line(
+      await this.run(input.repoRoot, [
+        "--ignore-working-copy", "log", "-r", `parents(${parentChangeRevision})`,
+        "--no-graph", "-T", CHANGE_ID_TEMPLATE,
+      ]),
+      "integrated source parent change ID",
+    );
+    if (integratedTip !== childTargetAfter) {
+      throw new Error("Rebase completed with an unexpected graph: the complete delegated tip is not directly before the source workspace.");
+    }
+    const unexpectedIntegrated = await this.run(input.repoRoot, [
+      "--ignore-working-copy", "log", "-r", `${rootRevision}:: ~ ::${parentChangeRevision}`,
+      "--no-graph", "-T", CHANGE_ID_TEMPLATE,
+    ]);
+    if (unexpectedIntegrated.trim()) {
+      throw new Error("Rebase completed with descendants outside the integrated source ancestry.");
+    }
     const conflictFiles = await this.listConflicts(input.repoRoot, parentRevision);
+    if (conflictFiles.length === 0) {
+      const sourceDiffAfter = await this.run(input.repoRoot, ["diff", "-r", parentRevision, "--git"]);
+      if (sourceDiffAfter !== sourceDiffBefore) {
+        throw new Error("Rebase changed the source working-copy diff instead of preserving its concurrent work.");
+      }
+    }
     return { conflicted: conflictFiles.length > 0, conflictFiles };
   }
 
@@ -275,8 +318,22 @@ export class JjWorkspaceService {
     childWorkspace: string;
     childWorkspacePath: string;
   }): Promise<void> {
-    const conflictFiles = await this.listConflicts(input.repoRoot, `${input.parentWorkspace}@`);
+    const parentRevision = `${input.parentWorkspace}@`;
+    const childRevision = `${input.childWorkspace}@`;
+    const conflictFiles = await this.listConflicts(input.repoRoot, parentRevision);
     if (conflictFiles.length > 0) throw new Error("Cannot finalize child workspace while parent conflicts remain.");
+    const childTarget = await this.workspaceTargetChangeId(input.repoRoot, childRevision);
+    const integratedTarget = line(
+      await this.run(input.repoRoot, [
+        "--ignore-working-copy", "log", "-r",
+        `exactly(change_id(${childTarget}), 1) & ::${parentRevision}`,
+        "--no-graph", "-T", CHANGE_ID_TEMPLATE,
+      ]),
+      "integrated child workspace target",
+    );
+    if (integratedTarget !== childTarget) {
+      throw new Error("Cannot finalize a child workspace whose current target is not integrated into the source workspace.");
+    }
     await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace]);
     await this.files.rm(input.childWorkspacePath);
   }
@@ -285,9 +342,13 @@ export class JjWorkspaceService {
     repoRoot: string;
     childWorkspace: string;
     childWorkspacePath: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
+    await this.run(input.childWorkspacePath, ["status"]);
+    const childDiff = await this.run(input.repoRoot, ["diff", "-r", `${input.childWorkspace}@`, "--summary"]);
+    if (childDiff.trim()) return false;
     await this.run(input.repoRoot, ["workspace", "forget", input.childWorkspace]);
     await this.files.rm(input.childWorkspacePath);
+    return true;
   }
 
   private async verifySourceSibling(

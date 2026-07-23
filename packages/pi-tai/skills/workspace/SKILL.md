@@ -5,11 +5,11 @@ description: Create, enter, inspect, integrate, or clean up an isolated workspac
 
 # Workspace router
 
-Treat “workspace”, “work tree”, and “worktree” as equivalent triggers. Load exactly one backend strategy before taking workspace action:
+Choose exactly one strategy before any workspace mutation:
 
-1. Probe with `jj root` in the current working directory.
-2. If it succeeds, read [references/jj.md](references/jj.md) completely and follow it. Do not inspect or use the Git fallback.
-3. If it fails, and only before any JJ mutation was attempted, read [references/git.md](references/git.md) completely and follow it.
-4. Never switch backends after mutation begins.
+1. If the user explicitly requests Git or says `git worktree`, read [references/git-worktrees.md](references/git-worktrees.md) completely and use Git—even in a JJ or colocated repository.
+2. Otherwise, probe with `jj root` in the current directory. If it succeeds, read [references/jj-workspaces.md](references/jj-workspaces.md) completely and use JJ.
+3. If that probe fails, read [references/git-worktrees.md](references/git-worktrees.md) completely and use Git.
+4. A statement that the repository is Git-backed is not by itself an explicit Git override. Never switch strategies after mutation starts.
 
-A request to work “from a workspace” or avoid the “main thread” authorizes routine read-only repository inspection and creation of an isolated workspace for that task. It does not authorize deleting, abandoning, undoing, or simplifying existing work.
+A generic workspace/worktree request authorizes routine read-only inspection and creation of an isolated workspace. It does not authorize deleting, abandoning, undoing, rewriting, or simplifying existing work.

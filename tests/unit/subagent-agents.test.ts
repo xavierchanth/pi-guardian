@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -44,6 +44,24 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
       { name: "worker", model: "gpt-5.6-sol", effort: "low" },
     ],
   );
+});
+
+test("packaged orchestration guidance covers interim status and dirty-source planner integration", async () => {
+  const [thinker, planner, worker] = await Promise.all(
+    ["thinker", "planner", "worker"].map((name) => readFile(join(PACKAGED, `${name}.md`), "utf8")),
+  );
+  for (const prompt of [planner, worker]) {
+    assert.match(prompt, /bounded interim status as visible assistant text/);
+    assert.match(prompt, /do not call `report_to_parent`/);
+    assert.match(prompt, /automatically resume the original objective without waiting for another prompt/);
+    assert.match(prompt, /`report_to_parent` exactly once only for the terminal outcome/);
+  }
+  assert.match(thinker, /status report from an active child.*`steer`/);
+  assert.match(thinker, /`followUp` instead queues a subsequent instruction/);
+  assert.match(thinker, /integrate even when the source `@` is dirty/);
+  assert.match(thinker, /inserts the complete rooted planner subtree serially immediately before the current source `@`/);
+  assert.match(thinker, /preserves the current source workspace and files/);
+  assert.doesNotMatch(thinker, /wait until your current source working-copy change is empty/);
 });
 
 test("trusted project definitions override user and packaged definitions", async () => {

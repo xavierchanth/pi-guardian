@@ -84,13 +84,13 @@ Pi-Tai registers `web_search` and `web_fetch` as normal standalone tools and gra
 
 ### Explicit workspaces and declarative subagents
 
-Workspaces and worktrees are not session capabilities. The packaged `workspace` skill is advertised to the model and should load automatically when the user asks for a workspace, work tree, worktree, isolated checkout, or to avoid interfering with the main working directory; `/skill:workspace` remains available as a manual override. Its thin router probes JJ, loads the detailed JJ strategy when available, and loads the separate Git fallback only when JJ was unavailable before mutation. JJ creation branches from the recorded source `@-`, so source `@` may contain ongoing work and its files remain untouched. The current Pi session does not silently change cwd: work targets the new path explicitly, or the user can start `pi` from that path for a persistently relocated interactive session. Integration remains separate and requires an empty source working-copy revision before insertion.
+Workspaces and worktrees are not session capabilities. The packaged generic `workspace` skill is advertised to the model and should load automatically when the user asks for a workspace, work tree, worktree, isolated checkout, or to avoid interfering with the main working directory; `/skill:workspace` remains available as a manual override. An explicit request for Git or `git worktree` selects Git even in a JJ/colocated repository. Other workspace requests probe JJ first and use Git only when JJ is unavailable before mutation; routing never changes after mutation starts. Native JJ creation makes a sibling working-copy commit over the current `@`'s parent or parents, excluding current changes unless the user explicitly requests `-r @`. The current Pi session does not silently change cwd: work targets the new path explicitly, or the user can start `pi` from that path for a persistently relocated interactive session.
 
 Subagents are disabled by default. Bare `/subagents` toggles them. `/subagents on` applies the scoped root agent definition (packaged as `thinker`), including its model, effort, exact tools, prompt, and allowed children. `/subagents off` restores the previous main-session model, effort, and tools after direct children resolve; `/subagents force-off` recursively terminates unresolved descendants first. `/subagents list [delegation-id]` opens the child activity/detail view. `/capabilities` now reports subagents rather than workspace backends.
 
 Agent definitions are Markdown files with YAML front matter. Packaged defaults live in `packages/pi-tai/agents`; user definitions in `~/.pi/agent/agents` override them, and trusted nearest-project `.pi/agents` definitions have highest precedence. Thinker may spawn planners, scouts, or researchers; planner may spawn workers, scouts, or researchers; worker may spawn scouts or researchers; specialists cannot delegate. Only thinker owns the planner-workspace tools, so a planner can never launch another planner or create another workspace. Graph validation rejects missing children, root delegation, and cycles.
 
-The normal `subagent` tool launches a persistent isolated Pi process in the same cwd. For a substantial isolated subtask, thinker can use `planner_workspace` to create a JJ-preferred workspace and launch exactly one planner there. Creation may branch from source `@-` while source `@` contains ongoing work, without changing source files. Durable records retain the source workspace, base and root Change IDs, backend path, and integration phase. After source work has reached a fresh empty `@`, `integrate_planner_workspace` updates stale workspaces, validates the complete rooted subtree, and rebases it before that working-copy change without assuming a commit count. `cleanup_planner_workspace` remains a separate post-integration operation. Any graph mismatch, recovery history, conflict, partial integration, or cleanup error enters a non-retryable user-attention state and preserves the workspace.
+The normal `subagent` tool launches a persistent isolated Pi process in the same cwd. For a substantial isolated subtask, thinker can use `planner_workspace` to create a JJ-preferred workspace and launch exactly one planner there. Creation may branch from source `@-` while source `@` contains ongoing work, without changing source files. Durable records retain the source workspace and current Change ID, base and root Change IDs, backend path, and integration phase. After the planner completes, `integrate_planner_workspace` updates stale workspaces, validates the complete rooted subtree, and inserts it serially between the recorded base and the original source `@` without assuming a change count. Source `@` may remain non-empty: its workspace identity, current marker, and on-disk concurrent work are preserved. `cleanup_planner_workspace` remains a separate post-integration operation. Any graph mismatch, recovery history, conflict, partial integration, or cleanup error enters a non-retryable user-attention state and preserves the workspace.
 
 Parents can continue independent work while children run, but remain responsible for avoiding duplicate assignments and conflicting edits. A below-editor widget shows each direct child's task, phase, and latest visible assistant line; `/subagents list` opens full details. Children must resolve their own descendants before reporting. The footer shows `thinker` beside the directory while subagents are enabled; workspace backends do not appear as capabilities.
 
@@ -163,6 +163,15 @@ npm ci
 npm run check
 npm run package:check
 npm run smoke:isolated
+
+# Free seeded workspace-skill fixture/schema validation
+npm run eval:workspace:dry
+
+# Validate the specification-only subagent lifecycle YAML suite
+npm run eval:subagents
+
+# Explicit model-backed behavioral run (not part of npm test/check)
+npm run eval:workspace -- --seed demo --provider <provider> --model <model>
 ```
 
 `smoke:isolated` starts Pi in offline RPC mode with only this distribution loaded. The real-agent acceptance command remains:
@@ -183,7 +192,8 @@ packages/pi-tai/src/work-context/   update_plan domain and persistence
 packages/pi-tai/src/subagents/      delegation and planner-workspace lifecycle
 packages/pi-tai/src/workspaces/     JJ-preferred workspace backend operations
 packages/pi-tai/agents/             thinker, planner, worker, scout, researcher
-packages/pi-tai/skills/             request-triggered workspace router and backend strategies
+packages/pi-tai/skills/             request-triggered generic workspace router and backend references
+evals/                               explicit seeded behavioral suites (never part of normal tests)
 packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       standalone action review and path boundaries
 packages/pi-tai/src/web/            hosted web search and public-only page fetching
