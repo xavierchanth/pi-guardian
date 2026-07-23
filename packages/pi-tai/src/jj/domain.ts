@@ -1,4 +1,39 @@
 import { isAbsolute } from "node:path";
+import {
+  childContextId,
+  fileSetClaimId,
+  integrationId,
+  jjOperationId,
+  sourceWorkspaceId,
+  workspaceId,
+  workspaceWriteLeaseId,
+  type ChildContextId,
+  type FileSetClaimId,
+  type IntegrationId,
+  type JjOperationId,
+  type SourceWorkspaceId,
+  type WorkspaceId,
+  type WorkspaceWriteLeaseId,
+} from "../concurrency/ids.ts";
+
+export {
+  childContextId,
+  fileSetClaimId,
+  integrationId,
+  jjOperationId,
+  sourceWorkspaceId,
+  workspaceId,
+  workspaceWriteLeaseId,
+};
+export type {
+  ChildContextId,
+  FileSetClaimId,
+  IntegrationId,
+  JjOperationId,
+  SourceWorkspaceId,
+  WorkspaceId,
+  WorkspaceWriteLeaseId,
+};
 
 declare const semanticIdBrand: unique symbol;
 declare const handleBrand: unique symbol;
@@ -7,14 +42,7 @@ type Branded<Value, Name extends string> = Value & { readonly [semanticIdBrand]:
 
 export type AbsolutePath = Branded<string, "AbsolutePath">;
 export type ChangeId = Branded<string, "ChangeId">;
-export type SourceWorkspaceId = Branded<string, "SourceWorkspaceId">;
-export type WorkspaceId = Branded<string, "WorkspaceId">;
 export type WorkspaceName = Branded<string, "WorkspaceName">;
-export type ChildContextId = Branded<string, "ChildContextId">;
-export type FileSetClaimId = Branded<string, "FileSetClaimId">;
-export type WorkspaceWriteLeaseId = Branded<string, "WorkspaceWriteLeaseId">;
-export type IntegrationId = Branded<string, "IntegrationId">;
-export type JjOperationId = Branded<string, "JjOperationId">;
 export type ChangeDescription = Branded<string, "ChangeDescription">;
 
 export function absolutePath(value: string): AbsolutePath {
@@ -37,19 +65,6 @@ export function changeDescription(value: string): ChangeDescription {
   if (!normalized) throw new Error("JJ change description must not be empty.");
   if (Buffer.byteLength(normalized, "utf8") > 4096) throw new Error("JJ change description exceeds 4096 bytes.");
   return normalized as ChangeDescription;
-}
-
-export function sourceWorkspaceId(value: string): SourceWorkspaceId { return opaqueId(value, "source workspace") as SourceWorkspaceId; }
-export function workspaceId(value: string): WorkspaceId { return opaqueId(value, "workspace") as WorkspaceId; }
-export function childContextId(value: string): ChildContextId { return opaqueId(value, "child context") as ChildContextId; }
-export function fileSetClaimId(value: string): FileSetClaimId { return opaqueId(value, "file-set claim") as FileSetClaimId; }
-export function workspaceWriteLeaseId(value: string): WorkspaceWriteLeaseId { return opaqueId(value, "workspace write lease") as WorkspaceWriteLeaseId; }
-export function integrationId(value: string): IntegrationId { return opaqueId(value, "integration") as IntegrationId; }
-export function jjOperationId(value: string): JjOperationId { return opaqueId(value, "JJ operation") as JjOperationId; }
-
-function opaqueId(value: string, label: string): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) throw new Error(`Invalid ${label} ID: ${value}`);
-  return value;
 }
 
 export interface SourceWorkspaceHandle {
