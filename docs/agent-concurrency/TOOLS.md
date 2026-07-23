@@ -6,11 +6,25 @@ This is the consolidated tool surface for the target concurrency model. Names ar
 
 1. Models choose intent, scope, semantic descriptions, and findings.
 2. Deterministic tools choose exact JJ revsets, mutation order, locks, receipts, and postcondition checks.
-3. A tool receives semantic IDs and constructs exact expressions itself. Models do not author mutating JJ shell commands.
+3. A tool handler receives opaque tracked handles/leases from its execution context and constructs exact expressions itself. Model-visible inputs do not include cwd, tracked Change IDs, revsets, filesets, or JJ arguments unless choosing a bounded semantic scope genuinely requires one.
 4. Every mutating tool is scoped to an owner context and workspace.
 5. Read-only inspection tools return bounded projections, never complete histories or unbounded diffs into a parent context.
 6. Parent/child protocol messages are custom Pi messages, not user messages.
 7. Checkpoint and squash tools retain the full file-set lock until the JJ receipt verifies success.
+
+## JJ capability boundary
+
+Model tools call strong internal `JjOperations` capabilities. The operation receives a tracked source/workspace handle, file-set claim, writer lease, or approved integration handle injected by the harness. That private handle resolves the small known set of managed working-copy paths and expected Change IDs.
+
+For example, the model-facing isolated checkpoint input is only:
+
+```ts
+{ description: string }
+```
+
+The handler injects `IsolatedWorkspaceWriteLease`; `checkpointWorkspace(lease, { description })` loads and verifies the expected head internally. Shared `checkpoint_change` similarly consumes the active `CheckpointableFileSetClaim`, including its assigned target and complete file set, instead of accepting those values from model text.
+
+`JjOperations` constructs behaviorally meaningful steps over a repository-scoped executor; a lower `JjProcessExecutor` alone converts trusted argv into a bounded `jj` process invocation. Neither executor is model-visible.
 
 ## Agents
 
@@ -228,7 +242,7 @@ Thinker-only main-workspace normalization.
 
 ### `insert_change`
 
-Creates a named empty change immediately before a recorded WIP while preserving the WIP Change ID and content. Its description makes the shared-workspace purpose explicit. It returns:
+The thinker supplies semantic description and assigned owner; its tracked source handle is injected. It does not supply a target Change ID, cwd, or insertion revset. The operation creates a named empty change immediately before a recorded WIP while preserving the WIP Change ID and content. Its description makes the shared-workspace purpose explicit. It returns:
 
 - inserted Change ID;
 - source WIP Change ID;
@@ -241,7 +255,7 @@ Every tracked ID is resolved with `exactly(change_id(<id>), 1)`. This inserted c
 
 ### `checkpoint_change`
 
-Moves only the locked shared-source file set from WIP into the assigned inserted Change ID.
+The handler injects the caller's active checkpointable file-set claim; the model does not resubmit target Change ID, cwd, paths, fileset, or revset. The operation moves only the claim's locked shared-source file set from WIP into its assigned inserted Change ID.
 
 Preconditions:
 
@@ -255,7 +269,7 @@ The tool constructs the exact JJ fileset/revset, performs squash, verifies unrel
 
 ### `workspace_checkpoint`
 
-The only routine checkpoint tool available to an isolated planner/worker. Isolated workspaces serialize writers with a workspace-wide write token rather than shared-source file sets.
+The model supplies only a nonempty semantic `description`; the handler injects its current isolated-workspace writer lease. The only routine checkpoint tool available to an isolated planner/worker. Isolated workspaces serialize writers with a workspace-wide write token rather than shared-source file sets.
 
 This tool provides deterministic `jj commit` semantics:
 

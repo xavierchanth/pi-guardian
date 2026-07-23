@@ -54,7 +54,9 @@ The [blocking policy](BLOCKING_POLICY.md) controls whether a detected condition 
 - The original base Change ID is diagnostic context, not a requirement that commit IDs or exact parent versions remain unchanged.
 - Commit IDs are observed version evidence only. A commit-ID change never blocks by itself.
 - The reviewable workspace range is the inclusive exact `root::content-tip` Change-ID range.
-- Models do not construct mutating revsets. Deterministic code constructs exact revsets and verifies results.
+- Model-visible mutation inputs do not accept cwd, tracked Change IDs, filesets, revsets, or JJ argv; handlers inject opaque tracked handles and active claims/leases.
+- Strong semantic JJ operations construct and verify complete behaviorally meaningful steps; models do not assemble command sequences.
+- Production inherits user/repository JJ configuration but never mutates it, and invokes JJ `0.43.0` using built-in commands with explicit long-form options.
 - Review covers the complete inclusive range, not just the child summary or latest revision.
 - Every nonempty isolated range receives a reviewer report before integration.
 - A clean rebase may refresh approval when Change IDs and normalized patches remain equivalent.

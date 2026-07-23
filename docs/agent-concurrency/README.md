@@ -146,6 +146,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 - [Agent and tool catalog](TOOLS.md) — complete tool contracts and role authority matrix.
 - [Testing and eval strategy](TESTING.md) — Real-JJ E2E harness, SDK lifecycle tests, and prompt benchmarks.
 - [Implementation DAG](IMPLEMENTATION_DAG.md) — dependency-ordered milestones and independently testable slices.
+- [M0 foundation design](M0_DESIGN.md) — strict types, JJ executor/Real-JJ fixture, SDK spike, and eval-runner proposal.
 - [Implementation gaps](IMPLEMENTATION_GAPS.md) — provisional differences between the target model and current implementation.
 
 Legacy context is available under [`../archive/`](../archive/README.md), but this subsystem design controls when the two disagree.

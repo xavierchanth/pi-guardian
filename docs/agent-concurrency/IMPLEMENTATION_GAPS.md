@@ -34,6 +34,8 @@
 | Shared writers | Prompt-based re-read and non-overlap advice | Atomic canonical file-set queues held through checkpoint/squash | P0 |
 | Pi file queue | Built-in edit/write queue only each individual mutation | Reuse/extend `withFileMutationQueue()` across semantic edit→checkpoint boundary | P0 |
 | Shell authority | Worker bash can mutate files/JJ | Shared shell constrained; JJ mutation available only through deterministic tools | P0 |
+| JJ boundary | `JjCommandRunner(cwd, args)` and broad workspace service mix process execution with behavior | Strong `JjOperations` consume injected tracked handles/leases; private repository/process executors emit explicit long-form JJ 0.43.0 commands | P0 |
+| JJ configuration | Process inherits config implicitly and command construction uses short options | Deliberately inherit identity/signing/policy, never mutate config, and use built-in commands with long-form options | P0 |
 | WIP identity | No orchestration-change domain model | `ensure_wip_change` records private mutable WIP and config diagnostics | P0 |
 | Task plan | Session plan exists but no repository Markdown task artifact | Thinker-owned concise task-plan file in WIP with bounded snapshots | P1 |
 | Shared change target | No deterministic pre-WIP target allocation | `insert_change` returns assigned Change ID and operation receipt | P0 |

@@ -83,19 +83,18 @@ graph TD
   F1 --> F3
   A1 --> F3
   F2 --> F4
-  F3 --> F4
 ```
 
 ## Milestones
 
 | Milestone | Slices | Product proof |
 |---|---|---|
-| M0 Foundations | A0–A3 | Strict domain contracts, real-JJ harness, SDK feasibility, eval runner |
+| M0 Foundations | A0–A3 | Strict domain/JJ operation contracts, real-JJ harness, SDK feasibility, opt-in eval runner |
 | M1 In-process child runtime | B0–B4 | Private SDK children push bounded messages, compact, interrupt waits, and resume recursively |
 | M2 Shared-source concurrency | C0–C3 | `insert_change` and locked `checkpoint_change` produce deterministic shared history |
 | M3 Isolated workspace execution | D0–D3 | Workspace root/head are tracked exactly and coherent work uses `workspace_checkpoint` |
 | M4 Review and integration | E0–E4 | Task plan→reviewer→approval→integration→bounded conflict repair |
-| M5 Recovery and dogfood | F0–F4 | User-directed recovery, closure/UI, benchmarks, migration, subprocess removal |
+| M5 Recovery and dogfood | F0–F4 | User-directed recovery, closure/UI, optional benchmarks, migration, subprocess removal |
 
 M1, M2, and the early parts of M3 can progress in parallel after M0.
 
@@ -107,6 +106,7 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 - Add semantic IDs for root session, child context, execution cycle, event, workspace, file-set claim, JJ operation, review, integration, and recovery authorization.
 - Add strict unions from `INVARIANTS.md`.
+- Define semantic `JjOperations` capability interfaces over opaque tracked source/workspace handles and claims/leases.
 - Separate persistence DTO migration from internal domain objects.
 - Encode exactly-once event acknowledgement and usage attribution.
 
@@ -116,8 +116,9 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Depends on:** none
 
+- Add the structured `JjProcessExecutor`, exact `0.43.0` probe, scripted executor, and long-form-command contracts.
 - Build temp-repository lifecycle, normalized snapshots, seeded graph/workspace helpers, and operation-log retention.
-- Pin primary CI JJ version and add compatibility lane configuration.
+- Pin exact JJ `0.43.0` for the initial runtime and primary CI contract.
 - Add exact Change-ID and normalized-patch assertion helpers.
 
 **Exit:** one model-free test proves a real JJ before/tool-call/after assertion and fails with a retained diagnostic fixture.
@@ -138,10 +139,10 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 **Depends on:** none
 
 - Define stable YAML/JSON cases, expected/forbidden tools, lifecycle assertions, and rubric hooks.
-- Support model-free tool-selection fixtures and live `pi -ne -e .` cases.
+- Support dry/model-free tool-selection fixtures and opt-in live `pi -ne -e .` cases.
 - Keep model output separate from deterministic repository assertions.
 
-**Exit:** one no-JJ policy case and one empty real-JJ agent case execute through the same report format.
+**Exit:** the runner validates and dry-runs one no-JJ case and one Real-JJ agent case through the same report format; executing live models remains opt-in and non-gating.
 
 ### B0 — Child context coordinator
 
@@ -201,8 +202,8 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Depends on:** A0, A1
 
-- Centralize command execution, repository mutex, exact Change-ID resolver, operation IDs, normalized snapshots, and idempotency keys.
-- Deny arbitrary model-authored mutating revsets.
+- Implement strong `JjOperations` capabilities over tracked handles/leases, then centralize command execution, repository mutex, exact Change-ID resolver, operation IDs, normalized snapshots, and idempotency keys.
+- Keep cwd, tracked Change IDs, filesets, revsets, and argv out of model-visible mutation inputs.
 - Distinguish expected rewrite, divergence, recovery state, conflict, and unknown partial mutation.
 
 **Exit:** every tracked ID passes through `exactly(change_id(<id>), 1)` and every mutation returns a verifiable receipt.
@@ -359,7 +360,7 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Exit:** Active/Inactive/inspect/wait views satisfy UI and context-boundary tests.
 
-### F3 — Real-JJ agent benchmark
+### F3 — Optional Real-JJ agent benchmark
 
 **Depends on:** A1, A3, F1
 
@@ -367,16 +368,16 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 - Assert tool sequences and independent graph/filesystem postconditions.
 - Track model/role cost and context regressions.
 
-**Exit:** shared checkpoint, isolated checkpoint, clean rebase, conflict repair, restart, and authorized recovery cases pass reliably.
+**Exit:** when explicitly run, shared checkpoint, isolated checkpoint, clean rebase, conflict repair, restart, and authorized recovery cases produce independently verified reports. Results guide improvement but do not gate correctness or migration.
 
 ### F4 — Migration and subprocess removal
 
-**Depends on:** F2, F3
+**Depends on:** F2
 
 - Migrate/quarantine legacy records and preserve old workspace recovery metadata.
 - Remove subprocess/FIFO launch/control paths after parity.
 - Update prompts, tool aliases, package docs, and cleanup paths.
-- Run full package, runtime, Real-JJ, isolated-load, and eval acceptance.
+- Run full package, runtime, deterministic Real-JJ, and isolated-load acceptance; optionally record a separate eval benchmark.
 
 **Exit:** production behavior uses only in-process child contexts; legacy data remains inspectable and safe.
 
@@ -391,6 +392,6 @@ After M0, recommended parallel lanes are:
 | Workspace JJ | C0 → D0 → D1; then B0 + D0 → D2 → D3 |
 | Review | E0 in parallel; then D3 + B1 + E0 → E1 → E2 |
 | Integration/recovery | E2 + C3 → E3 → E4; B4 + E3 → F0 |
-| Productization | E4 + F0 → F1 → {F2, F3} → F4 |
+| Productization | E4 + F0 → F1 → F2 → F4; optional benchmark F1 + A1 + A3 → F3 |
 
 Each slice must add its model-free contract tests and applicable real-JJ tests before dependents consume it.

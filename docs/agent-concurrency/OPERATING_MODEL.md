@@ -187,7 +187,7 @@ Recommended user configuration:
 private-commits = "description('wip:*') | description('private:*')"
 ```
 
-Pi-Tai checks for missing protection and explains the risk. It never edits user config. It does not create bookmarks, push, or otherwise publish.
+Pi-Tai checks for missing protection and explains the risk. It inherits user/repository JJ configuration so identity, signing, immutability, and related policy remain active, but never edits that configuration. Managed commands use built-in command names and explicit long-form options. Pi-Tai does not create bookmarks, push, or otherwise publish.
 
 ### Task-plan Markdown
 
@@ -204,7 +204,7 @@ The thinker keeps one concise managed Markdown plan per substantial user objecti
 - validation evidence; and
 - operation ID.
 
-The model supplies semantic intent and description. Code supplies exact revsets and mutation sequence. If path extraction is ambiguous, the operation stops before mutation and the task is rerouted to isolation.
+The model supplies semantic intent and description. Tool handlers inject opaque tracked source/workspace handles and active claims/leases; strong `JjOperations` capabilities supply known cwd, expected Change IDs, exact revsets, and mutation sequence. Model-visible mutation inputs never accept raw cwd, tracked Change IDs, filesets, revsets, or JJ argv. If path extraction is ambiguous, the operation stops before mutation and the task is rerouted to isolation.
 
 ## 6. Isolated JJ workspace model
 

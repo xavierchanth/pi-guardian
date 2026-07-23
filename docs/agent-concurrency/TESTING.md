@@ -1,6 +1,6 @@
 # Agent concurrency testing and eval strategy
 
-The concurrency/JJ subsystem needs both deterministic tests and model-behavior evals. Prompt evals cannot replace real-JJ postcondition tests, and mocked JJ tests cannot prove the command sequences work against JJ's actual operation model.
+The concurrency/JJ subsystem needs deterministic correctness tests and separate model-behavior evals. Prompt evals are optional improvement instruments, not tests or merge gates. They cannot replace Real-JJ postcondition tests, and mocked JJ tests cannot prove command sequences work against JJ's actual operation model.
 
 ## Test layers
 
@@ -59,21 +59,31 @@ interface JjFixtureSnapshot {
 
 Commit IDs may be recorded for diagnostics but are excluded from equality assertions unless a test specifically proves that a rewrite occurred. Every tracked Change ID lookup uses `exactly(change_id(<id>), 1)`.
 
-### Tool-call harness
+### Semantic-operation harness
 
-The same public tool handler should be callable without a model:
+The same strong JJ operation used by the public tool handler is callable without a model. The test fixture supplies the tracked handle/lease that the harness would normally inject:
 
 ```ts
 const before = await fixture.snapshot();
-const result = await tools.workspaceCheckpoint({
-  workspaceId: fixture.workspaceId,
+const lease = await fixture.acquireWorkspaceWriteLease();
+const result = await operations.checkpointWorkspace(lease, {
   description: "feat(runtime): add restart reconciliation",
 });
 const after = await fixture.snapshot();
 expectWorkspaceCheckpoint({ before, result, after });
 ```
 
-Tests assert both the tool receipt and independent JJ state. They do not trust tool output as proof of its own correctness.
+A separate handler contract test proves that the model-visible schema contains only `description` and injects the current lease. Tests assert both the operation receipt and independent JJ state; they do not trust operation output as proof of its own correctness.
+
+### Executor and capability contracts
+
+- Probe accepts exact JJ `0.43.0` and classifies every other version as unsupported before managed mutation.
+- Production execution inherits a temporary test JJ configuration and never invokes `config set`/`config edit`.
+- Every constructed command uses a built-in command name and long-form options; contract fixtures reject short options such as `-r`, `-T`, `-m`, or `-B`.
+- `JjProcessExecutor` classifies timeout, cancellation, output limit, missing binary, spawn failure, and nonzero exit.
+- Model-facing mutation schemas omit cwd, tracked Change IDs, filesets, revsets, and argv.
+- Semantic operations receive only opaque tracked handles/claims/leases plus bounded semantic input.
+- Reviewer dependencies expose read-only JJ capability interfaces with no mutation methods.
 
 ## Deterministic tool scenario matrix
 
@@ -233,9 +243,11 @@ Example cases:
 - receipt/event completeness; and
 - token/cost regression budget by role/model.
 
-## CI policy
+## Correctness and eval policy
 
-- Pin a supported JJ version for deterministic CI while running a small compatibility lane against the newest supported version.
+- Pin exact JJ `0.43.0` for the initial runtime and deterministic CI contract; add compatibility lanes only through an explicit later decision.
 - Real-JJ tool E2E tests are required, not optional skips, in the primary CI environment.
-- Model evals may run in scheduled/pre-release lanes, but their seeded repository postconditions use the same assertion library as deterministic E2E tests.
-- Failed fixtures retain normalized snapshots, tool receipts, bounded agent event logs, and `jj op log`; they never expose hidden reasoning.
+- Domain, fake-executor, Real-JJ operation, and fake-model SDK tests are normal correctness gates.
+- Live-model policy and Real-JJ agent evals run only when explicitly requested. Their outcomes guide harness/prompt improvement and do not gate merges.
+- Eval repository postconditions reuse the deterministic assertion library so benchmark reports remain independently grounded.
+- Failed test/eval fixtures retain normalized snapshots, tool receipts, bounded agent event logs, and `jj op log`; they never expose hidden reasoning.
