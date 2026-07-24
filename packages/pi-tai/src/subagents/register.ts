@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
@@ -9,7 +9,11 @@ import {
 import { Key, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
-import type { WorkspacePort } from "../workspaces/domain.ts";
+import type { PiTaiConfigService } from "../config/register.ts";
+import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
+import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
+import { FileChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
+import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
   discoverAgentDefinitions,
@@ -34,11 +38,12 @@ import {
   FileDelegationStore,
   childReport,
   isResolvedDelegation,
+  snapshotAgentDefinition,
   type AgentDefinitionSnapshot,
   type DelegationRecord,
   type DelegationStore,
 } from "./store.ts";
-import { TASK_RESOURCE_TYPES } from "./task.ts";
+import { normalizeTaskPacket, TASK_RESOURCE_TYPES } from "./task.ts";
 import {
   delegationTree,
   delegationTreePrefix,
@@ -67,6 +72,8 @@ export interface SubagentDependencies {
   childDelegationId?: string;
   capabilities?: SessionCapabilityController;
   workspace?: WorkspacePort;
+  config?: PiTaiConfigService;
+  coordinator?: ChildContextCoordinator;
   agentDir?: string;
 }
 
@@ -82,6 +89,15 @@ export function registerSubagents(
     store,
     launcher: new PiChildProcessLauncher(store),
   });
+  const stateRoot = dirname(storeRoot);
+  const coordinator = dependencies.coordinator ?? (dependencies.config
+    ? new ChildContextCoordinator({
+        store: new FileChildContextStore(join(stateRoot, "context-records")),
+        sessionFactory: new PrivateChildSessionFactory({ config: dependencies.config }),
+        stateRoot,
+        agentDir,
+      })
+    : undefined);
   const capabilities = dependencies.capabilities;
   const workspace = dependencies.workspace ?? new JjWorkspacePort();
   capabilities?.register({
@@ -106,6 +122,74 @@ export function registerSubagents(
   let childWidgetTimer: ReturnType<typeof setInterval> | undefined;
   let childWidgetRefresh: Promise<void> | undefined;
   let childWidgetGeneration = 0;
+
+  const spawnManagedChild = async (input: {
+    task: Parameters<SubagentOrchestrator["spawnChild"]>[0]["task"];
+    agent: AgentDefinition;
+    caller: AgentDefinition;
+    parentCwd: string;
+    parentSessionId: string;
+    parentDelegationId?: string;
+    workspace?: WorkspaceAttachment;
+    modelRegistry: ExtensionContext["modelRegistry"];
+  }): Promise<DelegationRecord> => {
+    if (!coordinator) return orchestrator.spawnChild(input);
+    const task = normalizeTaskPacket(input.task, input.agent.uncertaintyHandling);
+    const agent = snapshotAgentDefinition(input.agent);
+    const caller = snapshotAgentDefinition(input.caller);
+    const context = await coordinator.spawn({
+      rootSessionId: childDelegation?.parentSessionId ?? input.parentSessionId,
+      ...(input.parentDelegationId ? { parentContextId: input.parentDelegationId } : {}),
+      cwd: input.parentCwd,
+      task,
+      agent,
+      caller,
+      modelRegistry: input.modelRegistry,
+      ...(input.workspace ? { workspace: input.workspace } : {}),
+      extensions: (contextId) => [{
+        name: `pi-tai-child-runtime-${contextId}`,
+        factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
+          store,
+          orchestrator,
+          coordinator,
+          ...(dependencies.config ? { config: dependencies.config } : {}),
+          loadInstructions,
+          discoverAgents: discover,
+          childDelegationId: contextId,
+          workspace,
+          agentDir,
+        }),
+      }],
+      onPersisted: async (record: PersistedChildContextV4) => {
+        const legacy: DelegationRecord = {
+          version: 3,
+          id: record.contextId,
+          parentSessionId: input.parentSessionId,
+          ...(input.parentDelegationId ? { parentDelegationId: input.parentDelegationId } : {}),
+          cwd: record.cwd,
+          task,
+          agent,
+          execution: { phase: "created" },
+          ...(input.workspace ? { workspace: { phase: "active", attachment: input.workspace } } : {}),
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        };
+        await store.create(legacy);
+      },
+      onStarted: async (record: PersistedChildContextV4) => {
+        if (record.execution.phase !== "running") return;
+        const { sessionId, sessionFile } = record.execution;
+        await store.update(record.contextId, (current) => ({
+          ...current,
+          execution: { phase: "running" },
+          childSessionId: sessionId,
+          childSessionFile: sessionFile,
+          updatedAt: record.updatedAt,
+        }));
+      },
+    });
+    return orchestrator.child(context.contextId);
+  };
 
   const loadCatalog = (ctx: ExtensionContext): AgentCatalog => {
     catalog = discover(ctx);
@@ -516,13 +600,14 @@ export function registerSubagents(
         throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
       }
       validateAgentTools(target, availableToolNames());
-      const record = await orchestrator.spawnChild({
+      const record = await spawnManagedChild({
         task: params.task,
         agent: target,
         caller,
         parentCwd: ctx.cwd,
         parentSessionId: ctx.sessionManager.getSessionId(),
         ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
+        modelRegistry: ctx.modelRegistry,
       });
       await refreshChildWidget(ctx);
       return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
@@ -553,13 +638,14 @@ export function registerSubagents(
       validateAgentTools(target, availableToolNames());
       const name = workspaceName(params.name, params.task.objective, params.agent);
       const attachment = await workspace.create({ cwd: ctx.cwd, name, purpose: "delegation" });
-      const record = await orchestrator.spawnChild({
+      const record = await spawnManagedChild({
         task: params.task,
         agent: target,
         caller,
         parentCwd: attachment.path,
         parentSessionId: ctx.sessionManager.getSessionId(),
         workspace: attachment,
+        modelRegistry: ctx.modelRegistry,
       });
       await refreshChildWidget(ctx);
       return result(`Spawned ${target.name} ${record.id} in JJ workspace ${attachment.path}.`, record);

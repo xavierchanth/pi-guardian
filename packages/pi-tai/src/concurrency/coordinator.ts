@@ -21,7 +21,9 @@ export interface SpawnContextRequest {
   caller: AgentDefinitionSnapshot;
   modelRegistry: ModelRegistry;
   workspace?: WorkspaceAttachment;
-  extensions?: readonly InlineExtension[];
+  extensions?: readonly InlineExtension[] | ((contextId: string) => readonly InlineExtension[]);
+  onPersisted?: (record: PersistedChildContextV4) => Promise<void>;
+  onStarted?: (record: PersistedChildContextV4) => Promise<void>;
 }
 
 export interface ChildContextRuntime {
@@ -81,6 +83,7 @@ export class ChildContextCoordinator {
       updatedAt: timestamp,
     };
     await this.store.create(record);
+    await request.onPersisted?.(record);
     await this.store.update(contextId, (current) => ({
       ...current,
       execution: { phase: "starting", cycleId, startedAt: timestamp },
@@ -95,9 +98,9 @@ export class ChildContextCoordinator {
         agent: request.agent,
         modelRegistry: request.modelRegistry,
         systemPrompt: request.agent.systemPrompt,
-        extensions: request.extensions,
+        extensions: typeof request.extensions === "function" ? request.extensions(contextId) : request.extensions,
       });
-      await this.store.update(contextId, (current) => ({
+      const started = await this.store.update(contextId, (current) => ({
         ...current,
         execution: {
           phase: "running",
@@ -108,6 +111,7 @@ export class ChildContextCoordinator {
         },
         updatedAt: this.now(),
       }));
+      await request.onStarted?.(started);
       const completion = handle.session.prompt(renderTaskPacket(request.task), { source: "rpc" })
         .then(() => undefined)
         .catch(async (error) => {

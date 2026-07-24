@@ -83,6 +83,7 @@ const productionRegistrars: PiTaiRegistrars = {
   subagents: (pi, runtime) => {
     registerSubagents(pi, {
       capabilities: runtime.capabilities,
+      config: runtime.config,
       agentDir: runtime.agentDir,
     });
   },
