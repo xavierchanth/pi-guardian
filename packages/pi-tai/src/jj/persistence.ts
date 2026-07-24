@@ -28,11 +28,17 @@ interface PersistedClaimBaseV1 {
 
 export type PersistedFileSetClaimV1 = PersistedClaimBaseV1 & (
   | { readonly phase: "queued" }
-  | { readonly phase: "active"; readonly acquiredAt: string; readonly fingerprints: readonly PersistedPathFingerprintV1[] }
+  | {
+      readonly phase: "active";
+      readonly acquiredAt: string;
+      readonly fingerprints: readonly PersistedPathFingerprintV1[];
+      readonly mutatedPaths: readonly string[];
+    }
   | {
       readonly phase: "checkpointing";
       readonly acquiredAt: string;
       readonly fingerprints: readonly PersistedPathFingerprintV1[];
+      readonly mutatedPaths: readonly string[];
       readonly operationId: string;
     }
   | { readonly phase: "released"; readonly releasedAt: string; readonly checkpointOperationId?: string }
@@ -155,7 +161,7 @@ export class FileSharedSourceStore implements SharedSourceStore {
       ...record,
       claims: record.claims.map((claim): PersistedFileSetClaimV1 => {
         if (claim.phase === "released" || claim.phase === "interrupted" || claim.phase === "breached") return claim;
-        return { ...claim, phase: "interrupted", priorPhase: claim.phase, reason, interruptedAt: at };
+        return { ...claimBase(claim), phase: "interrupted", priorPhase: claim.phase, reason, interruptedAt: at };
       }),
       updatedAt: at,
     }));
@@ -242,6 +248,8 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
       throw new Error(`${phase} claim requires one fingerprint per path.`);
     }
     for (const fingerprint of value.fingerprints) validateFingerprint(fingerprint);
+    if (!Array.isArray(value.mutatedPaths)) throw new Error(`${phase} claim requires mutatedPaths.`);
+    for (const path of value.mutatedPaths) repositoryPath(nonempty(path, "claim mutated path"));
   }
   if (phase === "checkpointing") validateManagedId(nonempty(value.operationId, "claim.operationId"), "operation");
   if (phase === "released") {
@@ -257,6 +265,18 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
     nonempty(value.reason, "claim.reason");
     nonempty(value.observedAt, "claim.observedAt");
   }
+}
+
+function claimBase(claim: PersistedFileSetClaimV1): PersistedClaimBaseV1 {
+  return {
+    claimId: claim.claimId,
+    ownerContextId: claim.ownerContextId,
+    rootSessionId: claim.rootSessionId,
+    targetChangeId: claim.targetChangeId,
+    wipChangeId: claim.wipChangeId,
+    paths: claim.paths,
+    queuedAt: claim.queuedAt,
+  };
 }
 
 function validateFingerprint(value: unknown): void {

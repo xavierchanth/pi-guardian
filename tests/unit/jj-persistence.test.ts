@@ -40,6 +40,7 @@ function source(root: string): PersistedSharedSourceV1 {
       queuedAt: "2026-01-01T00:00:00.000Z",
       acquiredAt: "2026-01-01T00:00:01.000Z",
       fingerprints: [{ path: "src/a.ts", digest: DIGEST }],
+      mutatedPaths: [],
     }],
     operations: [{
       phase: "started",
@@ -99,7 +100,13 @@ test("shared source updates serialize and restart interrupts every live claim", 
 
     const interrupted = await store.interruptLiveClaims("source-1", "process restart", "2026-01-01T00:00:05.000Z");
     assert.deepEqual(interrupted.claims[0], {
-      ...source(root).claims[0],
+      claimId: "claim-1",
+      ownerContextId: "child-1",
+      rootSessionId: "root-1",
+      targetChangeId: CHANGE_B,
+      wipChangeId: CHANGE_A,
+      paths: ["src/a.ts"],
+      queuedAt: "2026-01-01T00:00:00.000Z",
       phase: "interrupted",
       priorPhase: "active",
       reason: "process restart",
