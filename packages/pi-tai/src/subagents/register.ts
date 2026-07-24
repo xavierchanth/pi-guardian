@@ -16,6 +16,7 @@ import { FileChildContextStore, type ChildContextStore, type PersistedChildConte
 import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
+import { ChildContextReconciler } from "../concurrency/reconcile.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
@@ -82,6 +83,7 @@ export interface SubagentDependencies {
   waits?: ChildEventWaitRegistry;
   usageLedger?: ChildUsageLedger;
   retention?: ChildJournalRetention;
+  reconciler?: ChildContextReconciler;
   agentDir?: string;
 }
 
@@ -113,6 +115,9 @@ export function registerSubagents(
   const waits = dependencies.waits ?? new ChildEventWaitRegistry();
   const protocol = dependencies.protocol ?? (coordinator
     ? new ChildEventProtocol({ store: contextStore, coordinator, rootBridge: pi, onDelivered: (event) => waits.notify(event) })
+    : undefined);
+  const reconciler = dependencies.reconciler ?? (coordinator
+    ? new ChildContextReconciler({ store: contextStore, coordinator, waits })
     : undefined);
   const capabilities = dependencies.capabilities;
   const workspace = dependencies.workspace ?? new JjWorkspacePort();
@@ -173,6 +178,7 @@ export function registerSubagents(
           waits,
           usageLedger,
           retention,
+          ...(reconciler ? { reconciler } : {}),
           ...(dependencies.config ? { config: dependencies.config } : {}),
           loadInstructions,
           discoverAgents: discover,
@@ -782,6 +788,46 @@ export function registerSubagents(
       }
       const record = await orchestrator.message(params.delegationId, params.message, params.delivery ?? "steer");
       return result(`Sent ${params.delivery ?? "steer"} message to ${record.id}.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "reconcile_children",
+    label: "Reconcile Children",
+    description: "Reconcile the durable child tree post-order and resume only safe quiescent contexts.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      if (!reconciler) return result("No in-process child contexts require reconciliation.", []);
+      const rootSessionId = childDelegation?.parentSessionId ?? ctx.sessionManager.getSessionId();
+      const reconciled = await reconciler.reconcile({
+        rootSessionId,
+        modelRegistry: ctx.modelRegistry,
+        extensions: (contextId) => [{
+          name: `pi-tai-child-runtime-${contextId}`,
+          factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
+            store,
+            orchestrator,
+            coordinator,
+            contextStore,
+            protocol,
+            waits,
+            usageLedger,
+            retention,
+            reconciler,
+            ...(dependencies.config ? { config: dependencies.config } : {}),
+            loadInstructions,
+            discoverAgents: discover,
+            childDelegationId: contextId,
+            workspace,
+            agentDir,
+          }),
+        }],
+      });
+      const summary = reconciled.length
+        ? reconciled.map((item) => `${"  ".repeat(item.depth)}${item.contextId}: ${item.disposition}`).join("\n")
+        : "No durable child contexts.";
+      return result(`Reconciled children post-order.\n${summary}`, reconciled);
     },
   });
 

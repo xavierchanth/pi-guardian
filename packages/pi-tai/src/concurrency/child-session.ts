@@ -27,6 +27,7 @@ export interface PrivateChildSessionRequest {
   systemPrompt: string;
   extensions?: readonly InlineExtension[];
   signal?: AbortSignal;
+  sessionFile?: string;
 }
 
 export interface PrivateChildProtocolMessage {
@@ -110,7 +111,9 @@ export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPor
       thinkingLevel: request.agent.effort,
       tools: [...request.agent.tools],
       resourceLoader,
-      sessionManager: SessionManager.create(request.cwd, paths.sessions),
+      sessionManager: request.sessionFile
+        ? SessionManager.open(request.sessionFile, paths.sessions, request.cwd)
+        : SessionManager.create(request.cwd, paths.sessions),
       settingsManager,
     };
     if (compatibility.runtime) options.modelRuntime = compatibility.runtime;

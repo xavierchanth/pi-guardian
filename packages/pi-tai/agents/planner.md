@@ -18,6 +18,7 @@ tools:
   - message_child
   - await_child_event
   - ack_child_event
+  - reconcile_children
   - request_child_status
   - request_child_summary
   - concurrency_usage

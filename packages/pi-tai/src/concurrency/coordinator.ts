@@ -148,6 +148,69 @@ export class ChildContextCoordinator {
     return this.store.listChildren(rootSessionId, parentContextId);
   }
 
+  async resume(input: {
+    contextId: string;
+    modelRegistry: ModelRegistry;
+    extensions?: readonly InlineExtension[];
+    reconciliationSummary: string;
+  }): Promise<PersistedChildContextV4> {
+    const current = await this.store.get(input.contextId);
+    if (!current) throw new Error(`Unknown child context: ${input.contextId}`);
+    if (current.execution.phase !== "interrupted") {
+      throw new Error(`Only interrupted child contexts may resume; current phase is ${current.execution.phase}.`);
+    }
+    if (this.runtimes.has(input.contextId)) throw new Error(`Child context ${input.contextId} already has an active SDK runtime.`);
+    const cycleId = this.id();
+    const startedAt = this.now();
+    await this.store.update(input.contextId, (record) => ({
+      ...record,
+      execution: { phase: "starting", cycleId, startedAt },
+      updatedAt: startedAt,
+    }));
+    try {
+      const handle = await this.sessionFactory.create({
+        contextId: current.contextId,
+        cwd: current.cwd,
+        stateRoot: this.stateRoot,
+        agentDir: this.agentDir,
+        agent: current.agent,
+        modelRegistry: input.modelRegistry,
+        systemPrompt: current.agent.systemPrompt,
+        extensions: input.extensions,
+        ...(current.execution.sessionFile ? { sessionFile: current.execution.sessionFile } : {}),
+      });
+      const running = await this.store.update(input.contextId, (record) => ({
+        ...record,
+        execution: { phase: "running", cycleId, startedAt, sessionId: handle.sessionId, sessionFile: handle.sessionFile },
+        updatedAt: this.now(),
+      }));
+      const unsubscribe = handle.session.subscribe((event) => {
+        if (event.type !== "message_end" || event.message.role !== "assistant" || !this.usageLedger) return;
+        void this.usageLedger.recordAssistant({
+          contextId: current.contextId,
+          cycleId,
+          role: current.agent.name,
+          provider: current.agent.provider,
+          model: current.agent.model,
+          message: event.message,
+        });
+      });
+      const completion = handle.waitForIdle();
+      this.runtimes.set(input.contextId, { contextId: input.contextId, cycleId, handle, completion, unsubscribe });
+      handle.send({
+        customType: "pi-tai-continue-v1",
+        content: bounded(input.reconciliationSummary, 8_000, "reconciliation summary"),
+        details: { kind: "continue", reconciliationSummary: input.reconciliationSummary },
+        delivery: "steer",
+        triggerTurn: true,
+      });
+      return running;
+    } catch (error) {
+      await this.recordIncident(input.contextId, cycleId, error instanceof Error ? error.message : String(error));
+      return (await this.store.get(input.contextId))!;
+    }
+  }
+
   async message(
     contextId: string,
     input: { customType: string; content: string; details: unknown; delivery?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
