@@ -16,7 +16,7 @@ function context(id: string, parentContextId?: string): PersistedChildContextV4 
       tools: [], allowedChildren: [], uncertaintyHandling: "best-effort", systemPrompt: "work", source: "packaged", filePath: "worker.md", contentHash: "hash",
     },
     execution: { phase: "running", cycleId: `cycle-${id}`, startedAt: "now", sessionId: `session-${id}`, sessionFile: `/private/${id}.jsonl` },
-    events: [], usage: [], createdAt: "now", updatedAt: "now",
+    events: [], usage: [], telemetryGaps: [], createdAt: "now", updatedAt: "now",
   };
 }
 
@@ -43,6 +43,9 @@ test("usage ledger deduplicates intrinsic messages and aggregates descendants ex
   assert.equal(totals.byContext.parent.input, 10);
   assert.equal(totals.byContext.child.input, 20);
   assert.equal(totals.byModel["faux/one"].cost, .03);
+  const withoutUsage = { ...assistant("m3", 1), usage: undefined } as unknown as AssistantMessage;
+  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "planner", provider: "faux", model: "one", message: withoutUsage });
+  assert.deepEqual((await store.get("parent"))?.telemetryGaps.map((gap) => gap.reason), ["missing_message_usage"]);
 });
 
 test("journal cleanup requires terminal acknowledgement and closed workspace custody", async () => {

@@ -1,3 +1,4 @@
+import type { HostServicePort } from "./host-services.ts";
 import type {
   RuntimeCapabilities,
   SessionCreateParams,
@@ -29,6 +30,7 @@ export interface PromptStart {
 }
 
 export interface RuntimePort {
+  bindHostServices?(services: HostServicePort): void;
   capabilities(): Promise<RuntimeCapabilities>;
   createSession(params: SessionCreateParams, emit: RuntimeEventSink): Promise<SessionInfo>;
   openSession(params: SessionOpenParams, emit: RuntimeEventSink): Promise<SessionInfo>;

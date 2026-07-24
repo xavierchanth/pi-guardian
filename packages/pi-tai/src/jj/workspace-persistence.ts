@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
+import { HostConcurrencyState } from "../concurrency/host-state.ts";
 
 export interface PersistedWorkspaceAllocationV1 {
   readonly allocationId: string;
@@ -58,11 +59,24 @@ export type PersistedWorkspaceReportV1 =
   | ({ readonly range: "empty"; readonly proofHash: string } & PersistedRangeEvidenceV1)
   | ({ readonly range: "nonempty"; readonly contentTipChangeId: string; readonly normalizedPatchHash: string } & PersistedRangeEvidenceV1);
 
+interface PersistedFrozenCustodyV1 { readonly reviewCycle?: number; readonly priorReviewIds?: readonly string[]; readonly identity: PersistedWorkspaceIdentityV1; readonly reportOperationId: string; readonly reportVersion: number; readonly report: PersistedWorkspaceReportV1; readonly operations: readonly PersistedWorkspaceOperationV1[]; readonly createdAt: string; readonly updatedAt: string }
+export type PersistedIntegrationAttemptV1 = { readonly integrationId: string; readonly approvalId: string; readonly operationId: string; readonly phase: "prepared" | "workspace_detached" | "empties_removed" | "range_inserted" | "graph_verified" | "directory_removed" | "unknown"; readonly sourceWipChangeId: string; readonly sourcePatchHash: string; readonly orderedChangeIds: readonly string[]; readonly emptyChangeIds: readonly string[]; readonly startedAt: string; readonly lastEvidence: unknown };
 export type PersistedIsolatedWorkspaceV1 =
   | ({ readonly version: 1; readonly phase: "allocating"; readonly workspaceId: string; readonly allocation: PersistedWorkspaceAllocationV1; readonly createdAt: string; readonly updatedAt: string })
-  | ({ readonly version: 1; readonly phase: "active"; readonly identity: PersistedWorkspaceIdentityV1; readonly writer: PersistedWorkspaceWriterV1; readonly operations: readonly PersistedWorkspaceOperationV1[]; readonly createdAt: string; readonly updatedAt: string })
-  | ({ readonly version: 1; readonly phase: "reported"; readonly identity: PersistedWorkspaceIdentityV1; readonly reportOperationId: string; readonly report: PersistedWorkspaceReportV1; readonly operations: readonly PersistedWorkspaceOperationV1[]; readonly createdAt: string; readonly updatedAt: string })
-  | ({ readonly version: 1; readonly phase: "incident"; readonly workspaceId: string; readonly identity?: PersistedWorkspaceIdentityV1; readonly lastSafePhase: "allocating" | "active" | "reported"; readonly reason: string; readonly evidence: unknown; readonly stoppedAt: string; readonly createdAt: string; readonly updatedAt: string });
+  | ({ readonly version: 1; readonly phase: "active"; readonly identity: PersistedWorkspaceIdentityV1; readonly writer: PersistedWorkspaceWriterV1; readonly operations: readonly PersistedWorkspaceOperationV1[]; readonly reviewCycle?: number; readonly priorReviewIds?: readonly string[]; readonly createdAt: string; readonly updatedAt: string })
+  | ({ readonly version: 1; readonly phase: "reported"; readonly reportVersion?: number; readonly reviewCycle?: number; readonly priorReviewIds?: readonly string[] } & Omit<PersistedFrozenCustodyV1, "reportVersion">)
+  | ({ readonly version: 1; readonly phase: "acknowledged"; readonly implementationEventId: string; readonly taskId: string } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "reviewing"; readonly implementationEventId: string; readonly taskId: string; readonly reviewId: string; readonly reviewCycle: number } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "changes_requested"; readonly implementationEventId: string; readonly taskId: string; readonly reviewId: string; readonly reviewCycle: number } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "approved"; readonly implementationEventId: string; readonly taskId: string; readonly reviewId: string; readonly approval: unknown } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "integrating"; readonly implementationEventId: string; readonly taskId: string; readonly reviewId: string; readonly approval: unknown; readonly attempt: PersistedIntegrationAttemptV1 } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "conflict_resolution"; readonly implementationEventId: string; readonly taskId: string; readonly reviewId: string; readonly approval: unknown; readonly integrationReceipt: unknown; readonly conflictPaths: readonly string[]; readonly focusedReviewId?: string } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "integrated"; readonly taskId: string; readonly approval: unknown; readonly integrationReceipt: unknown } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "verifying"; readonly taskId: string; readonly integrationReceipt: unknown; readonly verificationId: string; readonly verificationReceipt: unknown } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "closed"; readonly taskId: string; readonly integrationReceipt: unknown; readonly verificationReceipt: unknown; readonly closedAt: string } & PersistedFrozenCustodyV1)
+  | ({ readonly version: 1; readonly phase: "closed_no_changes"; readonly identity: PersistedWorkspaceIdentityV1; readonly proof: PersistedWorkspaceReportV1; readonly taskId: string; readonly closedAt: string; readonly createdAt: string; readonly updatedAt: string })
+  | ({ readonly version: 1; readonly phase: "cleanup_pending"; readonly identity: PersistedWorkspaceIdentityV1; readonly outcome: "closed" | "closed_no_changes"; readonly semanticReceipt: unknown; readonly reason: string; readonly createdAt: string; readonly updatedAt: string })
+  | ({ readonly version: 1; readonly phase: "incident"; readonly workspaceId: string; readonly identity?: PersistedWorkspaceIdentityV1; readonly lastSafePhase: string; readonly reason: string; readonly evidence: unknown; readonly stoppedAt: string; readonly createdAt: string; readonly updatedAt: string });
 
 export interface IsolatedWorkspaceStore {
   create(record: PersistedIsolatedWorkspaceV1): Promise<void>;
@@ -70,6 +84,35 @@ export interface IsolatedWorkspaceStore {
   list(): Promise<PersistedIsolatedWorkspaceV1[]>;
   update(workspaceId: string, reducer: (record: PersistedIsolatedWorkspaceV1) => PersistedIsolatedWorkspaceV1): Promise<PersistedIsolatedWorkspaceV1>;
   interruptLiveWriters(workspaceId: string, reason: string, at?: string): Promise<PersistedIsolatedWorkspaceV1>;
+}
+
+export class HostIsolatedWorkspaceStore implements IsolatedWorkspaceStore {
+  private readonly state: HostConcurrencyState;
+  constructor(state: HostConcurrencyState) { this.state = state; }
+  async create(record: PersistedIsolatedWorkspaceV1): Promise<void> {
+    const value = validateIsolatedWorkspace(record); const id = workspaceIdOf(value);
+    await this.state.mutateSegment<PersistedIsolatedWorkspaceV1>("workspaces", "workspace.created", { workspaceId: id }, (records) => {
+      if (records.some((candidate) => workspaceIdOf(candidate) === id)) throw new Error(`Workspace already exists: ${id}`);
+      return [...records, value];
+    });
+  }
+  async get(workspaceId: string): Promise<PersistedIsolatedWorkspaceV1 | undefined> { return (await this.list()).find((record) => workspaceIdOf(record) === workspaceId); }
+  async list(): Promise<PersistedIsolatedWorkspaceV1[]> { return (await this.state.readSegment<PersistedIsolatedWorkspaceV1>("workspaces")).map(validateIsolatedWorkspace); }
+  async update(workspaceId: string, reducer: (record: PersistedIsolatedWorkspaceV1) => PersistedIsolatedWorkspaceV1): Promise<PersistedIsolatedWorkspaceV1> {
+    let output: PersistedIsolatedWorkspaceV1 | undefined;
+    await this.state.mutateSegment<PersistedIsolatedWorkspaceV1>("workspaces", "workspace.replaced", { workspaceId }, (records) => records.map((record) => {
+      if (workspaceIdOf(record) !== workspaceId) return record;
+      const next = validateIsolatedWorkspace(reducer(structuredClone(record))); if (workspaceIdOf(next) !== workspaceId) throw new Error("Workspace update changed identity."); output = next; return next;
+    }));
+    if (!output) throw new Error(`Unknown isolated workspace: ${workspaceId}`); return output;
+  }
+  interruptLiveWriters(workspaceId: string, reason: string, at = new Date().toISOString()): Promise<PersistedIsolatedWorkspaceV1> {
+    return this.update(workspaceId, (record) => {
+      if (record.phase !== "active" || record.writer.phase === "available" || record.writer.phase === "interrupted") return record;
+      const writer = record.writer;
+      return { ...record, writer: { phase: "interrupted", priorPhase: writer.phase, priorOwnerContextId: writer.ownerContextId, expectedHeadChangeId: writer.phase === "leased" ? writer.headChangeId : writer.expectedHeadChangeId, generation: writer.generation, interruptedAt: at, reason }, updatedAt: at };
+    });
+  }
 }
 
 export class FileIsolatedWorkspaceStore implements IsolatedWorkspaceStore {
@@ -124,12 +167,16 @@ export class FileIsolatedWorkspaceStore implements IsolatedWorkspaceStore {
 export function validateIsolatedWorkspace(input: unknown): PersistedIsolatedWorkspaceV1 {
   if (!object(input) || input.version !== 1) throw new Error("Isolated workspace record must use version 1.");
   const phase = nonempty(input.phase, "phase");
-  if (!["allocating", "active", "reported", "incident"].includes(phase)) throw new Error(`Invalid workspace phase: ${phase}`);
+  const phases = ["allocating", "active", "reported", "acknowledged", "reviewing", "changes_requested", "approved", "integrating", "conflict_resolution", "integrated", "verifying", "closed", "closed_no_changes", "cleanup_pending", "incident"];
+  if (!phases.includes(phase)) throw new Error(`Invalid workspace phase: ${phase}`);
   nonempty(input.createdAt, "createdAt"); nonempty(input.updatedAt, "updatedAt");
   if (phase === "allocating") { managedId(nonempty(input.workspaceId, "workspaceId"), "workspace"); validateAllocation(input.allocation); forbid(input, ["identity", "writer", "operations", "report"], phase); }
   if (phase === "active") { validateIdentity(input.identity); validateWriter(input.writer, (input.identity as any).expectedHeadChangeId); validateOperations(input.operations); forbid(input, ["workspaceId", "allocation", "report", "reportOperationId", "reason", "evidence"], phase); }
-  if (phase === "reported") { validateIdentity(input.identity); validateOperations(input.operations); managedId(nonempty(input.reportOperationId, "reportOperationId"), "operation"); validateReport(input.report, (input.identity as any).rootChangeId, (input.identity as any).expectedHeadChangeId); forbid(input, ["workspaceId", "allocation", "writer", "reason", "evidence"], phase); }
-  if (phase === "incident") { managedId(nonempty(input.workspaceId, "workspaceId"), "workspace"); if (input.identity !== undefined) validateIdentity(input.identity); if (!["allocating", "active", "reported"].includes(String(input.lastSafePhase))) throw new Error("Incident lastSafePhase is invalid."); nonempty(input.reason, "reason"); nonempty(input.stoppedAt, "stoppedAt"); if (input.evidence === undefined) throw new Error("Incident evidence is required."); forbid(input, ["allocation", "writer", "operations", "report"], phase); }
+  const frozen = ["reported", "acknowledged", "reviewing", "changes_requested", "approved", "integrating", "conflict_resolution", "integrated", "verifying", "closed"];
+  if (frozen.includes(phase)) { validateIdentity(input.identity); validateOperations(input.operations); managedId(nonempty(input.reportOperationId, "reportOperationId"), "operation"); if (phase !== "reported" && (!Number.isSafeInteger(input.reportVersion) || input.reportVersion < 1)) throw new Error("Frozen custody requires a positive report version."); validateReport(input.report, input.identity.rootChangeId, input.identity.expectedHeadChangeId); if (phase !== "reported") managedId(nonempty(input.taskId, "taskId"), "task"); if (["acknowledged", "reviewing", "changes_requested", "approved", "integrating", "conflict_resolution"].includes(phase)) managedId(nonempty(input.implementationEventId, "implementationEventId"), "event"); if (["reviewing", "changes_requested", "approved", "integrating", "conflict_resolution"].includes(phase)) managedId(nonempty(input.reviewId, "reviewId"), "review"); if (phase === "reviewing" || phase === "changes_requested") { if (!Number.isSafeInteger(input.reviewCycle) || input.reviewCycle < 0) throw new Error("Review cycle is invalid."); } if (phase === "approved" || phase === "integrating" || phase === "conflict_resolution") { if (input.approval === undefined) throw new Error(`${phase} requires approval evidence.`); } if (phase === "integrating") validateIntegrationAttempt(input.attempt); if ((phase === "integrated" || phase === "verifying" || phase === "closed") && input.integrationReceipt === undefined) throw new Error(`${phase} requires integration receipt.`); if ((phase === "verifying" || phase === "closed") && input.verificationReceipt === undefined) throw new Error("Closed custody requires verification receipt."); forbid(input, ["workspaceId", "allocation", "writer", "reason", "evidence"], phase); }
+  if (phase === "closed_no_changes") { validateIdentity(input.identity); managedId(nonempty(input.taskId, "taskId"), "task"); validateReport(input.proof, input.identity.rootChangeId, input.identity.expectedHeadChangeId); if (input.proof.range !== "empty") throw new Error("closed_no_changes requires empty proof."); nonempty(input.closedAt, "closedAt"); }
+  if (phase === "cleanup_pending") { validateIdentity(input.identity); if (!["closed", "closed_no_changes"].includes(String(input.outcome)) || input.semanticReceipt === undefined) throw new Error("Cleanup pending requires semantic outcome receipt."); nonempty(input.reason, "reason"); }
+  if (phase === "incident") { managedId(nonempty(input.workspaceId, "workspaceId"), "workspace"); if (input.identity !== undefined) validateIdentity(input.identity); nonempty(input.lastSafePhase, "lastSafePhase"); nonempty(input.reason, "reason"); nonempty(input.stoppedAt, "stoppedAt"); if (input.evidence === undefined) throw new Error("Incident evidence is required."); forbid(input, ["allocation", "writer", "operations", "report"], phase); }
   return input as unknown as PersistedIsolatedWorkspaceV1;
 }
 
@@ -139,7 +186,8 @@ function validateWriter(value: unknown, expectedHead: string): void { if (!objec
 function validateOperations(value: unknown): void { if (!Array.isArray(value)) throw new Error("Workspace operations must be an array."); const ids = new Set<string>(); for (const item of value) { if (!object(item) || !object(item.outcome)) throw new Error("Workspace operation is invalid."); const id = nonempty(item.operationId, "operationId"); managedId(id, "operation"); if (ids.has(id)) throw new Error(`Duplicate workspace operation: ${id}`); ids.add(id); if (!["allocate_workspace", "workspace_checkpoint", "rebase_workspace", "normalize_change_range", "prepare_workspace_report"].includes(nonempty(item.kind, "operation.kind"))) throw new Error("Invalid workspace operation kind."); nonempty(item.idempotencyKey, "operation.idempotencyKey"); nonempty(item.startedAt, "operation.startedAt"); nonempty(item.beforeJjOperationId, "operation.beforeJjOperationId"); if (item.intent === undefined) throw new Error("Workspace operation intent is required."); const phase = nonempty(item.outcome.phase, "operation.outcome.phase"); if (!["started", "completed", "blocked", "unknown"].includes(phase)) throw new Error("Invalid workspace operation outcome."); if (phase === "started" && !["prepared", "mutating", "verifying"].includes(String(item.outcome.boundary))) throw new Error("Started operation boundary is invalid."); if (phase === "completed" && item.outcome.receipt === undefined) throw new Error("Completed operation requires receipt."); if (phase === "blocked" && item.outcome.blocker === undefined) throw new Error("Blocked operation requires blocker."); if (phase === "unknown") nonempty(item.outcome.reason, "operation outcome reason"); } }
 function validateReport(value: unknown, root: string, head: string): void { if (!object(value) || !["empty", "nonempty"].includes(String(value.range)) || !["inline", "artifact"].includes(String(value.evidence))) throw new Error("Workspace report is invalid."); if (value.evidence === "inline") { if (!Array.isArray(value.orderedChangeIds)) throw new Error("Inline report requires ordered changes."); for (const id of value.orderedChangeIds) fullChangeId(nonempty(id, "report change ID")); if (value.orderedChangeIds.includes(head)) throw new Error("Report range must exclude expected empty head."); if (value.range === "nonempty" && value.orderedChangeIds[0] !== root) throw new Error("Report range must begin at tracked root."); } else { validateArtifact(value.artifact); if (!Number.isSafeInteger(value.changeCount) || !Number.isSafeInteger(value.conflictCount)) throw new Error("Artifact report requires bounded counts."); } if (value.range === "empty") digest(nonempty(value.proofHash, "report.proofHash")); else { fullChangeId(nonempty(value.contentTipChangeId, "report.contentTipChangeId")); if (value.evidence === "inline" && value.orderedChangeIds.at(-1) !== value.contentTipChangeId) throw new Error("Report content tip must end ordered range."); digest(nonempty(value.normalizedPatchHash, "report.normalizedPatchHash")); if (value.evidence === "inline" && !Array.isArray(value.conflictPaths)) throw new Error("Nonempty inline report requires conflict paths."); } }
 function validateArtifact(value: unknown): void { if (!object(value)) throw new Error("Workspace artifact reference is invalid."); digest(nonempty(value.digest, "artifact.digest")); if (!Number.isSafeInteger(value.bytes) || (value.bytes as number) < 0) throw new Error("Artifact bytes are invalid."); if (!["application/json", "text/x-diff"].includes(String(value.mediaType))) throw new Error("Artifact media type is invalid."); nonempty(value.purpose, "artifact.purpose"); absolute(nonempty(value.path, "artifact.path")); }
-function workspaceIdOf(record: PersistedIsolatedWorkspaceV1): string { return record.phase === "active" || record.phase === "reported" ? record.identity.workspaceId : record.workspaceId; }
+function validateIntegrationAttempt(value: unknown): void { if (!object(value)) throw new Error("Integration attempt is required."); for (const key of ["integrationId", "approvalId", "operationId"] as const) managedId(nonempty(value[key], key), key); if (!["prepared", "workspace_detached", "empties_removed", "range_inserted", "graph_verified", "directory_removed", "unknown"].includes(String(value.phase))) throw new Error("Integration attempt phase is invalid."); fullChangeId(nonempty(value.sourceWipChangeId, "sourceWipChangeId")); digest(nonempty(value.sourcePatchHash, "sourcePatchHash")); if (!Array.isArray(value.orderedChangeIds) || !Array.isArray(value.emptyChangeIds)) throw new Error("Integration range evidence is required."); nonempty(value.startedAt, "integration startedAt"); if (value.lastEvidence === undefined) throw new Error("Integration last evidence is required."); }
+function workspaceIdOf(record: PersistedIsolatedWorkspaceV1): string { if (record.phase === "allocating" || record.phase === "incident") return record.workspaceId; return record.identity.workspaceId; }
 function object(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function nonempty(value: unknown, label: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a nonempty string.`); return value; }
 function managedId(value: string, label: string): void { if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) throw new Error(`Invalid ${label} ID: ${value}`); }

@@ -25,8 +25,8 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 | I05 | [Concurrency runtime foundation](initiatives/I05-concurrency-foundation.md) | Complete | — | Strict types, Real-JJ harness, private SDK children, push/recovery foundation |
 | I06 | [Shared-source JJ concurrency](initiatives/I06-shared-jj.md) | Complete | I05 | Atomic file-set queues and deterministic WIP/feature checkpoints |
 | I07 | [Isolated JJ execution](initiatives/I07-isolated-jj.md) | Complete | I05, I06 | Tracked workspace identity, checkpoint, rebase, freeze, and no-change proof |
-| I08 | [Review, integration, and recovery](initiatives/I08-review-integration-recovery.md) | Planned | I06, I07 | Task-plan review gate, deterministic integration, conflict repair, recovery |
-| I09 | [Concurrency productization](initiatives/I09-concurrency-productization.md) | Planned | I08 | Honest closure/UI/accounting and deletion of compatibility paths |
+| I08 | [Review, integration, and recovery](initiatives/I08-review-integration-recovery.md) | Complete | I06, I07 | Task-plan review gate, deterministic integration, conflict repair, recovery |
+| I09 | [Concurrency productization](initiatives/I09-concurrency-productization.md) | Complete | I08 | Honest closure/UI/accounting and deletion of production compatibility paths |
 | I10 | [Desktop and ACP clients](initiatives/I10-desktop-acp.md) | In progress | I04 | Desktop manager and thin ACP adapter consume Host contract |
 | I11 | [Remote and multi-Host access](initiatives/I11-remote-multihost.md) | Exploratory | I04, I10 | Authenticated remote clients with one home Host per session |
 | I12 | [Stateful machine capabilities](initiatives/I12-machine-capabilities.md) | Exploratory | I02, I03, I04 | Browser/computer/image/cmux capabilities governed and persisted uniformly |

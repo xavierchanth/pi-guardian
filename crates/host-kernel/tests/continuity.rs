@@ -82,6 +82,7 @@ async fn a_turn_survives_client_detach_and_continues_for_an_observer() {
     assert_eq!(attached.attachment_count, 1);
 
     let mut text = String::new();
+    let mut usage = None;
     loop {
         let event = tokio::time::timeout(Duration::from_secs(3), events.recv())
             .await
@@ -93,17 +94,41 @@ async fn a_turn_survives_client_detach_and_continues_for_an_observer() {
         if event.event_type == "assistant.text_delta" {
             text.push_str(event.payload["delta"].as_str().unwrap());
         }
+        if event.event_type == "usage.replaced" { usage = Some(event.payload.clone()); }
         if event.event_type == "session.idle" {
             break;
         }
     }
     assert_eq!(text, "slow response");
+    let usage = usage.expect("usage projection");
+    assert_eq!((usage["total"]["input"].as_u64(), usage["total"]["output"].as_u64(), usage["total"]["cost"].as_f64()), (Some(2), Some(3), Some(0.03)));
+    assert_eq!(usage["byModel"]["pi-tai/faux"]["output"].as_u64(), Some(3));
     let complete = kernel.snapshot(created.session_id).await.unwrap();
     assert!(matches!(
         complete.foreground,
         ForegroundSnapshot::Idle { .. }
     ));
     assert!(matches!(complete.runtime, RuntimeSnapshot::Ready { .. }));
+    kernel.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn runtime_core_transactions_are_host_acknowledged_and_projected() {
+    let temporary = tempfile::tempdir().unwrap();
+    let workspace = temporary.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let kernel = HostKernel::start(kernel_config(&temporary)).unwrap();
+    let created = kernel.create_session(CreateSession { client_id: "core-client".into(), cwd: workspace.to_string_lossy().into_owned() }).await.unwrap();
+    let mut events = kernel.subscribe();
+    kernel.prompt(PromptSession { client_id: "core-client".into(), session_id: created.session_id.clone(), operation_id: "operation-host-service".into(), expected_revision: created.revision, text: "host-service proof".into() }).await.unwrap();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap().unwrap();
+        if event.session_id == created.session_id && event.event_type == "session.idle" { break; }
+    }
+    let replay = kernel.replay(created.session_id.clone(), 0, 100).await.unwrap();
+    let projected = replay.iter().find(|event| event.event_type == "concurrency.replaced").expect("Host concurrency projection event");
+    assert_eq!(projected.payload["revision"], 1);
+    assert_eq!(projected.payload["projection"]["version"], 1);
     kernel.shutdown().await.unwrap();
 }
 

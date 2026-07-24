@@ -129,6 +129,16 @@ export class JjRepositoryKernel {
     return this.execute(record, ["diff", "--revision", revision, "--git", ...filesets], "read");
   }
 
+  async isAncestor(source: SourceWorkspaceHandle, ancestor: ChangeId, descendant: ChangeId): Promise<boolean> { const record = await this.requireSource(source); const output = await this.execute(record, ["--ignore-working-copy", "log", "--revision", `${exactChange(ancestor)} & ::${exactChange(descendant)}`, "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"); return lines(output).length === 1; }
+
+  async conflictPaths(source: SourceWorkspaceHandle, revision: string): Promise<string[]> {
+    const record = await this.requireSource(source);
+    const result = await this.executor.execute({ cwd: absolutePath(record.workspacePath), args: ["--ignore-working-copy", "resolve", "--list", "--revision", revision], access: "read" });
+    if (result.kind === "success") return lines(result.stdout);
+    if (result.stderr.includes("No conflicts found")) return [];
+    throw new JjCommandError(["resolve", "--list", "--revision", revision], result);
+  }
+
   async changedPaths(source: SourceWorkspaceHandle, revision: string, filesets: readonly string[] = []): Promise<string[]> {
     const record = await this.requireSource(source);
     return lines(await this.execute(record, ["diff", "--revision", revision, "--name-only", ...filesets], "read")).sort();

@@ -1,7 +1,7 @@
 {
   "name": "pi-tai",
   "version": "0.1.0",
-  "description": "A guarded Pi distribution with structured work context, user-invoked isolated workspaces and subagents, independent session naming, and terminal-aware themes.",
+  "description": "A guarded Pi distribution with durable task context, managed isolated workspaces, subagents, codebase-grounded design guidance, independent session naming, and terminal-aware themes.",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -43,8 +43,6 @@
     "check": "npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs",
-    "eval:workspace": "node --experimental-strip-types evals/workspace-skill/run.ts",
-    "eval:workspace:dry": "node --experimental-strip-types evals/workspace-skill/run.ts --dry-run",
     "eval:subagents": "node --experimental-strip-types evals/subagents/run.ts",
     "eval:agent-concurrency": "node --experimental-strip-types evals/agent-concurrency/run.ts",
     "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live"
@@ -73,11 +71,11 @@
     "extensions": [
       "./packages/pi-tai/pi-tai.ts"
     ],
-    "prompts": [
-      "./packages/pi-tai/prompts"
-    ],
     "skills": [
       "./packages/pi-tai/skills"
+    ],
+    "prompts": [
+      "./packages/pi-tai/prompts"
     ]
   },
   "files": [

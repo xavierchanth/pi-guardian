@@ -4,7 +4,7 @@ use pi_tai_broker::{
     BrokerError, BrokerRecovery, BrokerSession, BrokerSessionId, ClientId, ForegroundState,
     OperationId, PiSessionBinding, RuntimeEventDisposition, RuntimeHealth, StopReason,
 };
-use pi_tai_event_store::{EventStore, OperationCommit, SessionProjection, StoreError};
+use pi_tai_event_store::{CoreAppendOutcome, CoreEvent, CoreTransaction, EventStore, OperationCommit, SessionProjection, StoreError, UsageEntry};
 use pi_tai_host_protocol::{CURRENT_PROTOCOL_VERSION, HostEvent};
 use pi_tai_runtime_protocol::{RuntimeEvent, SessionInfo};
 use pi_tai_runtime_supervisor::{
@@ -362,7 +362,7 @@ async fn run_actor(
             }
             KernelCommand::RuntimeNotice { session_id, notice } => {
                 if let Some(session) = sessions.get_mut(&session_id) {
-                    let _ = handle_runtime_notice(&events, &mut store, session, notice);
+                    let _ = handle_runtime_notice(&events, &mut store, session, notice).await;
                 }
             }
             KernelCommand::Shutdown { reply } => {
@@ -443,6 +443,8 @@ async fn recover_sessions(
                 "session.open",
                 json!({
                     "sessionFile": binding.session_file,
+                    "rootSessionId": persisted.session_id,
+                    "runtimeGeneration": generation,
                     "agentDir": config.agent_dir,
                     "sessionDir": config.session_dir,
                     "faux": config.faux,
@@ -525,6 +527,8 @@ async fn create_session(
             "session.create",
             json!({
                 "cwd": request.cwd,
+                "rootSessionId": session_key,
+                "runtimeGeneration": generation,
                 "agentDir": config.agent_dir,
                 "sessionDir": config.session_dir,
                 "faux": config.faux,
@@ -685,7 +689,7 @@ async fn cancel_session(
     Ok(snapshot(&session.state))
 }
 
-fn handle_runtime_notice(
+async fn handle_runtime_notice(
     events: &broadcast::Sender<HostEvent>,
     store: &mut EventStore,
     session: &mut ManagedSession,
@@ -693,7 +697,7 @@ fn handle_runtime_notice(
 ) -> Result<(), HostKernelError> {
     match notice {
         SupervisorNotice::RuntimeEvent(event) => {
-            handle_runtime_event(events, store, session, event)?
+            handle_runtime_event(events, store, session, event).await?
         }
         SupervisorNotice::WorkerExited { .. } => {
             let generation = session.state.runtime_generation();
@@ -712,7 +716,7 @@ fn handle_runtime_notice(
     Ok(())
 }
 
-fn handle_runtime_event(
+async fn handle_runtime_event(
     events: &broadcast::Sender<HostEvent>,
     store: &mut EventStore,
     session: &mut ManagedSession,
@@ -723,6 +727,10 @@ fn handle_runtime_event(
     {
         return Ok(());
     }
+    if event.event == "host.service_request" {
+        return handle_host_service_request(events, store, session, event).await;
+    }
+    let usage_changed = record_runtime_usage(store, session, &event)?;
     let mut payload = event.data;
     if let (Some(turn_id), Some(object)) = (event.turn_id.as_deref(), payload.as_object_mut()) {
         object
@@ -764,7 +772,237 @@ fn handle_runtime_event(
                 .replace_pi_session(event.runtime_generation, binding)?;
         }
     }
-    emit(events, store, session, &event.event, payload)
+    emit(events, store, session, &event.event, payload)?;
+    if usage_changed {
+        let usage = store.usage_breakdown(session.state.id().as_str())?;
+        emit(events, store, session, "usage.replaced", serde_json::to_value(usage)?)?;
+    }
+    Ok(())
+}
+
+fn record_runtime_usage(store: &EventStore, session: &ManagedSession, event: &RuntimeEvent) -> Result<bool, HostKernelError> {
+    if event.event != "message.end" || event.data["role"] != "assistant" { return Ok(false); }
+    let session_id = session.state.id().as_str();
+    let cycle_id = event.turn_id.as_deref().unwrap_or("root-idle");
+    let message_id = event.data["messageId"].as_str();
+    let provider = event.data["provider"].as_str();
+    let model = event.data["model"].as_str();
+    let usage = event.data.get("usage").and_then(Value::as_object);
+    if message_id.is_none() || provider.is_none() || model.is_none() || usage.is_none() {
+        return store.record_usage_gap(
+            &format!("usage-gap-{session_id}-{}", event.worker_sequence), session_id, session_id, cycle_id,
+            if usage.is_none() { "missing_message_usage" } else { "missing_model_identity" },
+            &OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+        ).map_err(HostKernelError::from);
+    }
+    let usage = usage.expect("checked");
+    let amount = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let cost = usage.get("cost").and_then(Value::as_object);
+    let cost_amount = |key: &str| cost.and_then(|value| value.get(key)).and_then(Value::as_f64).unwrap_or(0.0);
+    let entry = UsageEntry {
+        usage_event_id: format!("usage-{session_id}-{cycle_id}-{}", message_id.expect("checked")), session_id: session_id.into(), context_id: session_id.into(), cycle_id: cycle_id.into(), message_id: message_id.expect("checked").into(),
+        provider: provider.expect("checked").into(), model: model.expect("checked").into(), role: "thinker".into(),
+        input: amount("input"), output: amount("output"), cache_read: amount("cacheRead"), cache_write: amount("cacheWrite"),
+        cost_input: cost_amount("input"), cost_output: cost_amount("output"), cost_cache_read: cost_amount("cacheRead"), cost_cache_write: cost_amount("cacheWrite"), cost_total: cost_amount("total"),
+        recorded_at: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+    };
+    store.record_usage(&entry).map_err(HostKernelError::from)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HostServiceRequestData {
+    request_id: String,
+    method: String,
+    params: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CoreTransactionRequest {
+    transaction_id: String,
+    expected_revision: u64,
+    events: Vec<CoreEvent>,
+    state: Value,
+    projection: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnrollmentLoadRequest { key: String }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnrollmentPutRequest {
+    key: String,
+    transaction_id: String,
+    expected_revision: u64,
+    value: Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepositoryLeaseRequest {
+    repository_id: String,
+    root_session_id: Option<String>,
+    runtime_generation: Option<u64>,
+    operation_id: String,
+    lease_id: Option<String>,
+    reason: Option<String>,
+    transaction_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionWorkspaceLoadRequest { workspace_id: String }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionWorkspacePutRequest {
+    workspace_id: String,
+    transaction_id: String,
+    expected_revision: u64,
+    value: Value,
+}
+
+async fn handle_host_service_request(
+    events: &broadcast::Sender<HostEvent>,
+    store: &mut EventStore,
+    session: &mut ManagedSession,
+    event: RuntimeEvent,
+) -> Result<(), HostKernelError> {
+    let request = serde_json::from_value::<HostServiceRequestData>(event.data)
+        .map_err(|_| HostKernelError::InvalidRequest("Host service request is invalid"))?;
+    let aggregate_id = format!("session:{}:concurrency", session.state.id().as_str());
+    let outcome: Result<Value, HostKernelError> = (|| {
+        match request.method.as_str() {
+            "core.load" => Ok(serde_json::to_value(store.load_core_aggregate(&aggregate_id)?)?),
+            "core.transact" => {
+                let input = serde_json::from_value::<CoreTransactionRequest>(request.params.clone())
+                    .map_err(|_| HostKernelError::InvalidRequest("core.transact parameters are invalid"))?;
+                let timestamp = OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
+                let transaction = CoreTransaction {
+                    transaction_id: input.transaction_id,
+                    aggregate_id: aggregate_id.clone(),
+                    expected_revision: input.expected_revision,
+                    runtime_generation: event.runtime_generation,
+                    timestamp,
+                    events: input.events,
+                    state: input.state,
+                    projection: input.projection,
+                };
+                let appended = store.append_core_transaction(&transaction)?;
+                let aggregate = match appended {
+                    CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate,
+                };
+                emit(events, store, session, "concurrency.replaced", json!({ "aggregateId": aggregate.aggregate_id, "revision": aggregate.revision, "runtimeGeneration": aggregate.runtime_generation, "projection": aggregate.projection, "updatedAt": aggregate.updated_at }))?;
+                Ok(serde_json::to_value(aggregate)?)
+            }
+            "repository.enrollment.load" => {
+                let input = serde_json::from_value::<EnrollmentLoadRequest>(request.params.clone())
+                    .map_err(|_| HostKernelError::InvalidRequest("repository enrollment load parameters are invalid"))?;
+                validate_repository_key(&input.key)?;
+                Ok(serde_json::to_value(store.load_core_aggregate(&format!("repository:{}:enrollment", input.key))?)?)
+            }
+            "repository.enrollment.put" => {
+                let input = serde_json::from_value::<EnrollmentPutRequest>(request.params.clone())
+                    .map_err(|_| HostKernelError::InvalidRequest("repository enrollment put parameters are invalid"))?;
+                validate_repository_key(&input.key)?;
+                let enrollment_aggregate_id = format!("repository:{}:enrollment", input.key);
+                let transaction = CoreTransaction {
+                    transaction_id: input.transaction_id,
+                    aggregate_id: enrollment_aggregate_id,
+                    expected_revision: input.expected_revision,
+                    runtime_generation: event.runtime_generation,
+                    timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+                    events: vec![CoreEvent { event_id: format!("enrollment-event-{}", request.request_id), event_type: "repository.enrollment_replaced".into(), payload: json!({ "phase": input.value.get("phase") }) }],
+                    state: input.value.clone(),
+                    projection: input.value,
+                };
+                let appended = store.append_core_transaction(&transaction)?;
+                let aggregate = match appended { CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate };
+                Ok(serde_json::to_value(aggregate)?)
+            }
+            "repository.lease.acquire" => {
+                let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("repository lease acquire parameters are invalid"))?;
+                let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
+                let current = store.load_core_aggregate(&aggregate_id)?;
+                if current.as_ref().is_some_and(|aggregate| aggregate.projection["phase"] != "available") { return Err(HostKernelError::RepositoryBusy(input.repository_id)); }
+                let generation = current.as_ref().and_then(|aggregate| aggregate.projection["generation"].as_u64()).unwrap_or(0).checked_add(1).ok_or(HostKernelError::CounterOverflow("repository lease generation"))?;
+                let lease = json!({
+                    "phase": "leased", "repositoryId": input.repository_id, "generation": generation,
+                    "leaseId": format!("repo-lease-{}", input.transaction_id),
+                    "rootSessionId": input.root_session_id.ok_or(HostKernelError::InvalidRequest("rootSessionId is required"))?,
+                    "runtimeGeneration": input.runtime_generation.ok_or(HostKernelError::InvalidRequest("runtimeGeneration is required"))?,
+                    "operationId": input.operation_id, "acquiredAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+                });
+                let aggregate = replace_core_aggregate(store, aggregate_id, input.transaction_id, current.as_ref().map_or(0, |value| value.revision), event.runtime_generation, "repository.lease_acquired", lease.clone())?;
+                let _ = aggregate;
+                Ok(lease)
+            }
+            "repository.lease.release" | "repository.lease.interrupt" => {
+                let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("repository lease completion parameters are invalid"))?;
+                let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
+                let current = store.load_core_aggregate(&aggregate_id)?.ok_or_else(|| HostKernelError::RepositoryBusy(input.repository_id.clone()))?;
+                if current.projection["phase"] != "leased" || current.projection["leaseId"].as_str() != input.lease_id.as_deref() || current.projection["operationId"].as_str() != Some(input.operation_id.as_str()) { return Err(HostKernelError::RepositoryLeaseMismatch); }
+                let generation = current.projection["generation"].as_u64().ok_or(HostKernelError::RepositoryLeaseMismatch)?;
+                let next = if request.method == "repository.lease.release" {
+                    json!({ "phase": "available", "repositoryId": input.repository_id, "generation": generation })
+                } else {
+                    json!({ "phase": "interrupted", "repositoryId": input.repository_id, "generation": generation, "priorLeaseId": input.lease_id, "priorRootSessionId": current.projection["rootSessionId"], "priorRuntimeGeneration": current.projection["runtimeGeneration"], "operationId": input.operation_id, "reason": input.reason.unwrap_or_else(|| "runtime mutation interrupted".into()), "interruptedAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()) })
+                };
+                let event_type = if request.method == "repository.lease.release" { "repository.lease_released" } else { "repository.lease_interrupted" };
+                replace_core_aggregate(store, aggregate_id, input.transaction_id, current.revision, event.runtime_generation, event_type, next.clone())?;
+                Ok(next)
+            }
+            "session.workspace.load" => {
+                let input = serde_json::from_value::<SessionWorkspaceLoadRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("session workspace load parameters are invalid"))?;
+                validate_semantic_id(&input.workspace_id)?;
+                Ok(serde_json::to_value(store.load_core_aggregate(&format!("session:{}:workspace:{}", session.state.id().as_str(), input.workspace_id))?)?)
+            }
+            "session.workspace.put" => {
+                let input = serde_json::from_value::<SessionWorkspacePutRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("session workspace put parameters are invalid"))?;
+                validate_semantic_id(&input.workspace_id)?;
+                let aggregate_id = format!("session:{}:workspace:{}", session.state.id().as_str(), input.workspace_id);
+                let aggregate = replace_core_aggregate(store, aggregate_id, input.transaction_id, input.expected_revision, event.runtime_generation, "session.workspace_replaced", input.value)?;
+                Ok(serde_json::to_value(aggregate)?)
+            }
+            _ => Err(HostKernelError::UnsupportedHostService(request.method.clone())),
+        }
+    })();
+    let response_params = match outcome {
+        Ok(result) => json!({ "requestId": request.request_id, "ok": true, "result": result }),
+        Err(error) => json!({
+            "requestId": request.request_id,
+            "ok": false,
+            "error": { "code": "host_service_error", "message": error.to_string(), "retryable": false }
+        }),
+    };
+    let worker = session.worker.as_ref().ok_or(HostKernelError::RuntimeUnavailable)?;
+    let response = worker.request("host.service_response", response_params).await?;
+    if !response.ok {
+        return Err(HostKernelError::RuntimeRejected(response.error.map(|error| error.message).unwrap_or_else(|| "Host service response was rejected".into())));
+    }
+    Ok(())
+}
+
+fn replace_core_aggregate(store: &mut EventStore, aggregate_id: String, transaction_id: String, expected_revision: u64, runtime_generation: u64, event_type: &str, projection: Value) -> Result<pi_tai_event_store::CoreAggregate, HostKernelError> {
+    let transaction = CoreTransaction {
+        transaction_id: transaction_id.clone(), aggregate_id, expected_revision, runtime_generation,
+        timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+        events: vec![CoreEvent { event_id: format!("event-{transaction_id}"), event_type: event_type.into(), payload: json!({ "phase": projection.get("phase") }) }], state: projection.clone(), projection,
+    };
+    Ok(match store.append_core_transaction(&transaction)? { CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate })
+}
+
+fn repository_lease_aggregate(repository_id: &str) -> Result<String, HostKernelError> { validate_repository_key(repository_id)?; Ok(format!("repository:{repository_id}:mutation-lease")) }
+fn validate_semantic_id(value: &str) -> Result<(), HostKernelError> { if value.is_empty() || value.len() > 128 || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)) { return Err(HostKernelError::InvalidRequest("semantic ID is invalid")); } Ok(()) }
+
+fn validate_repository_key(value: &str) -> Result<(), HostKernelError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
+        return Err(HostKernelError::InvalidRequest("repository enrollment key must be lowercase SHA-256"));
+    }
+    Ok(())
 }
 
 fn emit(
@@ -961,6 +1199,12 @@ pub enum HostKernelError {
     UnknownSession(String),
     #[error("invalid Host request: {0}")]
     InvalidRequest(&'static str),
+    #[error("unsupported runtime Host service: {0}")]
+    UnsupportedHostService(String),
+    #[error("repository is busy or requires recovery: {0}")]
+    RepositoryBusy(String),
+    #[error("repository mutation lease does not match the active operation")]
+    RepositoryLeaseMismatch,
     #[error(transparent)]
     Broker(#[from] BrokerError),
     #[error(transparent)]

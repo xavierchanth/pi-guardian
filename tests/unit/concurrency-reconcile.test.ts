@@ -17,7 +17,7 @@ function record(id: string, parentContextId?: string): PersistedChildContextV4 {
       uncertaintyHandling: "best-effort", systemPrompt: "work", source: "packaged", filePath: "worker.md", contentHash: "hash",
     },
     execution: { phase: "interrupted", cycleId: `old-${id}`, reason: "root restart", interruptedAt: "before", sessionFile: `/private/${id}.jsonl` },
-    events: [], usage: [], createdAt: "before", updatedAt: "before",
+    events: [], usage: [], telemetryGaps: [], createdAt: "before", updatedAt: "before",
   };
 }
 

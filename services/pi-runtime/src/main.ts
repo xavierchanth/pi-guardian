@@ -31,6 +31,9 @@ export async function runWorker(options: WorkerMainOptions): Promise<void> {
     rejectDone = reject;
   });
   const reader = new JsonlReader({
+    isImmediate(value) {
+      return Boolean(value && typeof value === "object" && !Array.isArray(value) && (value as any).kind === "command" && (value as any).method === "host.service_response");
+    },
     async onValue(value) {
       await worker.handleValue(value);
       if (worker.currentState() === "stopped") {

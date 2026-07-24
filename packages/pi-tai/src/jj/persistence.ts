@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
+import { HostConcurrencyState } from "../concurrency/host-state.ts";
 
 export interface PersistedSharedTargetV1 {
   readonly changeId: string;
@@ -101,6 +102,34 @@ export interface SharedSourceStore {
     reducer: (record: PersistedSharedSourceV1) => PersistedSharedSourceV1,
   ): Promise<PersistedSharedSourceV1>;
   interruptLiveClaims(sourceId: string, reason: string, at?: string): Promise<PersistedSharedSourceV1>;
+}
+
+export class HostSharedSourceStore implements SharedSourceStore {
+  private readonly state: HostConcurrencyState;
+  constructor(state: HostConcurrencyState) { this.state = state; }
+  async create(record: PersistedSharedSourceV1): Promise<void> {
+    const value = validateSharedSource(record);
+    await this.state.mutateSegment<PersistedSharedSourceV1>("sharedSources", "source.created", { sourceId: value.sourceId }, (sources) => {
+      if (sources.some((source) => source.sourceId === value.sourceId)) throw new Error(`Shared source already exists: ${value.sourceId}`);
+      return [...sources, value];
+    });
+  }
+  async get(sourceId: string): Promise<PersistedSharedSourceV1 | undefined> { return (await this.list()).find((source) => source.sourceId === sourceId); }
+  async list(): Promise<PersistedSharedSourceV1[]> { return (await this.state.readSegment<PersistedSharedSourceV1>("sharedSources")).map(validateSharedSource); }
+  async update(sourceId: string, reducer: (record: PersistedSharedSourceV1) => PersistedSharedSourceV1): Promise<PersistedSharedSourceV1> {
+    let output: PersistedSharedSourceV1 | undefined;
+    await this.state.mutateSegment<PersistedSharedSourceV1>("sharedSources", "source.replaced", { sourceId }, (sources) => sources.map((source) => {
+      if (source.sourceId !== sourceId) return source;
+      const next = validateSharedSource(reducer(structuredClone(source))); if (next.sourceId !== sourceId) throw new Error("Shared source update changed identity."); output = next; return next;
+    }));
+    if (!output) throw new Error(`Unknown shared source: ${sourceId}`); return output;
+  }
+  interruptLiveClaims(sourceId: string, reason: string, at = new Date().toISOString()): Promise<PersistedSharedSourceV1> {
+    return this.update(sourceId, (record) => ({ ...record, claims: record.claims.map((claim): PersistedFileSetClaimV1 => {
+      if (claim.phase === "released" || claim.phase === "interrupted" || claim.phase === "breached") return claim;
+      return { ...claimBase(claim), phase: "interrupted", priorPhase: claim.phase, reason, interruptedAt: at, ...((claim.phase === "active" || claim.phase === "checkpointing") ? { recovery: { fingerprints: claim.fingerprints, baselinePatchHash: claim.baselinePatchHash, mutatedPaths: claim.mutatedPaths, ...(claim.phase === "checkpointing" ? { operationId: claim.operationId } : {}) } } : {}) };
+    }), updatedAt: at }));
+  }
 }
 
 export class FileSharedSourceStore implements SharedSourceStore {

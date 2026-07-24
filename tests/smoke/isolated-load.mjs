@@ -61,7 +61,6 @@ lines.on("line", (line) => {
       "mode:edit",
       "mode:read",
       "review-mode",
-      "implement",
       "cap:list",
       "cap:subagents",
       "cap:jj-workspaces",
@@ -71,14 +70,21 @@ lines.on("line", (line) => {
     ];
     if (
       event.success !== true ||
-      !names.has("continue") ||
-      !names.has("design") ||
+      names.has("continue") ||
+      names.has("design") ||
+      !names.has("implement") ||
       !names.has("capabilities") ||
       !names.has("subagents") ||
-      !names.has("plan-status") ||
+      !names.has("init-pi-tai") ||
+      names.has("parallelize") ||
+      names.has("plan-status") ||
+      names.has("collect-status") ||
       !names.has("profile") ||
       !names.has("effort") ||
-      !names.has("skill:workspace") ||
+      names.has("skill:workspace") ||
+      !names.has("skill:design") ||
+      !names.has("skill:invariants") ||
+      !names.has("skill:jj-guidelines") ||
       names.has("sub-agents") ||
       legacy.some((name) => names.has(name))
     ) {

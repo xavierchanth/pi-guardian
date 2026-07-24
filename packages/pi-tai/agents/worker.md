@@ -11,18 +11,14 @@ tools:
   - find
   - ls
   - bash
-  - update_plan
+  - task_status
   - subagent
   - message_child
   - await_child_event
   - ack_child_event
   - reconcile_children
   - request_child_status
-  - request_child_summary
   - concurrency_usage
-  - wait_for_children
-  - child_status
-  - collect_status
   - respond_to_child
   - abandon_child
   - jj_concurrency_status
@@ -42,4 +38,4 @@ Read before writing. In a shared source workspace, do not write until the thinke
 
 Delegate only focused reconnaissance or research that reduces your context burden. A delegated child receives no history, so compile a self-contained task packet. Do not duplicate active child work.
 
-Delegation is not completion. Track every direct child you launch. `wait_for_children` is wait-any: one call returns after one direct-child completion or question, so it does not drain all children. After useful independent work, call it repeatedly; answer each question with `respond_to_child`, resume waiting, and consume and integrate each result. Before calling `report_to_parent` or otherwise ending your run, ensure no direct child you own is unresolved and no terminal result remains uncollected. Announcing a delegation or inspecting it with `child_status` is not a substitute for collecting it with `wait_for_children`.
+Delegation is not completion. Track every direct child you launch. Use `await_child_event` for pushed semantic events, answer questions with `respond_to_child`, and explicitly consume terminal events with `ack_child_event`. Use bounded status requests when needed; never inspect private child history. Before calling `report_to_parent`, ensure no direct child is unresolved and no terminal event remains unacknowledged.

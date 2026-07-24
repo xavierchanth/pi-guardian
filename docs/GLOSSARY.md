@@ -20,9 +20,9 @@
 | **child context** | Private managed Pi SDK `AgentSession` linked to one parent and excluded from user session navigation. |
 | **execution cycle** | One concrete run or recovery attempt of a durable child context. |
 | **task packet** | Self-contained bounded objective, context, resources, authority, acceptance criteria, and report contract given to a child. |
-| **task plan** | Durable repository-visible specification for a substantial objective, owned by the thinker and snapshotted into child/reviewer packets. |
+| **task tree** | Durable state-owned intent hierarchy: immutable thinker goal, sourced user directions, child assignments, and effective plans backed by append-only revisions; execution roles receive effective-only projections while reviewers receive immutable full-history snapshots. |
 | **work context** | Current goal and execution checklist associated with a session or context. |
-| **orchestration change** | Mutable private main-workspace JJ change, conventionally `wip: thinker workspace`, preserving active root work and task plans. |
+| **orchestration change** | Mutable private per-session JJ change, described `pi-tai: session <id>`, preserving that Host session's integrated work without moving or rewriting the invoking user workspace. |
 | **shared lane** | Bounded implementation in the source workspace under an atomic file-set claim and assigned feature Change ID. |
 | **isolated lane** | Substantial or overlap-prone implementation in a separate JJ workspace rooted from source `@-`. |
 | **file-set claim** | Atomic exclusive ownership of a canonical set of source paths through edit, validation, checkpoint, and receipt verification. |

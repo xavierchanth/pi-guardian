@@ -24,7 +24,7 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
   const first = new RuntimeProcessHarness({ env });
   const initialized = await first.command("init-1", "runtime.initialize", initializeParams(1));
   assert.equal(initialized.ok, true);
-  assert.ok(initialized.result.capabilities.tools.includes("update_plan"));
+  assert.equal(initialized.result.capabilities.tools.includes("update_plan"), false);
   const created = await first.command("create", "session.create", {
     cwd: paths.cwd,
     agentDir: paths.agentDir,

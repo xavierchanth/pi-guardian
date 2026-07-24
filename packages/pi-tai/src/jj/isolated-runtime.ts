@@ -1,25 +1,43 @@
 import { join } from "node:path";
+import { FileReviewStore, ReviewService, type ReviewStore } from "../concurrency/reviews.ts";
+import { FileTaskStore, TaskService, type TaskStore } from "../concurrency/tasks.ts";
 import { workspaceId } from "./domain.ts";
 import { JjProcessExecutor, type JjExecutor } from "./executor.ts";
 import { IsolatedJjOperations } from "./isolated-operations.ts";
 import { SharedJjRuntime } from "./runtime.ts";
 import { WorkspaceArtifactStore } from "./workspace-artifacts.ts";
 import { FileIsolatedWorkspaceStore, type IsolatedWorkspaceStore } from "./workspace-persistence.ts";
+import { WorkspaceClosureService } from "./workspace-closure.ts";
+import { WorkspaceConflictService } from "./workspace-conflicts.ts";
+import { WorkspaceIntegrationService } from "./workspace-integration.ts";
 import { JjWorkspaceRepositoryKernel } from "./workspace-repository.ts";
+import { WorkspaceReviewCoordinator } from "./workspace-review.ts";
 
 export class IsolatedJjRuntime {
   readonly shared: SharedJjRuntime;
   readonly workspaces: IsolatedWorkspaceStore;
   readonly repository: JjWorkspaceRepositoryKernel;
   readonly artifacts: WorkspaceArtifactStore;
+  readonly tasks: TaskService;
+  readonly reviews: ReviewService;
+  readonly reviewCoordinator: WorkspaceReviewCoordinator;
+  readonly integration: WorkspaceIntegrationService;
+  readonly closure: WorkspaceClosureService;
+  readonly conflicts: WorkspaceConflictService;
   readonly operations: IsolatedJjOperations;
   private initialization?: Promise<void>;
-  constructor(options: { stateRoot: string; executor?: JjExecutor; workspaces?: IsolatedWorkspaceStore; shared?: SharedJjRuntime; failpoint?: (operation: string, boundary: string) => void }) {
+  constructor(options: { stateRoot: string; executor?: JjExecutor; workspaces?: IsolatedWorkspaceStore; taskStore?: TaskStore; reviewStore?: ReviewStore; shared?: SharedJjRuntime; failpoint?: (operation: string, boundary: string) => void }) {
     const executor = options.executor ?? new JjProcessExecutor();
     this.shared = options.shared ?? new SharedJjRuntime({ stateRoot: options.stateRoot, executor });
     this.workspaces = options.workspaces ?? new FileIsolatedWorkspaceStore(join(options.stateRoot, "jj-workspaces"));
     this.repository = new JjWorkspaceRepositoryKernel({ executor, workspaces: this.workspaces, sources: this.shared.store });
     this.artifacts = new WorkspaceArtifactStore(join(options.stateRoot, "workspace-artifacts"));
+    this.tasks = new TaskService(options.taskStore ?? new FileTaskStore(join(options.stateRoot, "tasks")), join(options.stateRoot, "task-artifacts"));
+    this.reviews = new ReviewService(options.reviewStore ?? new FileReviewStore(join(options.stateRoot, "reviews")));
+    this.reviewCoordinator = new WorkspaceReviewCoordinator(this.workspaces, this.reviews, this.tasks);
+    this.integration = new WorkspaceIntegrationService({ workspaces: this.workspaces, reviews: this.reviews, sources: this.shared.kernel, repository: this.repository, ...(options.failpoint ? { failpoint: options.failpoint } : {}) });
+    this.closure = new WorkspaceClosureService(this.workspaces, this.shared.kernel, this.integration);
+    this.conflicts = new WorkspaceConflictService(this.workspaces, this.shared.kernel);
     this.operations = new IsolatedJjOperations({ sources: this.shared.kernel, workspaces: this.workspaces, repository: this.repository, artifacts: this.artifacts, executor, ...(options.failpoint ? { failpoint: options.failpoint } : {}) });
   }
   initialize(): Promise<void> {

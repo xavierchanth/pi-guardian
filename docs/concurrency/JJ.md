@@ -17,22 +17,21 @@ Models choose intent, scope, descriptions, and findings. Deterministic operation
 - An unexplained tracked Change-ID change stops automatic mutation.
 - Divergent IDs are never resolved by selecting an arbitrary side.
 
-## Main orchestration change
+## Per-session orchestration change
 
-The source workspace keeps one mutable private working change:
+Repository enrollment creates a managed workspace root and a private `pi_tai_private()` revset policy. Every Host session receives an independent workspace based on the invoking workspace's `@-`:
 
 ```text
-named feature changes
-└── wip: thinker workspace  ← source @
+invoking @- (recorded base)
+├── invoking user @ (preserved)
+└── pi-tai: session <id>  ← managed session @
 ```
 
-It holds active thinker work, shared-lane edits before checkpoint, and repository task plans. Pi-Tai records its Change ID separately from its description.
-
-If no WIP exists and `@` is empty, deterministic code may describe/create it. Unknown nonempty user work is never silently relabeled. Pi-Tai recommends private-commit configuration but never edits user JJ configuration or bypasses immutability automatically.
+The managed session change receives integrated task work. Pi-Tai records its workspace name, path, base Change ID, and orchestration Change ID under Host custody. Allocation and cleanup run under a repository mutation lease; they verify that the invoking workspace was not moved or rewritten. Cleanup refuses to forget a session workspace while its orchestration change contains unresolved work.
 
 ## Task-plan artifact
 
-For substantial work, the thinker maintains concise repository-visible Markdown containing:
+For substantial work, the thinker maintains a durable state-owned task tree rendered into immutable content-addressed Markdown snapshots containing:
 
 - objective and acceptance criteria;
 - decisions and constraints;
@@ -41,7 +40,7 @@ For substantial work, the thinker maintains concise repository-visible Markdown 
 - review/integration state;
 - deferred findings.
 
-Children and reviewers receive bounded snapshots because isolated workspaces branch from source `@-` and do not inherit files present only in source `@`.
+The thinker goal and sourced user directions are immutable; planners replace their current effective implementation plan through append-only revisions. Planner and worker projections omit superseded plan text. Reviewers receive an immutable full-history snapshot with current and superseded revisions clearly labeled. Child contexts execute bound task nodes without importing parent conversation history.
 
 ## Shared-source lane
 
@@ -158,7 +157,7 @@ Every nonempty isolated range receives a read-only reviewer. The reviewer gets:
 - deterministic range/conflict bundle;
 - planner validation and changed-path summary.
 
-Findings have relation (`introduced`, `in_scope_existing`, `out_of_scope_existing`) and severity (`goal_blocking`, `high`, `medium`, `low`, `note`). The thinker decides repair. Automatic repair is limited to one implementation cycle and one focused re-review unless the user authorizes more.
+Findings have relation (`introduced`, `in_scope_existing`, `out_of_scope_existing`) and canonical severity (`p0`, `p1`, `p2`, `p3`, `p4`). Every p0/p1 must be fixed and removed by focused re-review; p2 requires a thinker repair/defer disposition; p3 may defer and p4 records information. Automatic repair is limited to one implementation cycle and one focused re-review unless the user supplies new direction.
 
 Approval is an immutable receipt binding plan hash, exact identities, ordered Change IDs, normalized patch hashes, conflicts, and findings. Commit-ID-only rewrite does not stale it; patch changes do.
 

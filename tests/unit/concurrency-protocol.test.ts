@@ -17,7 +17,7 @@ function context(parentContextId?: string): PersistedChildContextV4 {
       filePath: "worker.md", contentHash: "hash",
     },
     execution: { phase: "running", cycleId: "cycle-1", startedAt: "now", sessionId: "session-1", sessionFile: "/private/session.jsonl" },
-    events: [], usage: [], createdAt: "now", updatedAt: "now",
+    events: [], usage: [], telemetryGaps: [], createdAt: "now", updatedAt: "now",
   };
 }
 

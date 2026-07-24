@@ -10,6 +10,7 @@ import {
   validateMethodResult,
   validateRuntimeEvent,
   type EmptyParams,
+  type HostServiceResponseParams,
   type RuntimeCommand,
   type RuntimeInitializeParams,
   type RuntimeProtocolError,
@@ -25,6 +26,7 @@ import {
 } from "@pi-tai/runtime-protocol";
 import type { DiagnosticSink } from "./diagnostics.ts";
 import type { JsonlWriter } from "./jsonl.ts";
+import { RuntimeHostServices } from "./host-services.ts";
 import type { RuntimeEventInput, RuntimePort } from "./runtime-port.ts";
 
 export type WorkerState =
@@ -50,11 +52,14 @@ export class RuntimeWorker {
   private readonly port: RuntimePort;
   private readonly writer: JsonlWriter;
   private readonly diagnostics: DiagnosticSink;
+  private readonly hostServices: RuntimeHostServices;
 
   constructor(port: RuntimePort, writer: JsonlWriter, diagnostics: DiagnosticSink) {
     this.port = port;
     this.writer = writer;
     this.diagnostics = diagnostics;
+    this.hostServices = new RuntimeHostServices((event) => this.emit(event));
+    this.port.bindHostServices?.(this.hostServices);
   }
 
   currentState(): WorkerState {
@@ -155,6 +160,7 @@ export class RuntimeWorker {
       new Promise((resolve) => setTimeout(resolve, 2_000)),
     ]);
     await this.port.shutdown();
+    this.hostServices.failAll("Runtime worker stopped before Host service response.");
     this.state = "stopped";
     await this.writer.flush();
   }
@@ -175,6 +181,8 @@ export class RuntimeWorker {
         return this.followUp(command, params as SessionTextParams);
       case "session.cancel":
         return this.cancel(command, params as SessionCancelParams);
+      case "host.service_response":
+        return this.hostServiceResponse(command, params as HostServiceResponseParams);
       case "session.set_model":
         return this.setModel(command, params as SessionSetModelParams);
       case "session.set_thinking":
@@ -303,6 +311,11 @@ export class RuntimeWorker {
     await this.writeSuccess(command, { accepted });
   }
 
+  private async hostServiceResponse(command: RuntimeCommand, params: HostServiceResponseParams): Promise<void> {
+    this.hostServices.resolve({ requestId: params.requestId, ok: params.ok, ...(params.result !== undefined && params.result !== null ? { result: params.result } : {}), ...(params.error ? { error: params.error } : {}) });
+    await this.writeSuccess(command, {});
+  }
+
   private async setModel(command: RuntimeCommand, params: SessionSetModelParams): Promise<void> {
     this.requireSessionIdle();
     await this.writeSuccess(command, await this.port.setModel(params));
@@ -343,6 +356,7 @@ export class RuntimeWorker {
     this.requireNoActiveTurn();
     this.state = "stopping";
     await this.port.shutdown();
+    this.hostServices.failAll("Runtime worker shut down before Host service response.");
     await this.writeSuccess(command, {});
     this.state = "stopped";
   }

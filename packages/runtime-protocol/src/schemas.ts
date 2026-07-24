@@ -3,6 +3,7 @@ import type {
   AcceptedResult,
   EmptyParams,
   EmptyResult,
+  HostServiceResponseParams,
   InterruptionData,
   ModelInfo,
   ProtocolRange,
@@ -97,6 +98,8 @@ export const RuntimeInitializeParamsSchema: z.ZodType<RuntimeInitializeParams> =
 
 export const SessionCreateParamsSchema: z.ZodType<SessionCreateParams> = z.object({
   cwd: nonEmptyString,
+  rootSessionId: nonEmptyString.nullish().transform((value) => value ?? null),
+  runtimeGeneration: safeUInt.nullish().transform((value) => value ?? null),
   agentDir: nonEmptyString,
   sessionDir: nonEmptyString,
   faux: z.boolean().optional(),
@@ -104,6 +107,8 @@ export const SessionCreateParamsSchema: z.ZodType<SessionCreateParams> = z.objec
 
 export const SessionOpenParamsSchema: z.ZodType<SessionOpenParams> = z.object({
   sessionFile: nonEmptyString,
+  rootSessionId: nonEmptyString.nullish().transform((value) => value ?? null),
+  runtimeGeneration: safeUInt.nullish().transform((value) => value ?? null),
   agentDir: nonEmptyString,
   sessionDir: nonEmptyString,
   faux: z.boolean().optional(),
@@ -121,6 +126,16 @@ export const SessionTextParamsSchema: z.ZodType<SessionTextParams> = z.object({
 export const SessionCancelParamsSchema: z.ZodType<SessionCancelParams> = z.object({
   turnId: nonEmptyString,
 }).strict();
+
+export const HostServiceResponseParamsSchema: z.ZodType<HostServiceResponseParams> = z.object({
+  requestId: nonEmptyString,
+  ok: z.boolean(),
+  result: jsonValue.optional(),
+  error: RuntimeProtocolErrorSchema.optional(),
+}).strict().superRefine((response, context) => {
+  if (response.ok && response.error !== undefined) context.addIssue({ code: "custom", message: "successful Host service responses cannot include error", path: ["error"] });
+  if (!response.ok && response.error === undefined) context.addIssue({ code: "custom", message: "failed Host service responses require error", path: ["error"] });
+});
 
 export const SessionSetModelParamsSchema: z.ZodType<SessionSetModelParams> = z.object({
   provider: nonEmptyString,

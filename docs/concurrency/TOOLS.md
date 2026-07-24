@@ -42,13 +42,9 @@ Atomic thinker-only operation: validate source/WIP, allocate managed JJ workspac
 
 Typed bounded protocol for instruction, question response, status, result, review, and continuation. Child result is rejected with unresolved/unacknowledged direct descendants.
 
-### `child_status`
+### `request_child_status`
 
-Metadata only; no journal/history/model turn.
-
-### `request_child_status` / `request_child_summary`
-
-Correlated bounded semantic request answered inside child context, followed by continuation.
+Correlated bounded semantic request answered inside child context, followed by continuation. Optional `focus` and `questions` fields add focused asks without requiring a separate summary tool.
 
 ### `await_child_event`
 
@@ -135,7 +131,12 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 - `rebind_tracked_change`: explicit user-authorized adoption of unique verified replacement.
 - `resume_workspace_operation`: continue next proved idempotent phase.
 - `retry_workspace_cleanup`: repeat exact cleanup only.
-- `task_plan`: create/update/read/snapshot/close durable objective Markdown.
+- `task_create`: thinker-owned immutable root goal from sourced user intent.
+- `task_assign`: immutable child assignment bound to one execution context.
+- `task_plan`: thinker/planner replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.
+- `task_record_user_direction`: thinker-only sourced user clarification.
+- `task_status`: role-scoped projection—full history for thinker, effective owned subtree for planner, and effective authority lineage for worker.
+- deterministic review snapshot: full task-tree history with current and superseded revisions clearly distinguished in immutable content-addressed Markdown evidence.
 - `concurrency_usage`: exact bounded totals by model, role, context, and cycle.
 
 ## Constrained built-ins

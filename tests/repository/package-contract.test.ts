@@ -49,43 +49,40 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
   }
 });
 
-test("workspace is packaged as a root-only JJ skill", () => {
-  const directory = join(root, "packages/pi-tai/skills/workspace");
+test("design is packaged as a codebase-grounded skill", () => {
+  const directory = join(root, "packages/pi-tai/skills/design");
   const skill = readFileSync(join(directory, "SKILL.md"), "utf8");
-  const jj = readFileSync(join(directory, "references/jj.md"), "utf8");
-  const thinker = readFileSync(join(root, "packages/pi-tai/agents/thinker.md"), "utf8");
-  const planner = readFileSync(join(root, "packages/pi-tai/agents/planner.md"), "utf8");
-  assert.match(skill, /name: workspace/);
-  assert.match(skill, /Pi-Tai supports Jujutsu workspaces only/);
-  assert.match(skill, /call `workspace_subagent`/);
-  assert.match(skill, /planner.*worker/s);
-  assert.match(skill, /Only the root thinker may create a workspace/);
-  assert.match(skill, /Explicit requests to inspect, create, enter, integrate, forget, remove, or clean up/);
-  assert.match(skill, /Manual `\/skill:workspace` invocation/);
-  assert.match(skill, /references\/jj\.md/);
-  assert.equal(existsSync(join(directory, "references/git.md")), false);
-  assert.match(thinker, /planner or worker with `workspace_subagent`/);
-  assert.match(thinker, /never require source `@` to be empty/);
-  assert.match(planner, /must never launch another planner or create another workspace/);
-  assert.match(jj, /Never require source `@` to be empty/);
-  assert.match(jj, /Create an isolated workspace from source `@-`/);
+  assert.match(skill, /name: design/);
+  assert.match(skill, /Stay in design rather than implementation/);
+  assert.match(skill, /Inspect the relevant source code, tests, configuration/);
+  assert.match(skill, /Discover and read relevant repository guidance/);
+  assert.match(skill, /Check important claims against the code/);
+  assert.match(skill, /implementation and validation plan/);
+  assert.equal(existsSync(join(root, "packages/pi-tai/skills/workspace")), false);
 });
 
-test("subagent workflow prompts are packaged as visible templates", () => {
-  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/continue.md"), "utf8");
-  assert.match(prompt, /description: Reconcile private child contexts/);
-  assert.match(prompt, /Call `reconcile_children` before resuming substantive work/);
-  assert.match(prompt, /Call `await_child_event` only when no independent work remains/);
-  const status = readFileSync(join(root, "packages/pi-tai/prompts/collect-status.md"), "utf8");
-  const parallelize = readFileSync(join(root, "packages/pi-tai/prompts/parallelize.md"), "utf8");
-  assert.match(status, /Call `collect_status` now/);
-  assert.match(status, /30 seconds/);
-  assert.match(parallelize, /workspace_subagent/);
-  assert.match(parallelize, /planner.*worker/s);
-  assert.doesNotMatch(
-    walkSource(join(root, "packages")).map((file) => readFileSync(file, "utf8")).join("\n"),
-    /registerCommand\(["']continue["']/,
-  );
+test("implement prompt integrates feedback before approved-plan execution", () => {
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/implement.md"), "utf8");
+  assert.match(prompt, /argument-hint: "\[plan feedback or additional notes\]"/);
+  assert.match(prompt, /## Plan feedback and additional notes/);
+  assert.match(prompt, /\$\{ARGUMENTS:-No additional feedback or notes were provided\.\}/);
+  assert.match(prompt, /integrate them into the current effective plan/);
+  assert.match(prompt, /immediately implement and validate/);
+  assert.match(prompt, /Do not stop merely to present the revised plan/);
+});
+
+test("version-control and invariant modeling skills are packaged", () => {
+  const skills = join(root, "packages/pi-tai/skills");
+  const jj = readFileSync(join(skills, "jj-guidelines/SKILL.md"), "utf8");
+  assert.match(jj, /name: jj-guidelines/);
+  assert.match(jj, /Prefer jj over git whenever a \.jj directory is present/);
+  assert.match(jj, /Use Conventional Commits/);
+
+  const invariants = readFileSync(join(skills, "invariants/SKILL.md"), "utf8");
+  assert.match(invariants, /name: invariants/);
+  assert.doesNotMatch(invariants, /name: model-invariants/);
+  assert.match(invariants, /make invalid states unrepresentable/);
+  assert.match(invariants, /Keep one representation per fact/);
 });
 
 test("legacy task blocks and permission modes are absent", () => {

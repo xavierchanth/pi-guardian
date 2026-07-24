@@ -7,6 +7,9 @@ This document is normative. Boundary DTOs may be migration-tolerant; conversion 
 - One Host-owned root session has one thinker and one isolated coordinator.
 - Every child has exactly one direct parent and one immutable role/task authority snapshot.
 - Child contexts are private Pi SDK contexts, not user-selectable sessions.
+- Task goals, assignments, directions, and plan revisions are append-only; the latest plan revision is the sole effective plan.
+- Planner projections expose only their owned subtree's effective plans; worker projections expose only effective plans on their authority lineage.
+- Thinker projections and immutable reviewer snapshots expose full plan history with superseded revisions explicitly non-authoritative.
 - Parent/child protocol uses hidden typed custom messages, never user-role impersonation.
 - Parents receive bounded child-authored reports, never histories.
 - Questions and terminal reports push; awaiting is optional.

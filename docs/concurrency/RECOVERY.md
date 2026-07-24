@@ -95,10 +95,10 @@ Retries an exact recorded filesystem/runtime cleanup. It cannot alter history or
 
 ## Review loop budget
 
-- `goal_blocking`: repair immediately if owned and within budget.
-- `high`: one bounded repair when clearly in scope; otherwise ask.
-- `medium`: surface; repair only when cheap and explicitly within acceptance criteria.
-- `low`/`note`: defer/record.
+- `p0`/`p1`: repair when owned and within budget; approval is impossible while either remains.
+- `p2`: thinker must repair or durably defer with rationale.
+- `p3`: surface and optionally defer.
+- `p4`: record as information.
 - out-of-scope existing findings do not trigger automatic repair unless they pose immediate safety risk.
 
 One implementation repair plus one focused re-review is automatic per workspace. Further cycles require user direction.

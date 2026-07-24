@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with structured work context, request-triggered isolated workspaces and declarative subagents, prompt-based work continuation, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with durable task context, managed isolated workspaces and declarative subagents, codebase-grounded design guidance, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -40,31 +40,25 @@ pi install git:github.com/xavierchanth/pi-tai@v0.1.1
 
 ## Included plugins
 
-### Open-ended design prompt
+### Codebase-grounded design skill
 
-Use `/design [focus]` to start an investigative design phase before implementation. The agent consults you where key decisions or clarification need your input, then produces an implementation plan once the design is sufficiently resolved.
+The packaged `design` skill guides design and architecture work before implementation. It first inspects the relevant code, tests, configuration, working state, and repository documentation; distinguishes intended design from current implementation; and checks important documentation claims against the code. It consults you on consequential unresolved decisions, then produces a concrete implementation and validation plan for review. Use `/skill:design [focus]` to invoke it explicitly.
 
-### Structured work context
+### Jujutsu version-control guidance
 
-The `update_plan` tool stores a complete goal and replacement plan in Pi tool-result details. State follows Pi's active session branch and survives resume, tree navigation, and compaction.
+The packaged `jj-guidelines` skill keeps Jujutsu inspection, checkpoints, mutable-stack cleanup, workspace management, and Conventional Commit descriptions safe and reviewable. It prefers JJ in JJ repositories, remains read-only without mutation authority, and leaves completed checkpoints on a fresh empty change.
 
-- Plans are optional for simple work.
-- At most one item may be `in_progress`.
-- An item must be accepted as `in_progress` before it becomes `completed`.
-- Every update contains the complete replacement plan.
+### Invariant-driven modeling
 
-In interactive TUI sessions, active work context appears below the editor as a responsive two-line widget:
+The packaged `invariants` skill guides domain models, APIs, state machines, wire contracts, and persistence schemas toward representations where invalid states are difficult or impossible to express. It emphasizes authoritative facts, discriminated states, validated boundaries, and explicit transitions.
 
-```text
-Goal: Ship terminal refresh
-Plan: 2/5 | Now: Integrate Guardian
-```
+### Approved-plan implementation prompt
 
-Long goal and active-step text is truncated to the available terminal width. Run `/plan-status` for a read-only full-plan view. `update_plan` results show a compact progress summary by default and the full checklist when tool output is expanded.
+`/implement [plan feedback or additional notes]` incorporates optional feedback into the current effective approved plan, then immediately implements and validates the result. It does not pause merely to re-present the revised plan unless the feedback introduces material unresolved ambiguity.
 
-### Work continuation prompt
+### Durable task trees
 
-Use `/continue` after interrupting the agent. It expands to the visible prompt `Continue what you were doing.` and starts a normal turn.
+Packaged concurrency roles use Host-persisted task trees with immutable thinker goals, sourced user directions, child assignments, effective plans backed by append-only revision history, and immutable full-history review snapshots. Scoped `task_*` tools are authoritative. The legacy `update_plan` tool and `/plan-status` command are not exposed by the production package.
 
 ### Contextual external editor
 
@@ -82,17 +76,17 @@ Pi-Tai registers `web_search` and `web_fetch` as normal standalone tools and gra
 
 `web_fetch` performs an anonymous GET for one known public HTTP(S) URL, converts HTML to readable linked text, and supports an `offset` for bounded continuation. Guardian reviews every fetch before network access. Deterministic checks still reject credentials in URLs, private or intranet names and addresses, mixed public/private DNS answers, metadata endpoints, non-routable targets, unsafe redirects, oversized responses, and unsupported binary media. For documentation discovery, agents may explicitly fetch a site-root `/llms.txt`; Pi-Tai never assumes or automatically fetches `llms-full.txt`.
 
-### Explicit workspaces and declarative subagents
+### Managed workspaces and declarative subagents
 
-Workspaces and worktrees are not session capabilities. Pi-Tai supports Jujutsu workspaces only. The packaged `workspace` skill loads automatically when the user asks for a workspace, work tree, worktree, isolated checkout, or non-interference with the current working directory; `/skill:workspace` remains a manual override. Creation branches from recorded source `@-`, so source `@` may contain ongoing work. Integration updates stale in both workspaces, preserves source `@`'s Change ID and file content, and uses `--ignore-working-copy` for graph rewrites.
+Pi-Tai supports Jujutsu workspaces only. Host sessions and isolated implementation children use deterministic, custodied workspace operations rather than a model-directed workspace skill. Child workspace creation branches from recorded source `@-`, so source `@` may contain ongoing work. Integration preserves source work and is gated by exact identity, review, receipt, verification, and closure checks.
 
 Subagents are disabled by default. Bare `/subagents` toggles them. `/subagents on` applies the scoped root agent definition (packaged as `thinker`), including its model, effort, exact tools, prompt, and allowed children. `/subagents off` restores the previous main-session model, effort, and tools after direct children resolve; `/subagents force-off` recursively terminates unresolved descendants first. `/subagents list` opens the active/inactive tree and `/subagents inspect [delegation-id]` opens detail. `/capabilities` now reports subagents rather than workspace backends.
 
 Agent definitions are Markdown files with YAML front matter. Packaged defaults live in `packages/pi-tai/agents`; user definitions in `~/.pi/agent/agents` override them, and trusted nearest-project `.pi/agents` definitions have highest precedence. Thinker may spawn planners, workers, scouts, or researchers; planner may spawn workers, scouts, or researchers; worker may spawn scouts or researchers; specialists cannot delegate. There is exactly one thinker, and only it owns workspace tools. Graph validation rejects missing children, root delegation, and cycles.
 
-The normal `subagent` tool launches a persistent Pi process in the same cwd. `workspace_subagent` is root-only and launches either a planner or worker in an isolated JJ workspace; thinker may fan out as many independent slices as useful. `integrate_workspace` updates stale, validates the full ancestry, forgets and removes the workspace, strips every empty delegated revision, and inserts retained changes before source `@` even when source work is active. It reports undescribed Change IDs for thinker inspection and `describe_integrated_changes`. Any graph mismatch, recovery history, conflict, or partial operation enters a non-retryable user-attention state.
+The normal `subagent` tool launches a private in-process Pi SDK context in the same cwd. `workspace_subagent` is root-only and launches either a planner or worker in an isolated JJ workspace; thinker may fan out as many independent slices as useful. `integrate_workspace` updates stale, validates the full ancestry, forgets and removes the workspace, strips every empty delegated revision, and inserts retained changes before source `@` even when source work is active. It reports undescribed Change IDs for thinker inspection and `describe_integrated_changes`. Any graph mismatch, recovery history, conflict, or partial operation enters a non-retryable user-attention state.
 
-Parents can continue independent work while children run, but remain responsible for avoiding duplicate assignments and conflicting edits. `/collect-status` requests fresh reports from the complete unresolved descendant tree, waits up to 30 seconds, and returns partial timeout information without stopping work. `/parallelize` delegates an approved plan through workspace planners or workers. Runtime continuation keeps every parent in the wait-any loop until all direct children resolve and their terminal results are collected. The footer shows `thinker` beside the directory while subagents are enabled; workspace backends do not appear as capabilities.
+Parents can continue independent work while children run, but remain responsible for avoiding duplicate assignments and conflicting edits. Child questions, status, terminal results, and incidents are pushed as bounded semantic events; parents wait with `await_child_event`, request focused status explicitly, and acknowledge terminal events with `ack_child_event`. No production tool polls child files or reads private child history. The footer shows `thinker` beside the directory while subagents are enabled; workspace backends do not appear as capabilities.
 
 Independent model profiles now live in `pi-tai.json`. Shift+Tab cycles profiles in configured order, while Ctrl+Alt+T retains Pi's native thinking-level cycle. Pi-Tai provisions these as first-party bindings in `~/.pi/agent/keybindings.json`, preserving unrelated bindings and any additional keys assigned to thinking-level cycling. `/profile` selects a profile directly, `/effort` changes reasoning effort independently, and Pi's `/model` remains available for unrestricted model selection. See the [`agent concurrency design`](docs/concurrency/README.md) for routing, roles, ownership, child runtime, JJ coordination, review, integration, and recovery.
 
@@ -102,7 +96,7 @@ Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generat
 
 Built-in file tools use deterministic canonical boundaries. Unignored repository files remain frictionless; direct targets ignored by Git, likely credential paths, VCS metadata, Pi `auth.json`, Pi `models.json`, and Pi `sessions/**` receive Guardian review. Repository-wide `grep` and `find` retain their native Git-ignore behavior. Read-only tools may additionally inspect safe Pi state/resources and global `.agents/skills`; Pi-state writes and outside-boundary file operations remain blocked, with reviewed `bash` as the escalation path. Traversal and symlink escapes are always blocked.
 
-Pi-Tai does not provide legacy permission modes. `/mode`, `/review-mode`, and `/implement` are intentionally absent.
+Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are intentionally absent. `/implement` is a prompt template for approved-plan execution, not a permission or tool-access mode.
 
 ### Percentage-based automatic compaction
 
@@ -179,18 +173,17 @@ packages/pi-tai/pi-tai.ts           Pi extension composition root
 packages/pi-tai/src/config/         trusted Pi-Tai configuration
 packages/pi-tai/src/compaction/     percentage-based automatic compaction
 packages/pi-tai/src/keybindings/    first-party keyboard mappings
-packages/pi-tai/src/work-context/   update_plan domain and persistence
-packages/pi-tai/src/subagents/      delegation and planner-workspace lifecycle
-packages/pi-tai/src/workspaces/     JJ-preferred workspace backend operations
+packages/pi-tai/src/concurrency/    Host-backed task, event, projection, usage, and migration state
+packages/pi-tai/src/subagents/      private SDK delegation and orchestration lifecycle
+packages/pi-tai/src/jj/             enrolled repository and managed JJ workspace operations
 packages/pi-tai/agents/             thinker, planner, worker, scout, researcher
-packages/pi-tai/skills/             request-triggered workspace router and backend strategies
+packages/pi-tai/skills/             codebase-grounded design workflow
 packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       standalone action review and path boundaries
 packages/pi-tai/src/web/            hosted web search and public-only page fetching
 packages/pi-tai/src/notifications/  native review/completion notifications
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes
-packages/pi-tai/prompts/            /design and /continue prompt templates
 apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract
 crates/host-lifecycle/               portable Host lifecycle policy

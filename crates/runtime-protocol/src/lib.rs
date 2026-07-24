@@ -104,6 +104,11 @@ pub struct RuntimeInitializeParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionCreateParams {
     pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_safe_u64", default)]
+    #[specta(type = Option<Number>)]
+    pub runtime_generation: Option<u64>,
     pub agent_dir: String,
     pub session_dir: String,
     #[serde(default)]
@@ -114,6 +119,11 @@ pub struct SessionCreateParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionOpenParams {
     pub session_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_safe_u64", default)]
+    #[specta(type = Option<Number>)]
+    pub runtime_generation: Option<u64>,
     pub agent_dir: String,
     pub session_dir: String,
     #[serde(default)]
@@ -137,6 +147,18 @@ pub struct SessionTextParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionCancelParams {
     pub turn_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostServiceResponseParams {
+    pub request_id: String,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[specta(type = Option<Unknown>)]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<RuntimeProtocolError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -293,6 +315,18 @@ pub enum BindingExportError {
     Export(String),
 }
 
+fn deserialize_optional_safe_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+    let value = Option::<u64>::deserialize(deserializer)?;
+    if value.is_some_and(|value| value > MAX_SAFE_INTEGER) {
+        return Err(D::Error::custom("value exceeds JavaScript safe integer range"));
+    }
+    Ok(value)
+}
+
 fn deserialize_safe_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: Deserializer<'de>,
@@ -318,6 +352,7 @@ pub fn protocol_types() -> Types {
         .register::<SessionPromptParams>()
         .register::<SessionTextParams>()
         .register::<SessionCancelParams>()
+        .register::<HostServiceResponseParams>()
         .register::<SessionSetModelParams>()
         .register::<SessionSetThinkingParams>()
         .register::<SessionSetCapabilityParams>()

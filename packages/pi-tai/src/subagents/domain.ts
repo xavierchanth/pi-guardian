@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { UncertaintyHandling } from "./agents.ts";
 
 export const SUBAGENT_MODES = ["standalone", "root", "child"] as const;
 export type SubagentMode = (typeof SUBAGENT_MODES)[number];
@@ -10,11 +11,7 @@ export const PARENT_TOOL_NAMES = [
   "ack_child_event",
   "reconcile_children",
   "request_child_status",
-  "request_child_summary",
   "concurrency_usage",
-  "wait_for_children",
-  "child_status",
-  "collect_status",
   "respond_to_child",
   "abandon_child",
   "workspace_subagent",
@@ -30,9 +27,33 @@ export const PARENT_TOOL_NAMES = [
   "normalize_change_range",
   "prepare_workspace_report",
   "rebase_workspace",
+  "task_create",
+  "task_assign",
+  "task_plan",
+  "task_record_user_direction",
+  "task_status",
+  "prepare_workspace_review",
+  "submit_workspace_review",
+  "accept_workspace_review",
+  "begin_workspace_repair",
+  "verify_integrated_range",
+  "close_workspace",
+  "resume_workspace_operation",
+  "rebind_tracked_change",
+  "retry_workspace_cleanup",
+  "squash_resolution",
 ] as const;
-export const CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status", "ask_parent"] as const;
+const BASE_CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status"] as const;
+export const CHILD_PROTOCOL_TOOL_NAMES = [...BASE_CHILD_PROTOCOL_TOOL_NAMES, "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;
+
+export function childProtocolToolsForUncertainty(
+  uncertaintyHandling: UncertaintyHandling,
+): readonly string[] {
+  return uncertaintyHandling === "ask-parent"
+    ? CHILD_PROTOCOL_TOOL_NAMES
+    : BASE_CHILD_PROTOCOL_TOOL_NAMES;
+}
 
 export type SubagentsCommand =
   | { action: "toggle" }

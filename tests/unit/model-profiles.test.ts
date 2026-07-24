@@ -56,10 +56,11 @@ function createHarness(options: {
   };
 }
 
-test("default profiles are Sol high and Sol low", () => {
+test("default profiles are Sol low, medium, and high in cycling order", () => {
   assert.deepEqual(DEFAULT_MODEL_PROFILES, [
-    { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
     { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
+    { name: "sol-medium", provider: "openai-codex", model: "gpt-5.6-sol", effort: "medium" },
+    { name: "sol-high", provider: "openai-codex", model: "gpt-5.6-sol", effort: "high" },
   ]);
 });
 
@@ -103,5 +104,8 @@ test("matching profile is derived from actual provider, model, and effort", () =
     matchingProfile(DEFAULT_MODEL_PROFILES, "openai-codex", "gpt-5.6-sol", "low")?.name,
     "sol-low",
   );
-  assert.equal(matchingProfile(DEFAULT_MODEL_PROFILES, "openai-codex", "gpt-5.6-sol", "medium"), undefined);
+  assert.equal(
+    matchingProfile(DEFAULT_MODEL_PROFILES, "openai-codex", "gpt-5.6-sol", "medium")?.name,
+    "sol-medium",
+  );
 });

@@ -166,6 +166,15 @@ export function snapshotAgentDefinition(definition: AgentDefinition): AgentDefin
   };
 }
 
+export class MemoryDelegationStore implements DelegationStore {
+  private readonly records = new Map<string, DelegationRecord>();
+  async create(record: DelegationRecord): Promise<void> { if (this.records.has(record.id)) throw new Error(`Delegation already exists: ${record.id}`); this.records.set(record.id, structuredClone(record)); }
+  async get(id: string): Promise<DelegationRecord | undefined> { const value = this.records.get(id); return value ? structuredClone(value) : undefined; }
+  async update(id: string, update: (record: DelegationRecord) => DelegationRecord): Promise<DelegationRecord> { const current = await this.get(id); if (!current) throw new Error(`Unknown delegation: ${id}`); const next = { ...update(current), id: current.id, version: 3 as const, updatedAt: new Date().toISOString() }; validateRecord(next); this.records.set(id, structuredClone(next)); return next; }
+  async list(): Promise<DelegationRecord[]> { return [...this.records.values()].map((record) => structuredClone(record)); }
+  async listChildren(parentSessionId: string): Promise<DelegationRecord[]> { return (await this.list()).filter((record) => record.parentSessionId === parentSessionId); }
+}
+
 export class FileDelegationStore implements DelegationStore {
   readonly root: string;
 

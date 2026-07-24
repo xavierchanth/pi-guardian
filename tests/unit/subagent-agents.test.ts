@@ -19,7 +19,7 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
     agentDir: "/tmp/pi-tai-no-user-agents",
   });
   assert.equal(catalog.root.name, "thinker");
-  assert.deepEqual(catalog.root.allowedChildren, ["planner", "worker", "scout", "researcher"]);
+  assert.deepEqual(catalog.root.allowedChildren, ["planner", "worker", "reviewer", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("planner")?.allowedChildren, ["worker", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("worker")?.allowedChildren, ["scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("scout")?.allowedChildren, []);
@@ -32,7 +32,16 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
     assert.ok(catalog.byName.get("worker")?.tools.includes(tool), tool);
   }
   assert.equal(catalog.byName.get("planner")?.tools.includes("workspace_subagent"), false);
-  for (const name of ["thinker", "planner", "researcher"]) {
+  for (const name of ["thinker", "planner", "worker"]) assert.equal(catalog.byName.get(name)?.tools.includes("update_plan"), false, name);
+  assert.ok(catalog.root.tools.includes("task_create"));
+  assert.ok(catalog.byName.get("planner")?.tools.includes("task_plan"));
+  assert.ok(catalog.byName.get("reviewer")?.tools.includes("submit_workspace_review"));
+  assert.equal(catalog.byName.get("reviewer")?.tools.includes("task_status"), false);
+  for (const name of ["thinker", "planner", "worker", "reviewer"]) {
+    assert.ok(catalog.byName.get(name)?.tools.includes("request_child_status"), name);
+    assert.equal(catalog.byName.get(name)?.tools.includes("request_child_summary"), false, name);
+  }
+  for (const name of ["thinker", "planner", "reviewer", "researcher"]) {
     assert.ok(catalog.byName.get(name)?.tools.includes("web_search"), name);
     assert.ok(catalog.byName.get(name)?.tools.includes("web_fetch"), name);
   }
@@ -43,8 +52,9 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   assert.deepEqual(
     catalog.agents.map(({ name, model, effort }) => ({ name, model, effort })),
     [
-      { name: "planner", model: "gpt-5.6-sol", effort: "high" },
+      { name: "planner", model: "gpt-5.6-sol", effort: "medium" },
       { name: "researcher", model: "gpt-5.6-terra", effort: "medium" },
+      { name: "reviewer", model: "gpt-5.6-sol", effort: "medium" },
       { name: "scout", model: "gpt-5.6-luna", effort: "medium" },
       { name: "thinker", model: "gpt-5.6-sol", effort: "high" },
       { name: "worker", model: "gpt-5.6-sol", effort: "low" },
@@ -52,7 +62,7 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   );
 });
 
-test("packaged delegating prompts require repeated wait-any collection before completion", () => {
+test("packaged delegating prompts require pushed-event acknowledgement before completion", () => {
   const catalog = discoverAgentDefinitions({
     cwd: "/tmp",
     projectTrusted: false,
@@ -63,17 +73,17 @@ test("packaged delegating prompts require repeated wait-any collection before co
   for (const name of ["thinker", "planner", "worker"]) {
     const prompt = catalog.byName.get(name)?.systemPrompt ?? "";
     assert.match(prompt, /Delegation is not completion\./, name);
-    assert.match(prompt, /`wait_for_children` is wait-any/, name);
-    assert.match(prompt, /call it repeatedly/, name);
-    assert.match(prompt, /answer each question.*resume waiting/, name);
-    assert.match(prompt, /no direct child you own is unresolved/, name);
-    assert.match(prompt, /no terminal result remains uncollected/, name);
-    assert.match(prompt, /`child_status` is not a substitute.*`wait_for_children`/, name);
+    assert.match(prompt, /`await_child_event`/, name);
+    assert.match(prompt, /`respond_to_child`/, name);
+    assert.match(prompt, /`ack_child_event`/, name);
+    assert.match(prompt, /no direct child is unresolved/, name);
+    assert.match(prompt, /no terminal event remains unacknowledged/, name);
+    assert.match(prompt, /never inspect private child history/, name);
   }
 
   assert.match(
     catalog.root.systemPrompt,
-    /Before presenting delegated work as complete or ending your user-facing work/,
+    /Before presenting delegated work as complete/,
   );
   assert.match(
     catalog.root.systemPrompt,
@@ -89,7 +99,7 @@ test("packaged delegating prompts require repeated wait-any collection before co
   for (const name of ["planner", "worker"]) {
     assert.match(
       catalog.byName.get(name)?.systemPrompt ?? "",
-      /Before calling `report_to_parent` or otherwise ending your run/,
+      /Before calling `report_to_parent`/,
       name,
     );
   }

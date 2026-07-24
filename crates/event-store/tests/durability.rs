@@ -1,5 +1,5 @@
 use pi_tai_event_store::{
-    AppendOutcome, EventStore, OperationCommit, SessionProjection, StoreError,
+    AppendOutcome, EventStore, OperationCommit, SessionProjection, StoreError, UsageEntry,
 };
 use pi_tai_host_protocol::{CURRENT_PROTOCOL_VERSION, HostEvent};
 use serde_json::json;
@@ -103,6 +103,27 @@ fn duplicate_operation_returns_the_original_response_without_an_event() {
         store.load_projection("session-1").unwrap(),
         Some(projection(1))
     );
+}
+
+#[test]
+fn usage_entries_are_exact_idempotent_and_report_telemetry_gaps() {
+    let temporary = tempfile::tempdir().unwrap();
+    let mut store = EventStore::open(temporary.path().join("broker.sqlite3")).unwrap();
+    store.append(&projection(1), &event(1, 1, "session.created"), None).unwrap();
+    let usage = UsageEntry {
+        usage_event_id: "usage-1".into(), session_id: "session-1".into(), context_id: "child-1".into(), cycle_id: "cycle-1".into(), message_id: "message-1".into(), provider: "provider".into(), model: "model".into(), role: "worker".into(),
+        input: 2, output: 3, cache_read: 4, cache_write: 5, cost_input: 0.1, cost_output: 0.2, cost_cache_read: 0.3, cost_cache_write: 0.4, cost_total: 1.0, recorded_at: "now".into(),
+    };
+    assert!(store.record_usage(&usage).unwrap());
+    assert!(!store.record_usage(&usage).unwrap());
+    assert!(store.record_usage_gap("gap-1", "session-1", "child-2", "cycle-2", "missing_message_usage", "now").unwrap());
+    let totals = store.usage_totals("session-1").unwrap();
+    assert_eq!((totals.input, totals.output, totals.cache_read, totals.cache_write, totals.cost, totals.telemetry_gap_count), (2, 3, 4, 5, 1.0, 1));
+    let breakdown = store.usage_breakdown("session-1").unwrap();
+    assert_eq!(breakdown.by_model["provider/model"].output, 3);
+    assert_eq!(breakdown.by_role["worker"].input, 2);
+    assert_eq!(breakdown.by_context["child-1"].cache_read, 4);
+    assert_eq!(breakdown.by_execution_cycle["cycle-1"].cache_write, 5);
 }
 
 #[test]

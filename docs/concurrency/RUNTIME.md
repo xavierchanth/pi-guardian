@@ -115,9 +115,9 @@ Recommended maxima: 250 tokens for questions, 400 for status, 1,200 for terminal
 
 ## Status
 
-`child_status` is metadata-only and does not wake the child. It reports lifecycle, heartbeat, objective, resume point, queues/claims, workspace/review state, and report availability.
+Host concurrency projections report bounded lifecycle, objective, question, claim, workspace/review, receipt, incident, and usage summaries without waking the child.
 
-`request_child_status` and `request_child_summary` send bounded correlated requests. The child answers from its own context and resumes prior work. Parent-side history summarization is unavailable.
+`request_child_status` sends a bounded correlated request with optional focus and additional questions. The child answers from its own context and resumes prior work. Parent-side history summarization is unavailable.
 
 ## Cancellation
 

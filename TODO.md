@@ -2,7 +2,4 @@
 - [ ] computer use tool
 - [ ] browser use tool
 - [ ] deeper cmux integrations (browser)
-- [ ] when wait_for_children tool is active don't queer a steer message, interrupt and act on the new message immediately.
 - [ ] After merging a planner workspace, the thinker should check commit history and remove empty inner commits, plus name any unnamed commits
-- [ ] /continue should only tell agents with the reconcile_children tool to call that.
-- [ ] /design should ground in the docs

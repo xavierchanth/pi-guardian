@@ -51,7 +51,7 @@ Pairs a client with a selected Host, observes sessions, and later controls them 
 
 - Durable sessions with ordered replay and reconnect cursors.
 - Pi SDK-backed agent execution and configurable models.
-- Work context and durable task-plan artifacts.
+- Work context and durable state-owned task trees with immutable snapshots.
 - Private in-process child agents with bounded parent/child messages.
 - Shared-source and isolated JJ execution lanes.
 - Independent review before isolated work integrates.

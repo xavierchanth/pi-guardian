@@ -13,6 +13,22 @@ export type EmptyResult = Record<string, never>;
 
 export type EventFrameKind = "event";
 
+export type HostServiceResponseParams = HostServiceResponseParams_Serialize | HostServiceResponseParams_Deserialize;
+
+export type HostServiceResponseParams_Deserialize = {
+	requestId: string,
+	ok: boolean,
+	result: unknown | null,
+	error: RuntimeProtocolError_Deserialize | null,
+};
+
+export type HostServiceResponseParams_Serialize = {
+	requestId: string,
+	ok: boolean,
+	result?: unknown | null,
+	error?: RuntimeProtocolError_Serialize | null,
+};
+
 export type InterruptionData = {
 	reason: string,
 };
@@ -174,11 +190,24 @@ export type SessionCapabilityState_Serialize = {
 	reason?: string | null,
 };
 
-export type SessionCreateParams = {
+export type SessionCreateParams = SessionCreateParams_Serialize | SessionCreateParams_Deserialize;
+
+export type SessionCreateParams_Deserialize = {
 	cwd: string,
+	rootSessionId: string | null,
+	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
 	faux?: boolean,
+};
+
+export type SessionCreateParams_Serialize = {
+	cwd: string,
+	rootSessionId?: string | null,
+	runtimeGeneration?: number | null,
+	agentDir: string,
+	sessionDir: string,
+	faux: boolean,
 };
 
 export type SessionInfo = {
@@ -187,11 +216,24 @@ export type SessionInfo = {
 	cwd: string,
 };
 
-export type SessionOpenParams = {
+export type SessionOpenParams = SessionOpenParams_Serialize | SessionOpenParams_Deserialize;
+
+export type SessionOpenParams_Deserialize = {
 	sessionFile: string,
+	rootSessionId: string | null,
+	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
 	faux?: boolean,
+};
+
+export type SessionOpenParams_Serialize = {
+	sessionFile: string,
+	rootSessionId?: string | null,
+	runtimeGeneration?: number | null,
+	agentDir: string,
+	sessionDir: string,
+	faux: boolean,
 };
 
 export type SessionPromptParams = {

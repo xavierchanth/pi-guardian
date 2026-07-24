@@ -29,10 +29,15 @@ export class ChildUsageLedger {
     message: AssistantMessage;
   }): Promise<PersistedUsageEntryV4 | undefined> {
     const usage = input.message.usage;
-    if (!usage) return undefined;
-    const messageId = String((input.message as AssistantMessage & { id?: string; timestamp?: number }).id
-      ?? (input.message as AssistantMessage & { timestamp?: number }).timestamp
-      ?? `${usage.input}:${usage.output}:${usage.cacheRead}:${usage.cacheWrite}`);
+    const rawMessageId = (input.message as AssistantMessage & { id?: string; timestamp?: number }).id
+      ?? (input.message as AssistantMessage & { timestamp?: number }).timestamp;
+    if (!usage || rawMessageId === undefined) {
+      const reason = usage ? "missing_message_identity" as const : "missing_message_usage" as const;
+      const gapId = `${input.cycleId}_${reason}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
+      await this.store.update(input.contextId, (context) => context.telemetryGaps.some((gap) => gap.gapId === gapId) ? context : { ...context, telemetryGaps: [...context.telemetryGaps, { version: 1, gapId, contextId: input.contextId, cycleId: input.cycleId, reason, observedAt: this.now() }], updatedAt: this.now() });
+      return undefined;
+    }
+    const messageId = String(rawMessageId);
     const usageEventId = `${input.cycleId}_${messageId}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
     const entry: PersistedUsageEntryV4 = {
       usageEventId,

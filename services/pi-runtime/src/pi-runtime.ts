@@ -33,7 +33,10 @@ import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
 import { createPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
+import { HostRepositoryEnrollmentStore, RepositoryEnrollmentService } from "../../../packages/pi-tai/src/jj/repository-enrollment.ts";
+import { HostRepositoryMutationCoordinator, HostSessionWorkspaceStore, SessionWorkspaceService } from "../../../packages/pi-tai/src/jj/session-workspace.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
+import type { HostServicePort } from "./host-services.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";
 import { createHeadlessUiContext } from "./headless-ui.ts";
 import type { PromptStart, RuntimeEventSink, RuntimePort } from "./runtime-port.ts";
@@ -47,18 +50,22 @@ export class PiSdkRuntimePort implements RuntimePort {
   private extensionErrors: string[] = [];
   private capabilityController?: SessionCapabilityController;
   private active?: { commandId: string; turnId: string; emit: RuntimeEventSink };
+  private hostServices?: HostServicePort;
+  private rootSessionId?: string;
   private readonly diagnostics: DiagnosticSink;
 
   constructor(diagnostics: DiagnosticSink = () => {}) {
     this.diagnostics = diagnostics;
   }
 
+  bindHostServices(services: HostServicePort): void { this.hostServices = services; }
+
   async capabilities(): Promise<RuntimeCapabilities> {
     if (!this.runtime) {
       return {
         methods: [],
-        tools: ["update_plan"],
-        commands: ["continue", "plan-status"],
+        tools: [],
+        commands: ["continue"],
         sessionCapabilities: [],
         extensionErrors: [...this.extensionErrors],
       };
@@ -82,10 +89,12 @@ export class PiSdkRuntimePort implements RuntimePort {
   async createSession(params: SessionCreateParams, emit: RuntimeEventSink): Promise<SessionInfo> {
     await this.disposeSession();
     await this.ensureModelRuntime(params.agentDir, params.faux ?? false);
-    const sessionManager = SessionManager.create(params.cwd, params.sessionDir);
-    this.runtime = await this.createRuntime(params.cwd, params.agentDir, sessionManager);
+    this.rootSessionId = params.rootSessionId ?? undefined;
+    const cwd = await this.managedSessionCwd(params);
+    const sessionManager = SessionManager.create(cwd, params.sessionDir);
+    this.runtime = await this.createRuntime(cwd, params.agentDir, sessionManager);
     await this.bindSession(this.runtime.session);
-    const info = sessionInfo(this.runtime.session, params.cwd);
+    const info = sessionInfo(this.runtime.session, cwd);
     emit({
       event: "session.ready",
       sessionId: info.sessionId,
@@ -95,6 +104,7 @@ export class PiSdkRuntimePort implements RuntimePort {
   }
 
   async openSession(params: SessionOpenParams, emit: RuntimeEventSink): Promise<SessionInfo> {
+    this.rootSessionId = params.rootSessionId ?? undefined;
     await this.ensureModelRuntime(params.agentDir, params.faux ?? false);
     if (this.runtime) {
       await this.runtime.switchSession(params.sessionFile);
@@ -209,6 +219,21 @@ export class PiSdkRuntimePort implements RuntimePort {
     await this.disposeSession();
   }
 
+  private async managedSessionCwd(params: SessionCreateParams): Promise<string> {
+    const rootSessionId = params.rootSessionId ?? undefined;
+    if (!this.hostServices || !rootSessionId) return params.cwd;
+    const enrollments = new RepositoryEnrollmentService({ store: new HostRepositoryEnrollmentStore(this.hostServices) });
+    let enrollment;
+    try { enrollment = await enrollments.verify(params.cwd); }
+    catch { return params.cwd; }
+    const service = new SessionWorkspaceService({
+      store: new HostSessionWorkspaceStore(this.hostServices, rootSessionId),
+      coordinator: new HostRepositoryMutationCoordinator(this.hostServices),
+    });
+    const identity = await service.allocate({ enrollment, invokingCwd: params.cwd, rootSessionId, runtimeGeneration: params.runtimeGeneration ?? 1 });
+    return identity.path;
+  }
+
   private async ensureModelRuntime(agentDir: string, faux: boolean): Promise<void> {
     if (!faux) throw new Error("H2 proof runtime currently requires faux: true.");
     if (this.agentDir && this.agentDir !== agentDir) {
@@ -271,6 +296,8 @@ export class PiSdkRuntimePort implements RuntimePort {
         notificationSender: () => {},
         capabilities,
         agentDir,
+        ...(this.hostServices ? { hostServices: this.hostServices } : {}),
+        ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
       };
     });
     const factory: CreateAgentSessionRuntimeFactory = async (options) => {

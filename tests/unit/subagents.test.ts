@@ -12,6 +12,7 @@ import type { AgentCatalog, AgentDefinition } from "../../packages/pi-tai/src/su
 import {
   PARENT_TOOL_NAMES,
   activeToolsForMode,
+  childProtocolToolsForUncertainty,
   composePiTaiInstructions,
   parseSubagentsCommand,
 } from "../../packages/pi-tai/src/subagents/domain.ts";
@@ -56,6 +57,14 @@ test("subagent mode tools are exact and unified command parsing remains stable",
   assert.equal(parseSubagentsCommand("bad"), undefined);
   assert.deepEqual(activeToolsForMode(["read", ...PARENT_TOOL_NAMES], "standalone"), ["read"]);
   assert.deepEqual(activeToolsForMode(["read"], "root", ["read", "subagent"]), ["read", "subagent"]);
+  assert.deepEqual(childProtocolToolsForUncertainty("ask-parent"), [
+    "message_parent", "report_to_parent", "report_status", "ask_parent",
+  ]);
+  for (const handling of ["block", "best-effort"] as const) {
+    assert.deepEqual(childProtocolToolsForUncertainty(handling), [
+      "message_parent", "report_to_parent", "report_status",
+    ]);
+  }
 });
 
 test("instruction composition describes sparse shared-cwd delegation without workspace policy", () => {
@@ -641,7 +650,6 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   }) | undefined;
   const customViews: { before: string[]; afterG: string[]; afterg: string[]; afterEnd: string[]; afterRight: string[]; options: unknown }[] = [];
   let inspectChoices: string[] = [];
-  let waitProgress: { content?: Array<{ type: string; text?: string }>; details?: { nodes?: Array<{ id: string }> } } | undefined;
   capabilities.bindTools({ getActiveTools: () => active, setActiveTools: (next) => { active = next; } });
   const catalog = agentCatalog();
   registerSubagents(pi, {
@@ -688,20 +696,17 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   });
   assert.match(
     tools.get("subagent")?.promptGuidelines.join("\n") ?? "",
-    /Spawning is not completion.*repeatedly call wait_for_children/s,
+    /Spawning is not completion.*repeatedly use await_child_event/s,
   );
   assert.match(
     tools.get("workspace_subagent")?.promptGuidelines.join("\n") ?? "",
-    /Launching a workspace child is not completion.*Repeatedly call wait_for_children/s,
+    /Launching a workspace child is not completion.*Use await_child_event/s,
   );
-  assert.match(tools.get("wait_for_children")?.description ?? "", /Wait-any.*call repeatedly/);
-  assert.match(
-    tools.get("wait_for_children")?.promptGuidelines.join("\n") ?? "",
-    /each call returns after one.*not after all.*Keep calling until.*uncollected/s,
-  );
+  assert.match(tools.get("await_child_event")?.description ?? "", /Suspend without polling/);
+  assert.match(tools.get("ack_child_event")?.description ?? "", /Acknowledge one delivered/);
   assert.match(
     tools.get("report_to_parent")?.promptGuidelines.join("\n") ?? "",
-    /repeatedly call wait_for_children.*consume every direct-child terminal result/s,
+    /repeatedly use await_child_event.*acknowledge every direct-child terminal event/s,
   );
   const notifications: string[] = [];
   const ctx = {
@@ -782,18 +787,6 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   await commands.get("subagents")?.("inspect finished-descendant", ctx);
   assert.match(customViews[2]?.before.join("\n") ?? "", /\[Inspect · scout · finished-descendant\]/);
   assert.match(customViews[2]?.before.join("\n") ?? "", /completed/);
-
-  await tools.get("wait_for_children")?.execute(
-    "tool",
-    {},
-    undefined,
-    (update: typeof waitProgress) => { waitProgress = update; },
-    ctx,
-  );
-  const waitText = waitProgress?.content?.map((part) => part.text ?? "").join("\n") ?? "";
-  assert.match(waitText, /planner · running[\s\S]*└── worker · running[\s\S]*    └── scout · running/);
-  assert.doesNotMatch(waitText, /completed descendant/);
-  assert.deepEqual(waitProgress?.details?.nodes?.map((node) => node.id), ["visible", "active-worker", "active-scout"]);
 
   await handlers.get("agent_settled")?.[0]({}, ctx);
   assert.match(injectedMessages.at(-1) ?? "", /^custom:false:.*unresolved or unacknowledged/);

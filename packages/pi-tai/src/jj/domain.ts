@@ -93,6 +93,13 @@ export interface WorkspaceRebaseLease {
   readonly [handleBrand]: "WorkspaceRebaseLease";
 }
 
+export interface ConflictResolutionLease {
+  readonly kind: "conflict_resolution_lease";
+  readonly workspaceId: WorkspaceId;
+  readonly claimId: FileSetClaimId;
+  readonly [handleBrand]: "ConflictResolutionLease";
+}
+
 export interface FrozenWorkspaceHandle {
   readonly kind: "frozen_workspace";
   readonly workspaceId: WorkspaceId;
@@ -127,6 +134,8 @@ export function workspaceRebaseLease(
 ): WorkspaceRebaseLease {
   return { kind: "workspace_rebase_lease", workspaceId, leaseId } as WorkspaceRebaseLease;
 }
+
+export function conflictResolutionLease(workspaceId: WorkspaceId, claimId: FileSetClaimId): ConflictResolutionLease { return { kind: "conflict_resolution_lease", workspaceId, claimId } as ConflictResolutionLease; }
 
 export function frozenWorkspaceHandle(workspaceId: WorkspaceId): FrozenWorkspaceHandle {
   return { kind: "frozen_workspace", workspaceId } as FrozenWorkspaceHandle;

@@ -15,6 +15,7 @@ import type {
   SessionTextParams,
   ThinkingInfo,
 } from "@pi-tai/runtime-protocol";
+import type { HostServicePort } from "./host-services.ts";
 import type { PromptStart, RuntimeEventSink, RuntimePort } from "./runtime-port.ts";
 
 export class FakeRuntimePort implements RuntimePort {
@@ -22,11 +23,14 @@ export class FakeRuntimePort implements RuntimePort {
   private active?: { turnId: string; controller: AbortController };
   private model: ModelInfo = { provider: "faux", model: "scripted" };
   private thinking: ThinkingInfo = { level: "off" };
+  private hostServices?: HostServicePort;
+
+  bindHostServices(services: HostServicePort): void { this.hostServices = services; }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     return {
       methods: [],
-      tools: ["update_plan"],
+      tools: [],
       commands: ["continue", "plan-status"],
       sessionCapabilities: [],
       extensionErrors: [],
@@ -139,11 +143,22 @@ export class FakeRuntimePort implements RuntimePort {
     const base = { commandId, sessionId: session.sessionId, turnId: params.turnId };
     emit({ ...base, event: "agent.start", data: {} });
     emit({ ...base, event: "turn.start", data: {} });
+    if (params.text.includes("host-service")) {
+      if (!this.hostServices) throw new Error("Host services are unavailable.");
+      await this.hostServices.request("core.transact", {
+        transactionId: `transaction-${params.turnId}`,
+        expectedRevision: 0,
+        events: [{ eventId: `event-${params.turnId}`, type: "test.recorded", payload: { turnId: params.turnId } }],
+        state: { version: 1, contexts: [] },
+        projection: { version: 1, rootSessionId: session.sessionId, revision: 1, generatedAt: "now", children: [], inactiveChildCount: 0, tasks: [], inactiveTaskCount: 0, workspaces: [], activeClaimCount: 0, unansweredQuestionCount: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, telemetryGapCount: 0, truncated: false },
+      });
+    }
     const chunks = params.text.includes("slow") ? ["slow", " response"] : ["faux", " response"];
     for (const delta of chunks) {
       await wait(params.text.includes("slow") ? 100 : 1, signal);
       emit({ ...base, event: "assistant.text_delta", data: { delta } });
     }
+    emit({ ...base, event: "message.end", data: { role: "assistant", messageId: `message-${params.turnId}`, provider: "pi-tai", model: "faux", usage: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } });
     emit({ ...base, event: "turn.end", data: {} });
     emit({ ...base, event: "agent.end", data: {} });
     emit({ ...base, event: "session.idle", data: {} });

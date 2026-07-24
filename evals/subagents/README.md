@@ -1,6 +1,6 @@
 # Subagent lifecycle specifications
 
-This suite records expected lifecycle behavior separately from executable workspace-skill evaluations. In this slice every case is intentionally `specification-only`: the runner validates YAML and reports each case as **skipped**. It does not launch Pi, simulate RPC, or claim protocol results.
+This suite records expected subagent lifecycle behavior. In this slice every case is intentionally `specification-only`: the runner validates YAML and reports each case as **skipped**. It does not launch Pi, simulate RPC, or claim protocol results.
 
 ## Validate and report
 

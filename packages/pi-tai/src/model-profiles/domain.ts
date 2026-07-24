@@ -10,15 +10,21 @@ export interface ModelProfile {
 
 export const DEFAULT_MODEL_PROFILES: readonly ModelProfile[] = Object.freeze([
   Object.freeze({
-    name: "sol-high",
-    provider: "openai-codex",
-    model: "gpt-5.6-sol",
-    effort: "high",
-  }),
-  Object.freeze({
     name: "sol-low",
     provider: "openai-codex",
     model: "gpt-5.6-sol",
     effort: "low",
+  }),
+  Object.freeze({
+    name: "sol-medium",
+    provider: "openai-codex",
+    model: "gpt-5.6-sol",
+    effort: "medium",
+  }),
+  Object.freeze({
+    name: "sol-high",
+    provider: "openai-codex",
+    model: "gpt-5.6-sol",
+    effort: "high",
   }),
 ]);

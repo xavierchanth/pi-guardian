@@ -25,7 +25,7 @@ import { generateModelTitle, type TitleGenerator } from "./src/session-title/gen
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerSubagents } from "./src/subagents/register.ts";
 import { registerWebTools } from "./src/web/register.ts";
-import { registerWorkContext } from "./src/work-context/register.ts";
+import type { HostServiceClientPort } from "./src/concurrency/host-repository.ts";
 import {
   createPiSessionWorkContextStore,
   type WorkContextStore,
@@ -39,6 +39,8 @@ export interface PiTaiRuntime {
   notificationSender: NotificationSender;
   capabilities: SessionCapabilityController;
   agentDir: string;
+  hostServices?: HostServiceClientPort;
+  rootSessionId?: string;
 }
 
 export type PiTaiRegistrar = (
@@ -68,9 +70,8 @@ const productionRegistrars: PiTaiRegistrars = {
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   compaction: (pi, runtime) => registerAutoCompaction(pi, runtime.config),
   capabilities: (pi, runtime) => registerCapabilityController(pi, runtime.capabilities),
-  workContext: (pi, runtime) => {
-    registerWorkContext(pi, runtime.workContext);
-  },
+  // I09: durable task tools are authoritative; update_plan remains injectable only for legacy test/package consumers.
+  workContext: () => undefined,
   responseEditor: (pi) => {
     registerResponseEditor(pi);
   },
@@ -85,6 +86,8 @@ const productionRegistrars: PiTaiRegistrars = {
       capabilities: runtime.capabilities,
       config: runtime.config,
       agentDir: runtime.agentDir,
+      ...(runtime.hostServices ? { hostServices: runtime.hostServices } : {}),
+      ...(runtime.rootSessionId ? { rootSessionId: runtime.rootSessionId } : {}),
     });
   },
   sessionTitle: (pi, runtime) => {

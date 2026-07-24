@@ -22,6 +22,7 @@ export interface SpawnContextRequest {
   caller: AgentDefinitionSnapshot;
   modelRegistry: ModelRegistry;
   contextId?: string;
+  taskId?: string;
   workspaceId?: string;
   workspace?: WorkspaceAttachment;
   extensions?: readonly InlineExtension[] | ((contextId: string) => readonly InlineExtension[]);
@@ -82,11 +83,13 @@ export class ChildContextCoordinator {
       cwd: request.cwd,
       task: request.task,
       agent: request.agent,
+      ...(request.taskId ? { taskId: request.taskId } : {}),
       ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
       ...(request.workspace ? { workspace: request.workspace } : {}),
       execution: { phase: "created", cycleId },
       events: [],
       usage: [],
+      telemetryGaps: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     };

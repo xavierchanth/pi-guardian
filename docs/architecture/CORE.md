@@ -66,11 +66,11 @@ Owns task packets, role graph, child contexts, events, acknowledgement, waits, r
 Provides:
 
 - lightweight session goal/checklist state;
-- durable repository-visible task plans for substantial implementation;
-- snapshots included in child and reviewer packets;
+- durable state-owned task trees for substantial implementation;
+- immutable content-addressed Markdown snapshots included in child and reviewer packets;
 - projections consumable by any client.
 
-The current `update_plan` checklist and the durable task-plan artifact are distinct. One manages immediate execution; the other protects long-running cross-context intent.
+Packaged roles use scoped task tools rather than `update_plan`: the thinker owns immutable goals and sourced user directions, planners replace their effective plans through append-only revisions, and child contexts execute bound task nodes using role-scoped task projections. Production no longer exposes `update_plan`; Host-backed task records are authoritative.
 
 ### Guardian
 

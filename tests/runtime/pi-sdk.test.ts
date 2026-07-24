@@ -32,9 +32,9 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
   const first = new PiSdkRuntimePort();
   const session = await first.createSession({ ...paths, faux: true }, (event) => events.push(event));
   const capabilities = await first.capabilities();
-  assert.ok(capabilities.tools.includes("update_plan"));
+  assert.equal(capabilities.tools.includes("update_plan"), false);
   assert.ok(capabilities.commands.includes("continue"));
-  assert.ok(capabilities.commands.includes("plan-status"));
+  assert.equal(capabilities.commands.includes("plan-status"), false);
   assert.equal(capabilities.commands.includes("jj-workspaces"), false);
   assert.equal(capabilities.commands.includes("git-worktrees"), false);
   assert.deepEqual(capabilities.extensionErrors, []);
@@ -125,19 +125,12 @@ test("Pi SDK session replacement rebinds events to only the new session", async 
   await port.shutdown();
 });
 
-test("Pi SDK port executes Pi-Tai update_plan and supports bounded cancellation", async () => {
+test("Pi SDK port excludes retired update_plan and supports bounded cancellation", async () => {
   const paths = await fixture();
   const events: RuntimeEventInput[] = [];
   const port = new PiSdkRuntimePort();
-  const session = await port.createSession({ ...paths, faux: true }, (event) => events.push(event));
-  const planned = await port.startPrompt(
-    { turnId: "turn-plan", text: "use update_plan" },
-    "prompt-plan",
-    (event) => events.push(event),
-  );
-  await planned.completion;
-  assert.ok(events.some((event) => event.event === "tool.start" && (event.data as any).toolName === "update_plan"));
-  assert.match(await readFile(session.sessionFile, "utf8"), /Prove hosted runtime/);
+  await port.createSession({ ...paths, faux: true }, (event) => events.push(event));
+  assert.equal((await port.capabilities()).tools.includes("update_plan"), false);
 
   const slow = await port.startPrompt(
     { turnId: "turn-slow", text: "slow response" },

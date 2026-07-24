@@ -62,7 +62,7 @@ Pi's native `settings.json` compaction policy remains active independently and m
 | `model` | non-empty string | Pi model ID. |
 | `effort` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Requested reasoning effort. |
 
-Defaults are `sol-high` and `sol-low`. Pi-Tai reserves Shift+Tab for profile cycling and moves Pi's native thinking-level cycle to Ctrl+Alt+T. On load, it merges the native mapping into `~/.pi/agent/keybindings.json`, preserving unrelated bindings and additional keys assigned to thinking-level cycling. Invalid JSON is never overwritten and produces a warning. Use `/effort` to change effort independently and Pi's `/model` for unrestricted model selection.
+Defaults are `sol-low`, `sol-medium`, and `sol-high`, in that cycling order; `sol-low` is the first/default profile. Pi-Tai reserves Shift+Tab for profile cycling and moves Pi's native thinking-level cycle to Ctrl+Alt+T. On load, it merges the native mapping into `~/.pi/agent/keybindings.json`, preserving unrelated bindings and additional keys assigned to thinking-level cycling. Invalid JSON is never overwritten and produces a warning. Use `/effort` to change effort independently and Pi's `/model` for unrestricted model selection.
 
 ### Example
 
@@ -89,8 +89,9 @@ Defaults are `sol-high` and `sol-low`. Pi-Tai reserves Shift+Tab for profile cyc
     "thresholdPercent": 90
   },
   "modelProfiles": [
-    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" },
-    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" }
+    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
+    { "name": "sol-medium", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "medium" },
+    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" }
   ]
 }
 ```

@@ -14,7 +14,7 @@ commands
 ├── submit prompt
 ├── cancel current operation
 ├── answer interaction
-├── replace work context or supported configuration
+├── invoke scoped task/event/review commands or supported configuration
 ├── send steering/follow-up
 └── invoke authorized session capability
 
@@ -28,7 +28,7 @@ queries
 events
 ├── item upsert/chunk
 ├── tool/terminal update
-├── work-context replacement
+├── bounded task/concurrency replacement
 ├── foreground/runtime state
 ├── interaction lifecycle
 ├── child/review/workspace projection
@@ -37,6 +37,8 @@ events
 ```
 
 Every mutating command has an operation ID. Revision-sensitive commands carry an expected revision. Event streams have ordered cursors.
+
+Concurrency projections contain bounded semantic task, child, question, finding, claim, workspace-custody, receipt, incident, and exact-usage summaries. They never contain transcripts, raw message histories, private journal/session paths, PIDs, control channels, or a client action for entering a child context.
 
 ## Pi CLI adapter
 
@@ -48,7 +50,7 @@ Client-specific responsibilities:
 - create/attach/resume Host sessions;
 - map Host events into Pi's extension/UI lifecycle;
 - ANSI themes and terminal background polling;
-- footer and work-context rendering;
+- footer and bounded task/concurrency rendering;
 - external response editor;
 - keybindings and model-profile shortcuts;
 - terminal notifications;

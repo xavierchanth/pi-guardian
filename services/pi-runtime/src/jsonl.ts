@@ -11,6 +11,7 @@ export const MAX_INPUT_LINE_BYTES = 1024 * 1024;
 export interface JsonlReaderHandlers {
   onValue(value: unknown): void | Promise<void>;
   onMalformed(reason: string): void | Promise<void>;
+  isImmediate?: (value: unknown) => boolean;
 }
 
 export class JsonlReader {
@@ -65,7 +66,11 @@ export class JsonlReader {
         this.enqueueMalformed("Input line is not valid JSON.");
         continue;
       }
-      this.queue = this.queue.then(() => this.handlers.onValue(value));
+      if (this.handlers.isImmediate?.(value)) {
+        void Promise.resolve(this.handlers.onValue(value)).catch((error) => this.handlers.onMalformed(error instanceof Error ? error.message : "Immediate input handling failed."));
+      } else {
+        this.queue = this.queue.then(() => this.handlers.onValue(value));
+      }
     }
   }
 

@@ -25,6 +25,7 @@ function fixture(): PersistedChildContextV4 {
     execution: { phase: "created", cycleId: "cycle-1" },
     events: [],
     usage: [],
+    telemetryGaps: [],
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   };
