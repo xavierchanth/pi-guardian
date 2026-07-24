@@ -40,13 +40,13 @@ class FakeHandle {
   readonly sent: unknown[] = [];
   aborted = false;
   disposed = false;
-  readonly session: Pick<AgentSession, "prompt">;
+  readonly session: Pick<AgentSession, "prompt" | "subscribe">;
   readonly contextId: string;
   constructor(contextId: string) {
     this.contextId = contextId;
     this.sessionId = `session-${contextId}`;
     this.sessionFile = `/private/${contextId}.jsonl`;
-    this.session = { prompt: async () => undefined };
+    this.session = { prompt: async () => undefined, subscribe: () => () => {} };
   }
   send(message: unknown): void { this.sent.push(message); }
   async abort(): Promise<void> { this.aborted = true; }

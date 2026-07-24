@@ -4,6 +4,7 @@ import type { AgentDefinitionSnapshot } from "../subagents/store.ts";
 import { renderTaskPacket, type ResolvedTaskPacket } from "../subagents/task.ts";
 import type { WorkspaceAttachment } from "../workspaces/domain.ts";
 import type { PrivateChildSessionFactoryPort, PrivateChildSessionHandle } from "./child-session.ts";
+import type { ChildUsageLedger } from "./usage.ts";
 import type {
   ChildContextStore,
   PersistedChildContextV4,
@@ -31,6 +32,7 @@ export interface ChildContextRuntime {
   readonly cycleId: string;
   readonly handle: PrivateChildSessionHandle;
   readonly completion: Promise<void>;
+  readonly unsubscribe: () => void;
 }
 
 export interface ChildContextCoordinatorOptions {
@@ -40,6 +42,7 @@ export interface ChildContextCoordinatorOptions {
   agentDir: string;
   now?: () => string;
   id?: () => string;
+  usageLedger?: ChildUsageLedger;
 }
 
 export class ChildContextCoordinator {
@@ -49,6 +52,7 @@ export class ChildContextCoordinator {
   private readonly agentDir: string;
   private readonly now: () => string;
   private readonly id: () => string;
+  private readonly usageLedger?: ChildUsageLedger;
   private readonly runtimes = new Map<string, ChildContextRuntime>();
 
   constructor(options: ChildContextCoordinatorOptions) {
@@ -58,6 +62,7 @@ export class ChildContextCoordinator {
     this.agentDir = options.agentDir;
     this.now = options.now ?? (() => new Date().toISOString());
     this.id = options.id ?? randomUUID;
+    this.usageLedger = options.usageLedger;
   }
 
   async spawn(request: SpawnContextRequest): Promise<PersistedChildContextV4> {
@@ -112,12 +117,23 @@ export class ChildContextCoordinator {
         updatedAt: this.now(),
       }));
       await request.onStarted?.(started);
+      const unsubscribe = handle.session.subscribe((event) => {
+        if (event.type !== "message_end" || event.message.role !== "assistant" || !this.usageLedger) return;
+        void this.usageLedger.recordAssistant({
+          contextId,
+          cycleId,
+          role: request.agent.name,
+          provider: request.agent.provider,
+          model: request.agent.model,
+          message: event.message,
+        });
+      });
       const completion = handle.session.prompt(renderTaskPacket(request.task), { source: "rpc" })
         .then(() => undefined)
         .catch(async (error) => {
           await this.recordIncident(contextId, cycleId, error instanceof Error ? error.message : String(error));
         });
-      this.runtimes.set(contextId, { contextId, cycleId, handle, completion });
+      this.runtimes.set(contextId, { contextId, cycleId, handle, completion, unsubscribe });
       return (await this.store.get(contextId))!;
     } catch (error) {
       await this.recordIncident(contextId, cycleId, error instanceof Error ? error.message : String(error));
@@ -166,9 +182,18 @@ export class ChildContextCoordinator {
       events: [...current.events, event],
       updatedAt: timestamp,
     }));
+    runtime.unsubscribe();
     runtime.handle.dispose();
     this.runtimes.delete(contextId);
     return updated;
+  }
+
+  releaseRuntime(contextId: string): void {
+    const runtime = this.runtimes.get(contextId);
+    if (!runtime) return;
+    runtime.unsubscribe();
+    runtime.handle.dispose();
+    this.runtimes.delete(contextId);
   }
 
   async disposeRoot(rootSessionId: string): Promise<void> {
@@ -177,6 +202,7 @@ export class ChildContextCoordinator {
       const runtime = this.runtimes.get(record.contextId);
       if (!runtime) continue;
       await runtime.handle.abort().catch(() => undefined);
+      runtime.unsubscribe();
       runtime.handle.dispose();
       this.runtimes.delete(record.contextId);
       if (["starting", "running", "awaiting_parent"].includes(record.execution.phase)) {

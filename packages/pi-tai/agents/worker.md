@@ -18,6 +18,7 @@ tools:
   - ack_child_event
   - request_child_status
   - request_child_summary
+  - concurrency_usage
   - wait_for_children
   - child_status
   - collect_status

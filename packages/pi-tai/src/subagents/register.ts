@@ -15,6 +15,7 @@ import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
 import { FileChildContextStore, type ChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
 import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
+import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
@@ -79,6 +80,8 @@ export interface SubagentDependencies {
   contextStore?: ChildContextStore;
   protocol?: ChildEventProtocol;
   waits?: ChildEventWaitRegistry;
+  usageLedger?: ChildUsageLedger;
+  retention?: ChildJournalRetention;
   agentDir?: string;
 }
 
@@ -96,10 +99,13 @@ export function registerSubagents(
   });
   const stateRoot = dirname(storeRoot);
   const contextStore = dependencies.contextStore ?? new FileChildContextStore(join(stateRoot, "context-records"));
+  const usageLedger = dependencies.usageLedger ?? new ChildUsageLedger(contextStore);
+  const retention = dependencies.retention ?? new ChildJournalRetention(contextStore, stateRoot);
   const coordinator = dependencies.coordinator ?? (dependencies.config
     ? new ChildContextCoordinator({
         store: contextStore,
         sessionFactory: new PrivateChildSessionFactory({ config: dependencies.config }),
+        usageLedger,
         stateRoot,
         agentDir,
       })
@@ -165,6 +171,8 @@ export function registerSubagents(
           contextStore,
           ...(protocol ? { protocol } : {}),
           waits,
+          usageLedger,
+          retention,
           ...(dependencies.config ? { config: dependencies.config } : {}),
           loadInstructions,
           discoverAgents: discover,
@@ -558,7 +566,8 @@ export function registerSubagents(
     waits.cancel(childDelegation?.id ?? ctx.sessionManager.getSessionId());
     stopChildWidget(ctx);
     if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
-      await orchestrator.cleanupChildControl(childDelegation.id);
+      if (coordinator?.getRuntime(childDelegation.id)) coordinator.releaseRuntime(childDelegation.id);
+      else await orchestrator.cleanupChildControl(childDelegation.id);
     }
   });
 
@@ -790,10 +799,13 @@ export function registerSubagents(
       if (!protocol) throw new Error("Typed child event protocol is unavailable.");
       const event = await protocol.acknowledge(params.contextId, params.eventId);
       if (event.kind === "terminal") {
-        await store.update(params.contextId, (record) => ({
+        const legacy = await store.update(params.contextId, (record) => ({
           ...record,
           parentCollectedAt: record.parentCollectedAt ?? new Date().toISOString(),
         }));
+        if (!legacy.workspace && !coordinator?.getRuntime(params.contextId)) {
+          await retention.closeClean(params.contextId, true);
+        }
       }
       return result(`Acknowledged ${event.kind} event ${event.eventId}.`, event);
     },
@@ -975,6 +987,20 @@ export function registerSubagents(
         triggerTurn: true,
       });
       return result(`Requested focused summary ${requestId} from ${params.contextId}.`, { requestId, contextId: params.contextId });
+    },
+  });
+
+  pi.registerTool({
+    name: "concurrency_usage",
+    label: "Concurrency Usage",
+    description: "Return authoritative side-ledger usage totals by model, role, context, and execution cycle.",
+    parameters: Type.Object({ contextId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      if (params.contextId) await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
+      const rootSessionId = childDelegation?.parentSessionId ?? ctx.sessionManager.getSessionId();
+      const totals = await usageLedger.totals(rootSessionId, params.contextId);
+      return result(`Child usage: ${totals.total.input + totals.total.output + totals.total.cacheRead + totals.total.cacheWrite} tokens · $${totals.total.cost.toFixed(4)}.`, totals);
     },
   });
 
