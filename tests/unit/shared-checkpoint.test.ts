@@ -6,7 +6,7 @@ import { SharedFileSetCoordinator } from "../../packages/pi-tai/src/concurrency/
 import { childContextId } from "../../packages/pi-tai/src/concurrency/ids.ts";
 import { changeDescription } from "../../packages/pi-tai/src/jj/domain.ts";
 import { FileSharedSourceStore } from "../../packages/pi-tai/src/jj/persistence.ts";
-import { JjRepositoryKernel } from "../../packages/pi-tai/src/jj/repository.ts";
+import { exactChange, JjRepositoryKernel, literalRootFileset } from "../../packages/pi-tai/src/jj/repository.ts";
 import {
   createJjBaselineVerifier,
   DeterministicSharedCheckpointer,
@@ -78,6 +78,49 @@ test("Real-JJ rejects a claim over pre-existing unowned WIP paths", async (t) =>
       rootSessionId: "root-1", ownerContextId: "child-1", paths: ["existing.txt"],
     }), /pre-existing unowned WIP changes/);
     assert.equal((await r.store.get(r.source.sourceId))?.claims[0]?.phase, "breached");
+  } catch (error) {
+    const retained = await fixture.retainOnFailure(t.name);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test("Real-JJ reconciles completed and safe-to-reissue interrupted checkpoints", async (t) => {
+  const fixture = await RealJjFixture.create("pi-tai-shared-reconcile-");
+  try {
+    const r = await setupTarget(fixture, "child-1", "feat(shared): recover checkpoint");
+    const claim = await r.fileSets.acquire(r.source, {
+      rootSessionId: "root-1", ownerContextId: "child-1", paths: ["recovered.txt"],
+    });
+    await writeFile(join(fixture.repoPath, "recovered.txt"), "recovered\n");
+    await r.fileSets.recordOwnedMutation(r.source, "child-1", "recovered.txt");
+    const active = await r.fileSets.requireActive(claim);
+    const operation = await r.kernel.startOperation(r.source, "checkpoint_change", `checkpoint:${claim.claimId}`);
+    await r.fileSets.beginCheckpoint(claim, operation.operationId);
+    await r.kernel.runMutation(r.source, [
+      "squash", "--from", exactChange(r.inserted.wipChangeId), "--into", exactChange(r.inserted.insertedChangeId),
+      "--keep-emptied", literalRootFileset("recovered.txt"),
+    ]);
+    await r.store.interruptLiveClaims(r.source.sourceId, "simulated restart");
+    const completed = await r.checkpointer.reconcileInterrupted(r.source);
+    assert.equal(completed[0]?.classification, "completed");
+    assert.equal((await r.store.get(r.source.sourceId))?.claims.find((item) => item.claimId === active.handle.claimId)?.phase, "released");
+
+    const secondTarget = await r.operations.insertChange(r.source, {
+      description: changeDescription("test(shared): safe retry"), owner: childContextId("child-2"),
+    });
+    assert.equal(secondTarget.kind, "completed");
+    const second = await r.fileSets.acquire(r.source, {
+      rootSessionId: "root-1", ownerContextId: "child-2", paths: ["retry.txt"],
+    });
+    await writeFile(join(fixture.repoPath, "retry.txt"), "retry\n");
+    await r.fileSets.recordOwnedMutation(r.source, "child-2", "retry.txt");
+    const retryOperation = await r.kernel.startOperation(r.source, "checkpoint_change", `checkpoint:${second.claimId}`);
+    await r.fileSets.beginCheckpoint(second, retryOperation.operationId);
+    await r.store.interruptLiveClaims(r.source.sourceId, "simulated restart before squash");
+    const safe = await r.checkpointer.reconcileInterrupted(r.source);
+    assert.equal(safe.find((item) => item.operationId === retryOperation.operationId)?.classification, "safe_to_reissue");
   } catch (error) {
     const retained = await fixture.retainOnFailure(t.name);
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);

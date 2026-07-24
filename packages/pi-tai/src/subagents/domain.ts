@@ -20,6 +20,12 @@ export const PARENT_TOOL_NAMES = [
   "workspace_subagent",
   "integrate_workspace",
   "describe_integrated_changes",
+  "jj_concurrency_status",
+  "ensure_wip_change",
+  "insert_change",
+  "acquire_file_set",
+  "release_file_set",
+  "checkpoint_change",
 ] as const;
 export const CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status", "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;

@@ -11,6 +11,13 @@ import type {
 } from "./operations.ts";
 import { exactChange, JjRepositoryKernel, literalRootFileset } from "./repository.ts";
 
+export interface InterruptedCheckpointDisposition {
+  readonly operationId: string;
+  readonly claimId: string;
+  readonly classification: "completed" | "safe_to_reissue" | "unknown";
+  readonly receipt?: CheckpointChangeReceipt;
+}
+
 export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer {
   private readonly kernel: JjRepositoryKernel;
   private readonly store: SharedSourceStore;
@@ -138,6 +145,54 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
       await this.fileSets.releaseAfterCheckpoint(claim, operation.operationId);
       return { kind: "completed", receipt };
     });
+  }
+
+  async reconcileInterrupted(source: SourceWorkspaceHandle): Promise<InterruptedCheckpointDisposition[]> {
+    const sourceRecord = await this.store.get(source.sourceId);
+    if (!sourceRecord) throw new Error(`Unknown shared source: ${source.sourceId}`);
+    const dispositions: InterruptedCheckpointDisposition[] = [];
+    for (const operation of sourceRecord.operations) {
+      if (operation.phase !== "started" || operation.kind !== "checkpoint_change") continue;
+      const claim = sourceRecord.claims.find((candidate) =>
+        candidate.phase === "interrupted"
+        && candidate.priorPhase === "checkpointing"
+        && candidate.recovery?.operationId === operation.operationId,
+      );
+      if (!claim || claim.phase !== "interrupted" || !claim.recovery) continue;
+      const currentJjOperationId = await this.kernel.operationIdFor(source);
+      if (currentJjOperationId === operation.beforeJjOperationId) {
+        dispositions.push({ operationId: operation.operationId, claimId: claim.claimId, classification: "safe_to_reissue" });
+        continue;
+      }
+      const wipId = changeId(claim.wipChangeId);
+      const targetId = changeId(claim.targetChangeId);
+      const [wip, target] = await Promise.all([this.resolve(source, wipId), this.resolve(source, targetId)]);
+      const filesets = claim.paths.map(literalRootFileset);
+      const [remainingWip, targetPaths] = await Promise.all([
+        this.kernel.changedPaths(source, exactChange(wipId), filesets).catch((): string[] => ["<unresolved>"]),
+        this.kernel.changedPaths(source, exactChange(targetId), filesets).catch((): string[] => []),
+      ]);
+      const expectedPaths = claim.recovery.mutatedPaths;
+      if (wip && target && remainingWip.length === 0 && expectedPaths.length > 0 && expectedPaths.every((path) => targetPaths.includes(path))) {
+        const receipt: CheckpointChangeReceipt = {
+          checkpointedChangeId: targetId,
+          wipChangeId: wipId,
+          claimId: claim.claimId,
+          changedPaths: expectedPaths,
+          parentChangeIds: target.parentChangeIds,
+          unownedWipPatchHash: hash(await this.kernel.patchEvidence(source, exactChange(wipId), [complementFileset(claim.paths)])),
+          conflicted: wip.conflicted || target.conflicted,
+          operationId: jjOperationId(operation.operationId),
+        };
+        await this.kernel.completeOperation(source, operation.operationId, receipt);
+        await this.fileSets.settleInterruptedCheckpoint(source, claim.claimId, operation.operationId);
+        dispositions.push({ operationId: operation.operationId, claimId: claim.claimId, classification: "completed", receipt });
+        continue;
+      }
+      await this.kernel.unknownOperation(source, operation.operationId, "Interrupted checkpoint postconditions are neither unchanged nor independently complete.");
+      dispositions.push({ operationId: operation.operationId, claimId: claim.claimId, classification: "unknown" });
+    }
+    return dispositions;
   }
 
   private async resolve(source: SourceWorkspaceHandle, id: ChangeId) {

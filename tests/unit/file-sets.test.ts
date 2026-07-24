@@ -119,6 +119,8 @@ test("owned fingerprints allow guarded edits but reject release and detect bypas
     });
     assert.equal(await f.coordinator.authorizePath(f.source, "child-1", "src/a.ts"), "src/a.ts");
     await assert.rejects(() => f.coordinator.authorizePath(f.source, "child-1", "docs/guide.md"), /outside active claim/);
+    await assert.rejects(() => f.coordinator.authorizeUnclaimedPath(f.source, "src/a.ts"), /overlaps active claim/);
+    assert.equal(await f.coordinator.authorizeUnclaimedPath(f.source, "docs/guide.md"), "docs/guide.md");
     await writeFile(join(f.workspace, "src", "a.ts"), "owned\n");
     await f.coordinator.recordOwnedMutation(f.source, "child-1", "src/a.ts");
     await assert.rejects(() => f.coordinator.releaseUnused(claim), /without checkpointing/);
@@ -132,6 +134,33 @@ test("owned fingerprints allow guarded edits but reject release and detect bypas
     await writeFile(join(f.workspace, "src", "a.ts"), "external\n");
     await assert.rejects(() => f.coordinator.verifyOwnedState(bypassed), /breached/);
     assert.equal((await f.store.get("source-1"))?.claims.at(-1)?.phase, "breached");
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("restart interrupts authority but permits exact owner reacquisition from matching recovery evidence", async () => {
+  const f = await fixture();
+  try {
+    const first = await f.coordinator.acquire(f.source, {
+      rootSessionId: "root-1", ownerContextId: "child-1", paths: ["src/a.ts"],
+    });
+    await writeFile(join(f.workspace, "src", "a.ts"), "owned before restart\n");
+    await f.coordinator.recordOwnedMutation(f.source, "child-1", "src/a.ts");
+    const restarted = new SharedFileSetCoordinator({
+      store: f.store,
+      verifyBaseline: async () => ({ patchHash: EMPTY_PATCH_HASH, changedPaths: ["src/a.ts"] }),
+      now: () => "2026-01-01T00:00:02.000Z",
+    });
+    await restarted.initialize(f.source);
+    await assert.rejects(() => restarted.requireActive(first), /interrupted/);
+    const reacquired = await restarted.acquire(f.source, {
+      rootSessionId: "root-1", ownerContextId: "child-1", paths: ["src/a.ts"],
+    });
+    const active = await restarted.requireActive(reacquired);
+    assert.deepEqual(active.record.mutatedPaths, ["src/a.ts"]);
+    await restarted.beginCheckpoint(reacquired, "operation-recovered");
+    await restarted.releaseAfterCheckpoint(reacquired, "operation-recovered");
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

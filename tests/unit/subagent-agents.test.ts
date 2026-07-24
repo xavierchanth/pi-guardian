@@ -25,6 +25,12 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   assert.deepEqual(catalog.byName.get("scout")?.allowedChildren, []);
   assert.deepEqual(catalog.byName.get("researcher")?.allowedChildren, []);
   assert.ok(catalog.root.tools.includes("workspace_subagent"));
+  for (const tool of ["jj_concurrency_status", "ensure_wip_change", "insert_change"]) {
+    assert.ok(catalog.root.tools.includes(tool), tool);
+  }
+  for (const tool of ["jj_concurrency_status", "acquire_file_set", "release_file_set", "checkpoint_change"]) {
+    assert.ok(catalog.byName.get("worker")?.tools.includes(tool), tool);
+  }
   assert.equal(catalog.byName.get("planner")?.tools.includes("workspace_subagent"), false);
   for (const name of ["thinker", "planner", "researcher"]) {
     assert.ok(catalog.byName.get(name)?.tools.includes("web_search"), name);
@@ -78,6 +84,8 @@ test("packaged delegating prompts require repeated wait-any collection before co
     catalog.root.systemPrompt,
     /Do not use workspaces for simple tasks.*explicit workspace lifecycle administration/s,
   );
+  assert.match(catalog.root.systemPrompt, /ensure_wip_change.*insert_change/s);
+  assert.match(catalog.byName.get("worker")?.systemPrompt ?? "", /acquire_file_set.*checkpoint_change/s);
   for (const name of ["planner", "worker"]) {
     assert.match(
       catalog.byName.get(name)?.systemPrompt ?? "",

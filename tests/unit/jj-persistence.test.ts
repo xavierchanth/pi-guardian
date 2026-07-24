@@ -112,6 +112,11 @@ test("shared source updates serialize and restart interrupts every live claim", 
       priorPhase: "active",
       reason: "process restart",
       interruptedAt: "2026-01-01T00:00:05.000Z",
+      recovery: {
+        fingerprints: [{ path: "src/a.ts", digest: DIGEST }],
+        baselinePatchHash: DIGEST,
+        mutatedPaths: [],
+      },
     });
   } finally {
     await rm(root, { recursive: true, force: true });

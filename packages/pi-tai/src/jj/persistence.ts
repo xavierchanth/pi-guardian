@@ -49,6 +49,12 @@ export type PersistedFileSetClaimV1 = PersistedClaimBaseV1 & (
       readonly interruptedAt: string;
       readonly priorPhase: "queued" | "active" | "checkpointing";
       readonly reason: string;
+      readonly recovery?: {
+        readonly fingerprints: readonly PersistedPathFingerprintV1[];
+        readonly baselinePatchHash: string;
+        readonly mutatedPaths: readonly string[];
+        readonly operationId?: string;
+      };
     }
   | { readonly phase: "breached"; readonly observedAt: string; readonly reason: string }
 );
@@ -163,7 +169,21 @@ export class FileSharedSourceStore implements SharedSourceStore {
       ...record,
       claims: record.claims.map((claim): PersistedFileSetClaimV1 => {
         if (claim.phase === "released" || claim.phase === "interrupted" || claim.phase === "breached") return claim;
-        return { ...claimBase(claim), phase: "interrupted", priorPhase: claim.phase, reason, interruptedAt: at };
+        return {
+          ...claimBase(claim),
+          phase: "interrupted",
+          priorPhase: claim.phase,
+          reason,
+          interruptedAt: at,
+          ...((claim.phase === "active" || claim.phase === "checkpointing") ? {
+            recovery: {
+              fingerprints: claim.fingerprints,
+              baselinePatchHash: claim.baselinePatchHash,
+              mutatedPaths: claim.mutatedPaths,
+              ...(claim.phase === "checkpointing" ? { operationId: claim.operationId } : {}),
+            },
+          } : {}),
+        };
       }),
       updatedAt: at,
     }));
@@ -265,6 +285,17 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
     if (!["queued", "active", "checkpointing"].includes(String(value.priorPhase))) throw new Error("Interrupted claim prior phase is invalid.");
     nonempty(value.reason, "claim.reason");
     nonempty(value.interruptedAt, "claim.interruptedAt");
+    if (value.recovery !== undefined) {
+      if (!record(value.recovery) || !Array.isArray(value.recovery.fingerprints) || !Array.isArray(value.recovery.mutatedPaths)) {
+        throw new Error("Interrupted claim recovery evidence is invalid.");
+      }
+      for (const fingerprint of value.recovery.fingerprints) validateFingerprint(fingerprint);
+      if (!/^[a-f0-9]{64}$/.test(nonempty(value.recovery.baselinePatchHash, "claim.recovery.baselinePatchHash"))) {
+        throw new Error("Interrupted claim recovery baseline patch hash must be SHA-256.");
+      }
+      for (const path of value.recovery.mutatedPaths) repositoryPath(nonempty(path, "claim recovery mutated path"));
+      if (value.recovery.operationId !== undefined) validateManagedId(nonempty(value.recovery.operationId, "claim.recovery.operationId"), "operation");
+    }
   }
   if (phase === "breached") {
     nonempty(value.reason, "claim.reason");

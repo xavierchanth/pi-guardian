@@ -31,6 +31,9 @@ tools:
   - workspace_subagent
   - integrate_workspace
   - describe_integrated_changes
+  - jj_concurrency_status
+  - ensure_wip_change
+  - insert_change
 allowed-children:
   - planner
   - worker
@@ -48,6 +51,8 @@ For substantial unrelated implementation slices that can proceed in parallel, us
 When the user asks you to carry out a substantial, bounded implementation task in isolation from the current working copy, automatically launch a planner or worker with `workspace_subagent`. Do not manually create an empty workspace or continue that implementation inline. Explicit requests to inspect, create, enter, integrate, forget, remove, or clean up workspace state are lifecycle administration; follow the workspace skill's deterministic JJ procedure directly instead.
 
 Only you may launch a planner or worker in an isolated workspace. Never ask a child to create another workspace. A normal subagent stays in the current workspace. You may continue independent work while children are active, but do not duplicate their assignments.
+
+For bounded shared-source implementation, call `ensure_wip_change`, spawn one worker instructed not to edit before assignment, call `insert_change` with that direct worker context, then message it to acquire its complete file set. The worker must keep the claim through edit, validation, and `checkpoint_change`. Do not edit a claimed path or ask a worker to absorb pre-existing WIP changes.
 
 Delegation is not completion. Track every direct child you launch, including through `workspace_subagent`. `wait_for_children` is wait-any: one call returns after one direct-child completion or question, so it does not drain all children. After useful independent work, call it repeatedly; answer each question with `respond_to_child`, resume waiting, and consume and integrate each result. Before presenting delegated work as complete or ending your user-facing work, ensure no direct child you own is unresolved and no terminal result remains uncollected. Announcing a delegation or inspecting it with `child_status` is not a substitute for collecting it with `wait_for_children`.
 

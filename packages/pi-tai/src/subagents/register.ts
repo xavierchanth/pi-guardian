@@ -11,12 +11,16 @@ import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import type { PiTaiConfigService } from "../config/register.ts";
 import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
+import { childContextId } from "../concurrency/ids.ts";
 import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
 import { FileChildContextStore, type ChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
 import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
 import { ChildContextReconciler } from "../concurrency/reconcile.ts";
+import { registerSharedMutationGuard } from "../concurrency/source-guard.ts";
+import { changeDescription } from "../jj/domain.ts";
+import { SharedJjRuntime } from "../jj/runtime.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
@@ -84,6 +88,7 @@ export interface SubagentDependencies {
   usageLedger?: ChildUsageLedger;
   retention?: ChildJournalRetention;
   reconciler?: ChildContextReconciler;
+  sharedJj?: SharedJjRuntime;
   agentDir?: string;
 }
 
@@ -100,6 +105,7 @@ export function registerSubagents(
     launcher: new PiChildProcessLauncher(store),
   });
   const stateRoot = dirname(storeRoot);
+  const sharedJj = dependencies.sharedJj ?? new SharedJjRuntime({ stateRoot });
   const contextStore = dependencies.contextStore ?? new FileChildContextStore(join(stateRoot, "context-records"));
   const usageLedger = dependencies.usageLedger ?? new ChildUsageLedger(contextStore);
   const retention = dependencies.retention ?? new ChildJournalRetention(contextStore, stateRoot);
@@ -144,6 +150,18 @@ export function registerSubagents(
   let childWidgetRefresh: Promise<void> | undefined;
   let childWidgetGeneration = 0;
 
+  registerSharedMutationGuard(pi, {
+    openSource: (cwd) => sharedJj.openSource(cwd),
+    fileSets: sharedJj.fileSets,
+    state: () => {
+      const sharedWorker = mode === "child" && currentAgent?.name === "worker" && childDelegation !== undefined && childDelegation.workspace === undefined;
+      return {
+        enabled: mode === "root" || sharedWorker,
+        ...(sharedWorker && childDelegation ? { ownerContextId: childDelegation.id, constrainShell: true } : {}),
+      };
+    },
+  });
+
   const childRuntimeExtensions = (contextId: string) => [{
     name: `pi-tai-child-runtime-${contextId}`,
     factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
@@ -156,6 +174,7 @@ export function registerSubagents(
       usageLedger,
       retention,
       ...(reconciler ? { reconciler } : {}),
+      sharedJj,
       ...(dependencies.config ? { config: dependencies.config } : {}),
       loadInstructions,
       discoverAgents: discover,
@@ -680,6 +699,121 @@ export function registerSubagents(
       });
       await refreshChildWidget(ctx);
       return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "jj_concurrency_status",
+    label: "JJ Concurrency Status",
+    description: "Inspect bounded shared-source WIP, target, claim, and recovery state without mutating JJ.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      if (!currentAgent) throw new Error("JJ concurrency status requires an active Pi-Tai role.");
+      const source = await sharedJj.openSource(ctx.cwd);
+      const status = await sharedJj.operations.inspectStatus(source);
+      const durable = await sharedJj.store.get(source.sourceId);
+      return result("Inspected shared JJ concurrency state.", {
+        ...status,
+        sourceId: source.sourceId,
+        targets: durable?.targets.slice(-64) ?? [],
+        claims: durable?.claims.slice(-64) ?? [],
+        operations: durable?.operations.slice(-64).map(({ operationId, kind, phase, startedAt }) => ({ operationId, kind, phase, startedAt })) ?? [],
+      });
+    },
+  });
+
+  pi.registerTool({
+    name: "ensure_wip_change",
+    label: "Ensure WIP Change",
+    description: "Verify or canonically describe the root thinker's empty shared-source orchestration WIP without relabeling unknown work.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const source = await sharedJj.openSource(ctx.cwd);
+      const outcome = await sharedJj.operations.ensureWip(source);
+      return result(outcome.kind === "completed" ? `Shared WIP ${outcome.receipt.wipChangeId} is ready.` : `Shared WIP preparation stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
+    name: "insert_change",
+    label: "Insert Shared Change",
+    description: "Insert one named empty shared target before the same WIP and bind it to a direct shared worker context.",
+    promptGuidelines: [
+      "Spawn the shared worker first with instructions not to edit until assigned, then insert_change for that child context and message it to acquire its complete file set.",
+      "The description must be a meaningful Conventional Commit description for the bounded shared work.",
+    ],
+    parameters: Type.Object({
+      ownerContextId: Type.String({ minLength: 1, maxLength: 128, description: "Direct shared worker context returned by subagent" }),
+      description: Type.String({ minLength: 1, maxLength: 4_096 }),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const owner = await requireDirectChild(orchestrator, params.ownerContextId, ctx.sessionManager.getSessionId());
+      if (owner.agent.name !== "worker" || owner.workspace) throw new Error("Inserted shared changes can be assigned only to a direct non-workspace worker.");
+      if (isResolvedDelegation(owner)) throw new Error(`Worker ${owner.id} is already terminal and cannot receive a shared target.`);
+      const source = await sharedJj.openSource(ctx.cwd);
+      const outcome = await sharedJj.operations.insertChange(source, {
+        description: changeDescription(params.description),
+        owner: childContextId(owner.id),
+      });
+      return result(outcome.kind === "completed" ? `Inserted shared target ${outcome.receipt.insertedChangeId} for ${owner.id}.` : `Shared target insertion stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
+    name: "acquire_file_set",
+    label: "Acquire File Set",
+    description: "Acquire the complete canonical shared-source path set assigned to this worker; overlapping requests wait FIFO.",
+    parameters: Type.Object({
+      paths: Type.Array(Type.String({ minLength: 1, maxLength: 4_096 }), { minItems: 1, maxItems: 128 }),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const owner = requireSharedWorker(currentAgent, childDelegation);
+      const source = await sharedJj.openSource(ctx.cwd);
+      const claim = await sharedJj.fileSets.acquire(source, {
+        rootSessionId: owner.parentSessionId,
+        ownerContextId: owner.id,
+        paths: params.paths,
+        signal,
+      });
+      const active = await sharedJj.fileSets.requireActive(claim);
+      return result(`Acquired file-set claim ${claim.claimId}. Re-read every target before editing.`, {
+        claimId: claim.claimId,
+        paths: active.record.paths,
+        targetChangeId: active.record.targetChangeId,
+        acquiredAt: active.record.acquiredAt,
+      });
+    },
+  });
+
+  pi.registerTool({
+    name: "release_file_set",
+    label: "Release File Set",
+    description: "Release this shared worker's unused active file set. Mutated sets must use checkpoint_change.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      const owner = requireSharedWorker(currentAgent, childDelegation);
+      const source = await sharedJj.openSource(ctx.cwd);
+      const active = await sharedJj.fileSets.activeForOwner(source, owner.id);
+      if (!active) throw new Error("This worker has no active shared file-set claim.");
+      await sharedJj.fileSets.releaseUnused(active.handle);
+      return result(`Released unused file-set claim ${active.handle.claimId}.`, { claimId: active.handle.claimId });
+    },
+  });
+
+  pi.registerTool({
+    name: "checkpoint_change",
+    label: "Checkpoint Shared Change",
+    description: "Move only this worker's locked shared-source paths into its assigned inserted Change ID and release after receipt verification.",
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _onUpdate, ctx) {
+      const owner = requireSharedWorker(currentAgent, childDelegation);
+      const source = await sharedJj.openSource(ctx.cwd);
+      const active = await sharedJj.fileSets.activeForOwner(source, owner.id);
+      if (!active) throw new Error("This worker has no active shared file-set claim.");
+      const outcome = await sharedJj.checkpointer.checkpointChange(active.handle);
+      return result(outcome.kind === "completed" ? `Checkpointed ${outcome.receipt.changedPaths.length} path(s) into ${outcome.receipt.checkpointedChangeId}.` : `Shared checkpoint stopped: ${outcome.blocker.kind}.`, outcome);
     },
   });
 
@@ -1250,6 +1384,16 @@ function requireWorkspaceThinker(agent: AgentDefinition | undefined): AgentDefin
     throw new Error("Only the root thinker can manage delegated workspaces.");
   }
   return agent;
+}
+
+function requireSharedWorker(
+  agent: AgentDefinition | undefined,
+  delegation: DelegationRecord | undefined,
+): DelegationRecord {
+  if (agent?.name !== "worker" || !delegation || delegation.workspace) {
+    throw new Error("Shared file-set tools require a non-workspace worker context.");
+  }
+  return delegation;
 }
 
 function requireDelegatedWorkspace(record: DelegationRecord): void {

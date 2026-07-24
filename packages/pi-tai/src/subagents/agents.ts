@@ -67,6 +67,12 @@ const ORCHESTRATION_TOOLS = new Set([
   "workspace_subagent",
   "integrate_workspace",
   "describe_integrated_changes",
+  "jj_concurrency_status",
+  "ensure_wip_change",
+  "insert_change",
+  "acquire_file_set",
+  "release_file_set",
+  "checkpoint_change",
 ]);
 const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "report_status", "ask_parent"]);
 

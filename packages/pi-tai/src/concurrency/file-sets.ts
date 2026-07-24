@@ -144,6 +144,16 @@ export class SharedFileSetCoordinator {
     return { handle: checkpointableFileSetClaim(fileSetClaimId(claim.claimId)), source, record: claim };
   }
 
+  async authorizeUnclaimedPath(source: SourceWorkspaceHandle, inputPath: string): Promise<string> {
+    const sourceRecord = await this.requireSource(source);
+    const [path] = await canonicalizeFileSet(sourceRecord.workspacePath, [inputPath]);
+    const collision = sourceRecord.claims.find((claim) =>
+      (claim.phase === "active" || claim.phase === "checkpointing") && claim.paths.some((root) => pathCovered(root, path) || pathCovered(path, root)),
+    );
+    if (collision) throw new Error(`Path ${path} overlaps active claim ${collision.claimId} owned by ${collision.ownerContextId}.`);
+    return path!;
+  }
+
   async authorizePath(source: SourceWorkspaceHandle, ownerContextId: string, inputPath: string): Promise<string> {
     const sourceRecord = await this.requireSource(source);
     const [path] = await canonicalizeFileSet(sourceRecord.workspacePath, [inputPath]);
@@ -213,6 +223,25 @@ export class SharedFileSetCoordinator {
     await this.release(active);
   }
 
+  async settleInterruptedCheckpoint(
+    source: SourceWorkspaceHandle,
+    claimId: string,
+    operationId: string,
+  ): Promise<void> {
+    const at = this.now();
+    await this.store.update(source.sourceId, (record) => ({
+      ...record,
+      claims: record.claims.map((claim): PersistedFileSetClaimV1 => {
+        if (claim.claimId !== claimId) return claim;
+        if (claim.phase !== "interrupted" || claim.priorPhase !== "checkpointing" || claim.recovery?.operationId !== operationId) {
+          throw new Error(`Interrupted claim ${claimId} is not bound to checkpoint ${operationId}.`);
+        }
+        return { ...claimBase(claim), phase: "released", releasedAt: at, checkpointOperationId: operationId };
+      }),
+      updatedAt: at,
+    }));
+  }
+
   async breach(handle: CheckpointableFileSetClaim, reason: string): Promise<void> {
     const active = await this.requireActive(handle);
     const at = this.now();
@@ -273,8 +302,18 @@ export class SharedFileSetCoordinator {
         continue;
       }
       const baseline = await this.verifyBaseline(source, current.wipChangeId, current.paths);
+      const fingerprints = await fingerprintSet(sourceRecord.workspacePath, current.paths);
+      const recovery = [...sourceRecord.claims].reverse().find((claim) =>
+        claim.phase === "interrupted"
+        && claim.ownerContextId === current.ownerContextId
+        && claim.targetChangeId === current.targetChangeId
+        && samePaths(claim.paths, current.paths)
+        && claim.recovery !== undefined
+        && sameFingerprints(claim.recovery.fingerprints, fingerprints),
+      );
+      const recoveryEvidence = recovery?.phase === "interrupted" ? recovery.recovery : undefined;
       const at = this.now();
-      if (baseline.changedPaths.length) {
+      if (baseline.changedPaths.length && !recoveryEvidence) {
         const reason = `Claimed paths contain pre-existing unowned WIP changes: ${baseline.changedPaths.join(", ")}`;
         await this.store.update(source.sourceId, (record) => ({
           ...record,
@@ -288,16 +327,16 @@ export class SharedFileSetCoordinator {
         continue;
       }
       if (!/^[a-f0-9]{64}$/.test(baseline.patchHash)) throw new Error("File-set baseline verifier returned an invalid patch hash.");
-      const fingerprints = await fingerprintSet(sourceRecord.workspacePath, current.paths);
+      const mutatedPaths = recoveryEvidence?.mutatedPaths ?? [];
       await this.store.update(source.sourceId, (record) => ({
         ...record,
         claims: record.claims.map((claim): PersistedFileSetClaimV1 => claim.claimId === current.claimId && claim.phase === "queued"
-          ? { ...claim, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths: [] }
+          ? { ...claim, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths }
           : claim),
         updatedAt: at,
       }));
       activeIds.add(current.claimId);
-      activeClaims.push({ ...current, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths: [] });
+      activeClaims.push({ ...current, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths });
       this.active.set(source.sourceId, activeIds);
       this.removeWaiter(waiter);
       waiter.resolve(checkpointableFileSetClaim(fileSetClaimId(current.claimId)));
@@ -415,6 +454,9 @@ async function fingerprint(path: string): Promise<string> {
 
 function sameFingerprints(left: readonly PersistedPathFingerprintV1[], right: readonly PersistedPathFingerprintV1[]): boolean {
   return left.length === right.length && left.every((value, index) => value.path === right[index]?.path && value.digest === right[index]?.digest);
+}
+function samePaths(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 function inside(root: string, path: string): boolean { return path === root || path.startsWith(`${root}${sep}`); }
 function isMissing(error: unknown): boolean {

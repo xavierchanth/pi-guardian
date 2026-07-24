@@ -1,15 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SourceWorkspaceHandle } from "../jj/domain.ts";
-import type { JjRepositoryKernel } from "../jj/repository.ts";
 import type { SharedFileSetCoordinator } from "./file-sets.ts";
 
 export interface SharedMutationGuardState {
   readonly enabled: boolean;
   readonly ownerContextId?: string;
+  readonly constrainShell?: boolean;
 }
 
 export interface SharedMutationGuardOptions {
-  readonly kernel: JjRepositoryKernel;
+  readonly openSource: (cwd: string) => Promise<SourceWorkspaceHandle>;
   readonly fileSets: SharedFileSetCoordinator;
   readonly state: () => SharedMutationGuardState;
 }
@@ -26,7 +26,7 @@ export function registerSharedMutationGuard(pi: ExtensionAPI, options: SharedMut
   const sourceFor = (cwd: string) => {
     let source = sources.get(cwd);
     if (!source) {
-      source = options.kernel.openSource(cwd);
+      source = options.openSource(cwd);
       sources.set(cwd, source);
     }
     return source;
@@ -34,20 +34,26 @@ export function registerSharedMutationGuard(pi: ExtensionAPI, options: SharedMut
 
   pi.on("tool_call", async (event, ctx) => {
     const state = options.state();
-    if (!state.enabled || !state.ownerContextId) return undefined;
+    if (!state.enabled) return undefined;
     if (event.toolName === "write" || event.toolName === "edit") {
       const path = typeof event.input.path === "string" ? event.input.path : undefined;
       if (!path) return { block: true, reason: "Shared source mutation requires a concrete file path." };
       try {
         const source = await sourceFor(ctx.cwd);
-        await options.fileSets.authorizePath(source, state.ownerContextId, path);
-        authorized.set(event.toolCallId, { source, ownerContextId: state.ownerContextId, path });
+        if (state.ownerContextId) {
+          await options.fileSets.authorizePath(source, state.ownerContextId, path);
+          authorized.set(event.toolCallId, { source, ownerContextId: state.ownerContextId, path });
+        } else {
+          await options.fileSets.authorizeUnclaimedPath(source, path);
+        }
         return undefined;
       } catch (error) {
-        return { block: true, reason: error instanceof Error ? error.message : String(error) };
+        const reason = error instanceof Error ? error.message : String(error);
+        if (reason.includes("requires the repository's primary JJ workspace")) return undefined;
+        return { block: true, reason };
       }
     }
-    if (event.toolName === "bash") {
+    if (event.toolName === "bash" && state.constrainShell) {
       const command = typeof event.input.command === "string" ? event.input.command : "";
       const decision = classifySharedShellCommand(command);
       if (decision.kind !== "allowed") {
