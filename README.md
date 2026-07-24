@@ -94,7 +94,7 @@ The normal `subagent` tool launches a persistent Pi process in the same cwd. `wo
 
 Parents can continue independent work while children run, but remain responsible for avoiding duplicate assignments and conflicting edits. `/collect-status` requests fresh reports from the complete unresolved descendant tree, waits up to 30 seconds, and returns partial timeout information without stopping work. `/parallelize` delegates an approved plan through workspace planners or workers. Runtime continuation keeps every parent in the wait-any loop until all direct children resolve and their terminal results are collected. The footer shows `thinker` beside the directory while subagents are enabled; workspace backends do not appear as capabilities.
 
-Independent model profiles now live in `pi-tai.json`. Shift+Tab cycles profiles in configured order, while Ctrl+Alt+T retains Pi's native thinking-level cycle. Pi-Tai provisions these as first-party bindings in `~/.pi/agent/keybindings.json`, preserving unrelated bindings and any additional keys assigned to thinking-level cycling. `/profile` selects a profile directly, `/effort` changes reasoning effort independently, and Pi's `/model` remains available for unrestricted model selection. See the active [`agent concurrency subsystem design`](docs/agent-concurrency/README.md) for the refreshed use cases, role model, and lifecycle; the previously implemented design is retained under `docs/archive/legacy/`.
+Independent model profiles now live in `pi-tai.json`. Shift+Tab cycles profiles in configured order, while Ctrl+Alt+T retains Pi's native thinking-level cycle. Pi-Tai provisions these as first-party bindings in `~/.pi/agent/keybindings.json`, preserving unrelated bindings and any additional keys assigned to thinking-level cycling. `/profile` selects a profile directly, `/effort` changes reasoning effort independently, and Pi's `/model` remains available for unrestricted model selection. See the [`agent concurrency design`](docs/concurrency/README.md) for routing, roles, ownership, child runtime, JJ coordination, review, integration, and recovery.
 
 ### Approval Guardian
 
@@ -197,7 +197,9 @@ crates/host-lifecycle/               portable Host lifecycle policy
 crates/host-platform/                OS readiness adapter contracts
 crates/host-protocol/                portable Rust Host protocol contract
 fixtures/host-protocol/              shared cross-language protocol fixtures
-docs/adr/                            accepted architecture decisions
+docs/architecture/                   end-state product and system architecture
+docs/concurrency/                    agent concurrency and JJ design
+docs/roadmap/                        migration initiatives and sequencing
 tests/                               unit, integration, repository, and smoke tests
 ```
 
