@@ -73,6 +73,10 @@ const ORCHESTRATION_TOOLS = new Set([
   "acquire_file_set",
   "release_file_set",
   "checkpoint_change",
+  "workspace_checkpoint",
+  "normalize_change_range",
+  "prepare_workspace_report",
+  "rebase_workspace",
 ]);
 const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "report_status", "ask_parent"]);
 

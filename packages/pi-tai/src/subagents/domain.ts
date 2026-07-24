@@ -26,6 +26,10 @@ export const PARENT_TOOL_NAMES = [
   "acquire_file_set",
   "release_file_set",
   "checkpoint_change",
+  "workspace_checkpoint",
+  "normalize_change_range",
+  "prepare_workspace_report",
+  "rebase_workspace",
 ] as const;
 export const CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status", "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;

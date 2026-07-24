@@ -51,6 +51,9 @@ export interface PersistedChildContextV4 {
   cwd: string;
   task: ResolvedTaskPacket;
   agent: AgentDefinitionSnapshot;
+  /** Authoritative workspace reference for tracked isolated execution. */
+  workspaceId?: string;
+  /** Compatibility projection for pre-M3 records only; new launches must not populate this with workspaceId. */
   workspace?: WorkspaceAttachment;
   execution: PersistedExecutionCycleV4;
   events: PersistedChildEventV4[];
@@ -155,6 +158,8 @@ export function validateContextRecord(input: unknown): PersistedChildContextV4 {
   for (const field of ["contextId", "rootSessionId", "cwd", "createdAt", "updatedAt"] as const) nonempty(input[field], field);
   validateId(input.contextId as string);
   if (input.parentContextId !== undefined) validateId(nonempty(input.parentContextId, "parentContextId"));
+  if (input.workspaceId !== undefined) validateId(nonempty(input.workspaceId, "workspaceId"));
+  if (input.workspaceId !== undefined && input.workspace !== undefined) throw new Error("Child context cannot contain both authoritative workspaceId and legacy workspace attachment.");
   if (!record(input.task) || !record(input.agent) || !record(input.execution)) throw new Error("Child context task, agent, and execution are required objects.");
   if (!Array.isArray(input.events) || !Array.isArray(input.usage)) throw new Error("Child context events and usage must be arrays.");
   validateExecution(input.execution);

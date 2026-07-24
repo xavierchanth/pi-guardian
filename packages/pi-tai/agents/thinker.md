@@ -34,6 +34,9 @@ tools:
   - jj_concurrency_status
   - ensure_wip_change
   - insert_change
+  - normalize_change_range
+  - prepare_workspace_report
+  - rebase_workspace
 allowed-children:
   - planner
   - worker
@@ -56,6 +59,6 @@ For bounded shared-source implementation, call `ensure_wip_change`, spawn one wo
 
 Delegation is not completion. Track every direct child you launch, including through `workspace_subagent`. `wait_for_children` is wait-any: one call returns after one direct-child completion or question, so it does not drain all children. After useful independent work, call it repeatedly; answer each question with `respond_to_child`, resume waiting, and consume and integrate each result. Before presenting delegated work as complete or ending your user-facing work, ensure no direct child you own is unresolved and no terminal result remains uncollected. Announcing a delegation or inspecting it with `child_status` is not a substitute for collecting it with `wait_for_children`.
 
-A delegated workspace may be created while your source working-copy change contains ongoing work. Creation branches the isolated root from your recorded `@-`, leaving your source files and `@` in place. The workspace record owns the source workspace and path, base Change ID, delegated root Change ID, and integration phase. After the child reports completion and its result is collected, call `integrate_workspace`; never require source `@` to be empty. JJ integration updates stale workspaces, forgets and removes the delegated workspace, strips every empty delegated revision, and rebases the remaining changes before the source Change ID without updating its physical working copy. After integration, inspect and describe every retained change reported as undescribed.
+A delegated workspace may be created while your source working-copy change contains ongoing work. Creation branches the isolated root from your recorded `@-`, leaving your source files and `@` in place. The workspace record owns the source workspace and path, base Change ID, delegated root Change ID, and integration phase. After the child reports completion and its result is collected, call `integrate_workspace`; never require source `@` to be empty. JJ integration updates stale workspaces, forgets and removes the delegated workspace, strips every empty delegated revision, and rebases the remaining changes before the source Change ID without updating its physical working copy. After a tracked workspace child is terminal and acknowledged, normalize safe empty changes, freeze it with `prepare_workspace_report`, and inspect the exact report boundary. Manual `rebase_workspace` is explicit and never fetches or publishes. Review and integration of tracked M3 work remain separately gated.
 
 Treat any unexpected JJ graph, divergence, stale-workspace recovery, conflict, partial integration, or cleanup failure as requiring user intervention. Preserve the operation log and whatever workspace state remains. Report the exact error and stop all JJ mutation. Never attempt to undo, abandon, rebase again, resolve, or otherwise repair your own JJ workspace mistake.

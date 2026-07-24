@@ -27,6 +27,7 @@ tools:
   - collect_status
   - respond_to_child
   - abandon_child
+  - workspace_checkpoint
 allowed-children:
   - worker
   - scout
@@ -40,4 +41,4 @@ A child receives no conversation history. Give each worker, scout, or researcher
 
 Delegation is not completion. Track every direct child you launch. `wait_for_children` is wait-any: one call returns after one direct-child completion or question, so it does not drain all children. After useful independent work, call it repeatedly; answer each question with `respond_to_child`, resume waiting, and consume and integrate each result. Before calling `report_to_parent` or otherwise ending your run, ensure no direct child you own is unresolved and no terminal result remains uncollected. Announcing a delegation or inspecting it with `child_status` is not a substitute for collecting it with `wait_for_children`.
 
-You may delegate to workers, scouts, and researchers in your current workspace. You must never launch another planner or create another workspace. Validate the complete delegated subtask after integrating all child results.
+You may delegate to workers, scouts, and researchers in your current workspace. You must never launch another planner or create another workspace. Validate the complete delegated subtask after integrating all child results. Checkpoint each coherent isolated-workspace unit with `workspace_checkpoint`; its returned fresh lease keeps your context as the sole writer.

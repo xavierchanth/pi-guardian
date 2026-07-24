@@ -21,6 +21,8 @@ export interface SpawnContextRequest {
   agent: AgentDefinitionSnapshot;
   caller: AgentDefinitionSnapshot;
   modelRegistry: ModelRegistry;
+  contextId?: string;
+  workspaceId?: string;
   workspace?: WorkspaceAttachment;
   extensions?: readonly InlineExtension[] | ((contextId: string) => readonly InlineExtension[]);
   onPersisted?: (record: PersistedChildContextV4) => Promise<void>;
@@ -69,7 +71,7 @@ export class ChildContextCoordinator {
     if (!request.caller.allowedChildren.includes(request.agent.name)) {
       throw new Error(`Agent "${request.caller.name}" cannot create "${request.agent.name}".`);
     }
-    const contextId = this.id();
+    const contextId = request.contextId ?? this.id();
     const cycleId = this.id();
     const timestamp = this.now();
     const record: PersistedChildContextV4 = {
@@ -80,6 +82,7 @@ export class ChildContextCoordinator {
       cwd: request.cwd,
       task: request.task,
       agent: request.agent,
+      ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
       ...(request.workspace ? { workspace: request.workspace } : {}),
       execution: { phase: "created", cycleId },
       events: [],

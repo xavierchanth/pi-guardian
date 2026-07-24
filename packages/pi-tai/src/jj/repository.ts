@@ -141,19 +141,7 @@ export class JjRepositoryKernel {
 
   async withRepositoryMutation<T>(source: SourceWorkspaceHandle, fn: () => Promise<T>): Promise<T> {
     const record = await this.requireSource(source);
-    const key = record.repositoryRoot;
-    const prior = (repositoryMutexes.get(key) ?? Promise.resolve()).catch(() => undefined);
-    let release!: () => void;
-    const gate = new Promise<void>((resolveGate) => { release = resolveGate; });
-    const chain = prior.then(() => gate);
-    repositoryMutexes.set(key, chain);
-    await prior;
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (repositoryMutexes.get(key) === chain) repositoryMutexes.delete(key);
-    }
+    return withRepositoryMutation(record.repositoryRoot, fn);
   }
 
   async startOperation(
@@ -266,6 +254,18 @@ export class JjRepositoryKernel {
     if (result.kind === "success") return result.stdout;
     throw new JjCommandError(args, result, mutationStarted);
   }
+}
+
+export async function withRepositoryMutation<T>(repositoryRoot: string, fn: () => Promise<T>): Promise<T> {
+  const key = resolve(repositoryRoot);
+  const prior = (repositoryMutexes.get(key) ?? Promise.resolve()).catch(() => undefined);
+  let release!: () => void;
+  const gate = new Promise<void>((resolveGate) => { release = resolveGate; });
+  const chain = prior.then(() => gate);
+  repositoryMutexes.set(key, chain);
+  await prior;
+  try { return await fn(); }
+  finally { release(); if (repositoryMutexes.get(key) === chain) repositoryMutexes.delete(key); }
 }
 
 export function exactChange(id: ChangeId): string {

@@ -18,8 +18,9 @@ import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
 import { ChildContextReconciler } from "../concurrency/reconcile.ts";
-import { registerSharedMutationGuard } from "../concurrency/source-guard.ts";
-import { changeDescription } from "../jj/domain.ts";
+import { classifySharedShellCommand, registerSharedMutationGuard } from "../concurrency/source-guard.ts";
+import { changeDescription, changeId, isolatedWorkspaceWriteLease, workspaceId as jjWorkspaceId, workspaceName as jjWorkspaceName, workspaceRebaseLease, workspaceWriteLeaseId } from "../jj/domain.ts";
+import { IsolatedJjRuntime } from "../jj/isolated-runtime.ts";
 import { SharedJjRuntime } from "../jj/runtime.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
@@ -89,6 +90,7 @@ export interface SubagentDependencies {
   retention?: ChildJournalRetention;
   reconciler?: ChildContextReconciler;
   sharedJj?: SharedJjRuntime;
+  isolatedJj?: IsolatedJjRuntime;
   agentDir?: string;
 }
 
@@ -106,6 +108,8 @@ export function registerSubagents(
   });
   const stateRoot = dirname(storeRoot);
   const sharedJj = dependencies.sharedJj ?? new SharedJjRuntime({ stateRoot });
+  const isolatedJj = dependencies.isolatedJj ?? new IsolatedJjRuntime({ stateRoot, shared: sharedJj });
+  const isolatedReady = isolatedJj.initialize();
   const contextStore = dependencies.contextStore ?? new FileChildContextStore(join(stateRoot, "context-records"));
   const usageLedger = dependencies.usageLedger ?? new ChildUsageLedger(contextStore);
   const retention = dependencies.retention ?? new ChildJournalRetention(contextStore, stateRoot);
@@ -150,6 +154,19 @@ export function registerSubagents(
   let childWidgetRefresh: Promise<void> | undefined;
   let childWidgetGeneration = 0;
 
+  pi.on("tool_call", async (event) => {
+    if (mode !== "child" || !childDelegation || !["write", "edit", "bash"].includes(event.toolName)) return undefined;
+    await isolatedReady;
+    const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) return undefined;
+    const tracked = await isolatedJj.workspaces.get(context.workspaceId);
+    if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== context.contextId) return { block: true, reason: "Isolated workspace mutation requires this context's current writer lease." };
+    if (event.toolName === "bash") {
+      const decision = classifySharedShellCommand(typeof event.input.command === "string" ? event.input.command : "");
+      if (decision.kind !== "allowed") return { block: true, reason: decision.reason.replaceAll("Shared-worker", "Isolated-worker").replaceAll("shared workers", "isolated workers") };
+    }
+    return undefined;
+  });
+
   registerSharedMutationGuard(pi, {
     openSource: (cwd) => sharedJj.openSource(cwd),
     fileSets: sharedJj.fileSets,
@@ -175,6 +192,7 @@ export function registerSubagents(
       retention,
       ...(reconciler ? { reconciler } : {}),
       sharedJj,
+      isolatedJj,
       ...(dependencies.config ? { config: dependencies.config } : {}),
       loadInstructions,
       discoverAgents: discover,
@@ -191,6 +209,8 @@ export function registerSubagents(
     parentCwd: string;
     parentSessionId: string;
     parentDelegationId?: string;
+    contextId?: string;
+    workspaceId?: string;
     workspace?: WorkspaceAttachment;
     modelRegistry: ExtensionContext["modelRegistry"];
   }): Promise<DelegationRecord> => {
@@ -206,7 +226,9 @@ export function registerSubagents(
       agent,
       caller,
       modelRegistry: input.modelRegistry,
-      ...(input.workspace ? { workspace: input.workspace } : {}),
+      ...(input.contextId ? { contextId: input.contextId } : {}),
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+      ...(!input.workspaceId && input.workspace ? { workspace: input.workspace } : {}),
       extensions: childRuntimeExtensions,
       onPersisted: async (record: PersistedChildContextV4) => {
         const legacy: DelegationRecord = {
@@ -688,15 +710,29 @@ export function registerSubagents(
         throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
       }
       validateAgentTools(target, availableToolNames());
-      const record = await spawnManagedChild({
-        task: params.task,
-        agent: target,
-        caller,
-        parentCwd: ctx.cwd,
-        parentSessionId: ctx.sessionManager.getSessionId(),
-        ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
-        modelRegistry: ctx.modelRegistry,
-      });
+      const parentContext = childDelegation ? await contextStore.get(childDelegation.id) : undefined;
+      const writableWorkspaceChild = target.name === "worker" && parentContext?.workspaceId;
+      const contextId = writableWorkspaceChild ? randomUUID() : undefined;
+      let transferredLease: ReturnType<typeof isolatedWorkspaceWriteLease> | undefined;
+      if (writableWorkspaceChild && contextId) {
+        const tracked = await isolatedJj.workspaces.get(writableWorkspaceChild);
+        if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== parentContext?.contextId) throw new Error("Parent does not hold a transferable workspace writer lease.");
+        transferredLease = await isolatedJj.operations.transferWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(writableWorkspaceChild), workspaceWriteLeaseId(tracked.writer.leaseId)), contextId);
+      }
+      let record: DelegationRecord;
+      try {
+        record = await spawnManagedChild({
+          task: params.task, agent: target, caller,
+          parentCwd: ctx.cwd, parentSessionId: ctx.sessionManager.getSessionId(),
+          ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
+          ...(contextId ? { contextId } : {}),
+          ...(writableWorkspaceChild ? { workspaceId: writableWorkspaceChild } : {}),
+          modelRegistry: ctx.modelRegistry,
+        });
+      } catch (error) {
+        if (transferredLease && parentContext) await isolatedJj.operations.transferWriter(transferredLease, parentContext.contextId);
+        throw error;
+      }
       await refreshChildWidget(ctx);
       return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
     },
@@ -818,6 +854,74 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "workspace_checkpoint",
+    label: "Workspace Checkpoint",
+    description: "Checkpoint the current coherent isolated-workspace change and continue on one fresh empty head.",
+    parameters: Type.Object({ description: Type.String({ minLength: 1, maxLength: 4096 }) }),
+    async execute(_id, params) {
+      if (mode !== "child" || !childDelegation) throw new Error("workspace_checkpoint is available only inside a tracked isolated child.");
+      await isolatedReady;
+      const context = await contextStore.get(childDelegation.id);
+      if (!context?.workspaceId) throw new Error("This child has no tracked isolated workspace.");
+      const tracked = await isolatedJj.workspaces.get(context.workspaceId);
+      if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== context.contextId) throw new Error("This context does not hold the workspace writer lease.");
+      const lease = isolatedWorkspaceWriteLease(jjWorkspaceId(context.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId));
+      const outcome = await isolatedJj.operations.checkpointWorkspace(lease, { description: changeDescription(params.description) });
+      return result(outcome.kind === "completed" ? `Checkpointed ${outcome.receipt.checkpointedChangeId}; fresh head ${outcome.receipt.newHeadChangeId}.` : `Workspace checkpoint stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
+    name: "normalize_change_range",
+    label: "Normalize Change Range",
+    description: "Remove safe interior empty changes and semantically name exact owned changes before report freeze.",
+    parameters: Type.Object({ delegationId: Type.String(), descriptions: Type.Optional(Type.Array(Type.Object({ changeId: Type.String(), description: Type.String() }))) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace.");
+      const tracked = await isolatedJj.workspaces.get(context.workspaceId);
+      if (tracked?.phase === "active" && tracked.writer.phase === "leased" && tracked.writer.ownerContextId === child.id) {
+        if (!["completed", "blocked", "failed", "cancelled"].includes(context.execution.phase)) throw new Error("Workspace child writer is not terminal.");
+        await isolatedJj.operations.releaseWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(context.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId)));
+      }
+      const outcome = await isolatedJj.operations.normalizeChangeRange(jjWorkspaceId(context.workspaceId), (params.descriptions ?? []).map((item) => ({ changeId: item.changeId, description: changeDescription(item.description) })));
+      return result(outcome.kind === "completed" ? `Normalized tracked workspace ${context.workspaceId}.` : `Normalization stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
+    name: "prepare_workspace_report",
+    label: "Prepare Workspace Report",
+    description: "Freeze a settled tracked workspace and derive its exact review boundary or no-change proof.",
+    parameters: Type.Object({ delegationId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace.");
+      const tracked = await isolatedJj.workspaces.get(context.workspaceId);
+      if (tracked?.phase === "active" && tracked.writer.phase === "leased" && tracked.writer.ownerContextId === child.id) {
+        if (!["completed", "blocked", "failed", "cancelled"].includes(context.execution.phase)) throw new Error("Workspace child writer is not terminal.");
+        await isolatedJj.operations.releaseWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(context.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId)));
+      }
+      const outcome = await isolatedJj.operations.prepareWorkspaceReport(jjWorkspaceId(context.workspaceId));
+      return result(outcome.kind === "completed" ? `Frozen workspace report (${outcome.receipt.range}).` : `Report freeze stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
+    name: "rebase_workspace",
+    label: "Rebase Workspace",
+    description: "Explicitly rebase a settled tracked workspace onto source @- or one exact local Change ID.",
+    parameters: Type.Object({ delegationId: Type.String(), targetChangeId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace.");
+      const outcome = await isolatedJj.operations.rebaseWorkspace(workspaceRebaseLease(jjWorkspaceId(context.workspaceId), workspaceWriteLeaseId(`rebase-${randomUUID()}`)), params.targetChangeId ? { kind: "exact_change", changeId: changeId(params.targetChangeId) } : { kind: "source_parent" });
+      return result(outcome.kind === "completed" ? `Rebased workspace: ${outcome.receipt.disposition}.` : `Workspace rebase stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
     name: "workspace_subagent",
     label: "Workspace Subagent",
     description: "Create an isolated JJ workspace and launch a planner or worker there. Only the root thinker may call this tool.",
@@ -840,18 +944,48 @@ export function registerSubagents(
       if (!caller.allowedChildren.includes(target.name)) throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
       validateAgentTools(target, availableToolNames());
       const name = workspaceName(params.name, params.task.objective, params.agent);
-      const attachment = await workspace.create({ cwd: ctx.cwd, name, purpose: "delegation" });
-      const record = await spawnManagedChild({
-        task: params.task,
-        agent: target,
-        caller,
-        parentCwd: attachment.path,
-        parentSessionId: ctx.sessionManager.getSessionId(),
-        workspace: attachment,
-        modelRegistry: ctx.modelRegistry,
+      if (dependencies.workspace && !dependencies.isolatedJj) {
+        const attachment = await workspace.create({ cwd: ctx.cwd, name, purpose: "delegation" });
+        const record = await spawnManagedChild({ task: params.task, agent: target, caller, parentCwd: attachment.path, parentSessionId: ctx.sessionManager.getSessionId(), workspace: attachment, modelRegistry: ctx.modelRegistry });
+        await refreshChildWidget(ctx);
+        return result(`Spawned ${target.name} ${record.id} in JJ workspace ${attachment.path}.`, record);
+      }
+      await isolatedReady;
+      const source = await isolatedJj.shared.openSource(ctx.cwd);
+      const ensured = await isolatedJj.shared.operations.ensureWip(source);
+      if (ensured.kind !== "completed") throw new Error(`Workspace allocation stopped: ${ensured.blocker.kind}.`);
+      const contextId = randomUUID();
+      const created = await isolatedJj.operations.createWorkspace(source, {
+        name: jjWorkspaceName(name),
+        ownerContextId: contextId,
+        rootSessionId: ctx.sessionManager.getSessionId(),
       });
+      if (created.kind !== "completed") throw new Error(`Workspace allocation stopped: ${created.blocker.kind}.`);
+      const sourceState = await isolatedJj.shared.store.get(source.sourceId);
+      const tracked = await isolatedJj.workspaces.get(created.receipt.workspaceId);
+      if (!sourceState || tracked?.phase !== "active") throw new Error("Tracked workspace state disappeared after allocation.");
+      const attachment: WorkspaceAttachment = {
+        backend: "jj", purpose: "delegation", repoRoot: sourceState.workspacePath,
+        sourceWorkspace: sourceState.workspaceName, sourcePath: sourceState.workspacePath,
+        baseChangeId: tracked.identity.baseChangeId, name: tracked.identity.name,
+        path: tracked.identity.path, rootChangeId: tracked.identity.rootChangeId,
+      };
+      let record: DelegationRecord;
+      try {
+        record = await spawnManagedChild({
+          task: params.task, agent: target, caller, contextId,
+          parentCwd: created.receipt.path,
+          parentSessionId: ctx.sessionManager.getSessionId(),
+          workspaceId: created.receipt.workspaceId,
+          workspace: attachment,
+          modelRegistry: ctx.modelRegistry,
+        });
+      } catch (error) {
+        await isolatedJj.workspaces.interruptLiveWriters(created.receipt.workspaceId, "child startup failed");
+        throw error;
+      }
       await refreshChildWidget(ctx);
-      return result(`Spawned ${target.name} ${record.id} in JJ workspace ${attachment.path}.`, record);
+      return result(`Spawned ${target.name} ${record.id} in tracked JJ workspace ${created.receipt.path}.`, record);
     },
   });
 
@@ -867,6 +1001,8 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireWorkspaceThinker(currentAgent);
       const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      const trackedContext = await contextStore.get(child.id);
+      if (trackedContext?.workspaceId) throw new Error("Tracked workspace integration requires the I08 review and approval gate; legacy integrate_workspace cannot consume it.");
       requireDelegatedWorkspace(child);
       const record = await orchestrator.integrateWorkspace(child.id, workspace);
       await refreshChildWidget(ctx);
@@ -973,9 +1109,17 @@ export function registerSubagents(
           ...record,
           parentCollectedAt: record.parentCollectedAt ?? new Date().toISOString(),
         }));
-        if (!legacy.workspace && !coordinator?.getRuntime(params.contextId)) {
-          await retention.closeClean(params.contextId, true);
+        const terminalContext = await contextStore.get(params.contextId);
+        if (terminalContext?.workspaceId) {
+          const tracked = await isolatedJj.workspaces.get(terminalContext.workspaceId);
+          if (tracked?.phase === "active" && tracked.writer.phase === "leased" && tracked.writer.ownerContextId === terminalContext.contextId) {
+            const lease = isolatedWorkspaceWriteLease(jjWorkspaceId(terminalContext.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId));
+            const parentContext = terminalContext.parentContextId ? await contextStore.get(terminalContext.parentContextId) : undefined;
+            if (parentContext?.workspaceId === terminalContext.workspaceId) await isolatedJj.operations.transferWriter(lease, parentContext.contextId);
+            else await isolatedJj.operations.releaseWriter(lease);
+          }
         }
+        if (!legacy.workspace && !coordinator?.getRuntime(params.contextId)) await retention.closeClean(params.contextId, true);
       }
       return result(`Acknowledged ${event.kind} event ${event.eventId}.`, event);
     },

@@ -1,11 +1,27 @@
 # I07 — Isolated JJ execution
 
-**Status:** Planned  
+**Status:** Complete  
 **Depends on:** I05, I06
 
-## Existing foundation
+## Implemented foundation
 
-Pre-M3 workspace behavior includes JJ-only creation from source `@-`, dirty-source preservation, root-only allocation/integration, Change-ID ancestry checks, empty-revision handling, workspace rebase design contracts, and workspace evaluation fixtures. These are inputs and compatibility behavior, not completion of the target initiative. The M3 tracked root/head/content-tip lifecycle, workspace writer lease, deterministic checkpoint/rebase implementation, and freeze tools remain to be delivered.
+M3 now has a dedicated versioned isolated-workspace store under `jj-workspaces`. It is authoritative for allocation intent, source/root/head identity, writer generations, operation receipts, frozen reports, and incidents. New SDK workspace children retain only `workspaceId`; legacy attachments are compatibility projections.
+
+Delivered implementation includes:
+
+- pre-mutation allocation intent and exact creation from source `@-`;
+- source WIP Change-ID and patch-evidence preservation checks;
+- tracked linked-workspace repository access sharing the repository mutation mutex;
+- context-bound writer leases, atomic transfer, restart interruption, and isolated write/shell guards;
+- checkpoint receipts that consume the old lease and issue a fresh same-owner lease on one empty child;
+- explicit exact-target workspace rebase with identity/order and patch disposition evidence;
+- safe interior-empty normalization and exact description targets;
+- report freeze into a state that cannot contain writer authority;
+- exact root/head/content-tip derivation and entirely-empty range proof;
+- production tools for checkpoint, normalization, rebase, and report preparation;
+- a hard boundary preventing the legacy integration path from consuming tracked work before I08 review gating.
+
+Real-JJ tests cover dirty-source allocation, repeated identity tracking, checkpoint lease renewal, equivalent and conflicted rebase, interrupted allocation/checkpoint/rebase/normalization reconstruction, identity drift, foreign descendants, nonempty freeze, and no-change freeze. Strict persistence tests reject cross-phase authority and identity mismatches. Oversized evidence moves to immutable content-addressed workspace artifacts with centralized inline and aggregate limits.
 
 ## Outcome
 
@@ -13,13 +29,13 @@ The thinker can allocate tracked isolated JJ workspaces; planners/workers checkp
 
 ## Work slices
 
-1. Workspace allocation from source `@-` with source WIP/root/head identity capture.
-2. Workspace-wide writer token and `workspace_checkpoint` exact head transitions.
-3. Atomic workspace child startup with durable custody on failure.
-4. Manual `rebase_workspace` onto source parent/exact local Change ID.
-5. `prepare_workspace_report` freeze and content-tip derivation.
-6. Exact inclusive range/conflict inspection and bounded artifacts.
-7. Safe empty/naming normalization and no-change proof.
+1. **Delivered:** authoritative workspace persistence and exact linked-workspace repository access.
+2. **Delivered:** allocation from source `@-` with source WIP/root/head identity capture and startup-failure custody.
+3. **Delivered:** workspace-wide writer leases, parent/child transfer, guarded mutation, and exact checkpoint head transitions.
+4. **Delivered:** manual `rebase_workspace` onto source parent/exact local Change ID.
+5. **Delivered:** safe empty/naming normalization, report freeze, content-tip derivation, and no-change proof.
+6. **Delivered:** restart reconciliation reconstructs matching allocation, checkpoint, rebase, and normalization boundaries; safe-to-resume and attention-required states remain explicit.
+7. **Delivered:** bounded immutable content-addressed range artifacts plus Real-JJ interruption, conflict, identity-drift, foreign-descendant, and no-change fixtures.
 
 ## Required proofs
 
