@@ -1,6 +1,19 @@
 # M1 in-process child runtime implementation plan
 
-Status: accepted plan; implementation not started.
+Status: implemented and validated.
+
+Implemented checkpoints:
+
+- `lmuwtwxpszvq` — version-4 child context persistence and private paths;
+- `rykwqrslnmtz` — private file-backed child SDK session factory;
+- `ynnpqktuqxvs` — root-scoped in-process child context coordinator;
+- `txmkpsntkxtv` — production new-launch cutover with version-3 compatibility projection;
+- `wzxxlkvttnns` — hidden typed push events and explicit acknowledgement;
+- `xzkvkospqpkm` — interruptible event waits and bounded status/summary requests;
+- `olulpkvoxruv` — authoritative child usage ledger and journal retention;
+- `pyprxrvosnuz` — post-order reconciliation, quiet continuation, and legacy safety.
+
+The old subprocess launcher remains only for version-3 compatibility recovery and final F4 removal. Production registration routes every new child through the in-process coordinator.
 
 M1 replaces new subprocess/FIFO child execution with private in-process Pi SDK `AgentSession` contexts. It preserves the current role hierarchy and model-facing workflow while changing runtime topology, delivery, context boundaries, accounting, and recovery.
 

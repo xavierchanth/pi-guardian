@@ -76,6 +76,7 @@ test("root-scoped coordinator persists intent before starting private contexts",
   assert.deepEqual((await coordinator.children("root-a")).map((item) => item.contextId), ["child-1"]);
   assert.deepEqual((await coordinator.children("root-b")).map((item) => item.contextId), ["child-2"]);
   assert.equal(factory.requests.length, 2);
+  assert.equal((factory.handles.get("child-1")?.sent[0] as { customType?: string })?.customType, "pi-tai-task-v1");
 
   await coordinator.disposeRoot("root-a");
   assert.equal(factory.handles.get("child-1")?.aborted, true);

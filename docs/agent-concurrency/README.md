@@ -150,7 +150,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 - [Testing and eval strategy](TESTING.md) — Real-JJ E2E harness, SDK lifecycle tests, and prompt benchmarks.
 - [Implementation DAG](IMPLEMENTATION_DAG.md) — dependency-ordered milestones and independently testable slices.
 - [M0 foundation design](M0_DESIGN.md) — implemented strict types, JJ executor/Real-JJ fixture, SDK spike, and eval runner.
-- [M1 implementation plan](M1_IMPLEMENTATION_PLAN.md) — accepted in-process child runtime, push protocol, wait/status, usage/compaction, and recursive recovery slices.
+- [M1 implementation plan](M1_IMPLEMENTATION_PLAN.md) — implemented in-process child runtime, push protocol, wait/status, usage/compaction, and post-order recovery slices.
 - [Implementation gaps](IMPLEMENTATION_GAPS.md) — provisional differences between the target model and current implementation.
 
 Legacy context is available under [`../archive/`](../archive/README.md), but this subsystem design controls when the two disagree.

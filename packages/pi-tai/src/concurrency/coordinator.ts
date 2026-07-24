@@ -128,11 +128,16 @@ export class ChildContextCoordinator {
           message: event.message,
         });
       });
-      const completion = handle.session.prompt(renderTaskPacket(request.task), { source: "rpc" })
-        .then(() => undefined)
-        .catch(async (error) => {
-          await this.recordIncident(contextId, cycleId, error instanceof Error ? error.message : String(error));
-        });
+      handle.send({
+        customType: "pi-tai-task-v1",
+        content: renderTaskPacket(request.task),
+        details: { kind: "task", contextId, cycleId, task: request.task },
+        delivery: "steer",
+        triggerTurn: true,
+      });
+      const completion = handle.waitForIdle().catch(async (error) => {
+        await this.recordIncident(contextId, cycleId, error instanceof Error ? error.message : String(error));
+      });
       this.runtimes.set(contextId, { contextId, cycleId, handle, completion, unsubscribe });
       return (await this.store.get(contextId))!;
     } catch (error) {

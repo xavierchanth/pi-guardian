@@ -18,13 +18,13 @@
 
 | Area | Current implementation | Target design | Priority |
 |---|---|---|---|
-| Runtime topology | One subprocess/RPC/FIFO per child | Multiple private Pi SDK `AgentSession` contexts in the root process | P0 |
-| Child identity | Durable delegation linked to physical session/log/process | Root-linked private context and multiple execution cycles; not user-selectable sessions | P0 |
-| Child events | Parent receives results mainly through tool polling/collection | Typed custom child messages steer active parent or trigger idle parent | P0 |
-| Awaiting | `wait_for_children` is the primary delivery path and user steer can sit behind it | `await_child_event` is optional; user input immediately resolves only this wait before normal steering | P0 |
-| Parent context | Inspect can project child transcript; terminal result collection can carry large output | Parent receives bounded events/status or focused `request_child_summary`; no history-reading tool | P0 |
-| Restart | Reconcile process exit; abandoned logs/session state are external | `/continue` prompt recursively rebuilds contexts; live locks reset and writers reacquire | P0 |
-| Child compaction | Subprocess child inherits current CLI behavior indirectly | Every child SDK context uses Pi-Tai auto-compaction and restores compacted state | P1 |
+| Runtime topology | New launches use private in-process SDK contexts; subprocess launcher remains for v3 recovery | Remove final legacy subprocess/FIFO code after downstream parity | P2 |
+| Child identity | Version-4 root-linked contexts/cycles plus a temporary version-3 compatibility projection | Remove compatibility projection after F4 migration | P2 |
+| Child events | Hidden typed push events and explicit acknowledgement implemented; old collection aliases remain | Remove polling/transcript-era aliases after prompt/tool migration | P1 |
+| Awaiting | `await_child_event` and immediate input interruption implemented; `wait_for_children` remains compatible | Remove polling implementation after all prompts migrate | P1 |
+| Parent context | New protocol is bounded; legacy inspect can still read old transcript logs | Eliminate legacy transcript projection in F4 | P1 |
+| Restart | Post-order v4 reconciliation and `/continue` implemented; legacy records remain mutation-stopped | Add downstream JJ receipt classifiers as C/D/E tools land | P1 |
+| Child compaction | New SDK children register independent Pi-Tai compaction and private journals | Add production threshold/reopen stress coverage as usage grows | P2 |
 | Hang recovery | Process liveness is the main signal | Heartbeat/status/abort/quiescence proof before a linked replacement cycle | P0 |
 | Usage | Recursive intrinsic totals and once-only attribution exist | Root ledger additionally groups by provider/model, role, context, and execution cycle | P1 |
 | Native Pi totals | Child usage is returned through current tool results | Immutable side ledger is authoritative; reconcile native totals where possible without adding usage at delivery/acknowledgement | P1 |

@@ -7,12 +7,13 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRuntime, SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createPiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
 import { PrivateChildSessionFactory } from "../../packages/pi-tai/src/concurrency/child-session.ts";
+import { Type } from "typebox";
 import type { AgentDefinitionSnapshot } from "../../packages/pi-tai/src/subagents/store.ts";
 
 function agent(provider: string): AgentDefinitionSnapshot {
   return {
     name: "worker", description: "worker", root: false, provider, model: "scripted", effort: "low",
-    tools: [], allowedChildren: [], uncertaintyHandling: "best-effort", systemPrompt: "work",
+    tools: ["child_echo"], allowedChildren: [], uncertaintyHandling: "best-effort", systemPrompt: "work",
     source: "packaged", filePath: "worker.md", contentHash: "hash",
   };
 }
@@ -42,9 +43,17 @@ test("private child factory creates a hidden file-backed SDK context", async () 
   const handle = await factory.create({
     contextId: "child-1", cwd, stateRoot: join(agentDir, "pi-tai", "subagents"), agentDir,
     agent: agent(provider.id), modelRegistry: registry, systemPrompt: "Private worker prompt.",
+    extensions: [{
+      name: "child-tools",
+      factory: (pi) => pi.registerTool({
+        name: "child_echo", label: "Child Echo", description: "Echo", parameters: Type.Object({ text: Type.String() }),
+        async execute(_id, params) { return { content: [{ type: "text", text: params.text }], details: {} }; },
+      }),
+    }],
   });
   try {
     assert.ok(handle.sessionFile.includes("/contexts/child-1/sessions/"));
+    assert.deepEqual(handle.session.getActiveToolNames(), ["child_echo"]);
     assert.deepEqual(await SessionManager.list(cwd, join(root, "root-sessions")), []);
     faux.setResponses([(context) => fauxAssistantMessage(
       JSON.stringify(context.messages).includes("quiet-continue") ? "custom-seen" : "custom-missing",

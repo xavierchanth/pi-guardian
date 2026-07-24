@@ -73,8 +73,9 @@ test("workspace is packaged as a root-only JJ skill", () => {
 
 test("subagent workflow prompts are packaged as visible templates", () => {
   const prompt = readFileSync(join(root, "packages/pi-tai/prompts/continue.md"), "utf8");
-  assert.match(prompt, /description: Continue the agent's previous work/);
-  assert.match(prompt, /Continue what you were doing\./);
+  assert.match(prompt, /description: Reconcile private child contexts/);
+  assert.match(prompt, /Call `reconcile_children` before resuming substantive work/);
+  assert.match(prompt, /Call `await_child_event` only when no independent work remains/);
   const status = readFileSync(join(root, "packages/pi-tai/prompts/collect-status.md"), "utf8");
   const parallelize = readFileSync(join(root, "packages/pi-tai/prompts/parallelize.md"), "utf8");
   assert.match(status, /Call `collect_status` now/);

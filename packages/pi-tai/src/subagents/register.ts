@@ -144,6 +144,27 @@ export function registerSubagents(
   let childWidgetRefresh: Promise<void> | undefined;
   let childWidgetGeneration = 0;
 
+  const childRuntimeExtensions = (contextId: string) => [{
+    name: `pi-tai-child-runtime-${contextId}`,
+    factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
+      store,
+      orchestrator,
+      coordinator,
+      contextStore,
+      ...(protocol ? { protocol } : {}),
+      waits,
+      usageLedger,
+      retention,
+      ...(reconciler ? { reconciler } : {}),
+      ...(dependencies.config ? { config: dependencies.config } : {}),
+      loadInstructions,
+      discoverAgents: discover,
+      childDelegationId: contextId,
+      workspace,
+      agentDir,
+    }),
+  }];
+
   const spawnManagedChild = async (input: {
     task: Parameters<SubagentOrchestrator["spawnChild"]>[0]["task"];
     agent: AgentDefinition;
@@ -167,26 +188,7 @@ export function registerSubagents(
       caller,
       modelRegistry: input.modelRegistry,
       ...(input.workspace ? { workspace: input.workspace } : {}),
-      extensions: (contextId) => [{
-        name: `pi-tai-child-runtime-${contextId}`,
-        factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
-          store,
-          orchestrator,
-          coordinator,
-          contextStore,
-          ...(protocol ? { protocol } : {}),
-          waits,
-          usageLedger,
-          retention,
-          ...(reconciler ? { reconciler } : {}),
-          ...(dependencies.config ? { config: dependencies.config } : {}),
-          loadInstructions,
-          discoverAgents: discover,
-          childDelegationId: contextId,
-          workspace,
-          agentDir,
-        }),
-      }],
+      extensions: childRuntimeExtensions,
       onPersisted: async (record: PersistedChildContextV4) => {
         const legacy: DelegationRecord = {
           version: 3,
@@ -489,6 +491,12 @@ export function registerSubagents(
         state = { mode: "standalone" };
         capabilities?.disable("subagents", "user");
         pi.appendEntry(ROLE_ENTRY, state);
+      } else if (reconciler) {
+        await reconciler.reconcile({
+          rootSessionId: ctx.sessionManager.getSessionId(),
+          modelRegistry: ctx.modelRegistry,
+          extensions: childRuntimeExtensions,
+        });
       }
       startChildWidget(ctx);
       return;
@@ -571,6 +579,7 @@ export function registerSubagents(
   pi.on("session_shutdown", async (event, ctx) => {
     waits.cancel(childDelegation?.id ?? ctx.sessionManager.getSessionId());
     stopChildWidget(ctx);
+    if (mode === "root" && coordinator) await coordinator.disposeRoot(ctx.sessionManager.getSessionId());
     if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
       if (coordinator?.getRuntime(childDelegation.id)) coordinator.releaseRuntime(childDelegation.id);
       else await orchestrator.cleanupChildControl(childDelegation.id);
@@ -803,26 +812,7 @@ export function registerSubagents(
       const reconciled = await reconciler.reconcile({
         rootSessionId,
         modelRegistry: ctx.modelRegistry,
-        extensions: (contextId) => [{
-          name: `pi-tai-child-runtime-${contextId}`,
-          factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
-            store,
-            orchestrator,
-            coordinator,
-            contextStore,
-            protocol,
-            waits,
-            usageLedger,
-            retention,
-            reconciler,
-            ...(dependencies.config ? { config: dependencies.config } : {}),
-            loadInstructions,
-            discoverAgents: discover,
-            childDelegationId: contextId,
-            workspace,
-            agentDir,
-          }),
-        }],
+        extensions: childRuntimeExtensions,
       });
       const summary = reconciled.length
         ? reconciled.map((item) => `${"  ".repeat(item.depth)}${item.contextId}: ${item.disposition}`).join("\n")
