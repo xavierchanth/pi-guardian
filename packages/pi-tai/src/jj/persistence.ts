@@ -264,6 +264,17 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
     prior = normalized;
   }
   nonempty(value.queuedAt, "claim.queuedAt");
+  const activeFields = ["acquiredAt", "fingerprints", "baselinePatchHash", "mutatedPaths"] as const;
+  const checkpointFields = ["operationId"] as const;
+  const releasedFields = ["releasedAt", "checkpointOperationId"] as const;
+  const interruptedFields = ["interruptedAt", "priorPhase", "reason", "recovery"] as const;
+  const breachedFields = ["observedAt"] as const;
+  if (phase === "queued") forbid(value, [...activeFields, ...checkpointFields, ...releasedFields, ...interruptedFields, ...breachedFields], "queued claim");
+  if (phase === "active") forbid(value, [...checkpointFields, ...releasedFields, ...interruptedFields, ...breachedFields], "active claim");
+  if (phase === "checkpointing") forbid(value, [...releasedFields, ...interruptedFields, ...breachedFields], "checkpointing claim");
+  if (phase === "released") forbid(value, [...activeFields, ...checkpointFields, ...interruptedFields, ...breachedFields], "released claim");
+  if (phase === "interrupted") forbid(value, [...activeFields, ...checkpointFields, ...releasedFields, ...breachedFields], "interrupted claim");
+  if (phase === "breached") forbid(value, [...activeFields, ...checkpointFields, ...releasedFields, "interruptedAt", "priorPhase", "recovery"], "breached claim");
   if (phase === "active" || phase === "checkpointing") {
     nonempty(value.acquiredAt, "claim.acquiredAt");
     if (!Array.isArray(value.fingerprints) || value.fingerprints.length !== value.paths.length) {
@@ -332,6 +343,13 @@ function validateOperation(value: unknown): asserts value is PersistedJjOperatio
   nonempty(value.idempotencyKey, "operation.idempotencyKey");
   nonempty(value.startedAt, "operation.startedAt");
   nonempty(value.beforeJjOperationId, "operation.beforeJjOperationId");
+  const completedFields = ["completedAt", "afterJjOperationId", "receipt"] as const;
+  const blockedFields = ["blockedAt", "blocker"] as const;
+  const unknownFields = ["stoppedAt", "reason"] as const;
+  if (phase === "started") forbid(value, [...completedFields, ...blockedFields, ...unknownFields], "started operation");
+  if (phase === "completed") forbid(value, [...blockedFields, ...unknownFields], "completed operation");
+  if (phase === "blocked") forbid(value, [...completedFields, ...unknownFields], "blocked operation");
+  if (phase === "unknown") forbid(value, [...completedFields, ...blockedFields], "unknown operation");
   if (phase === "completed") {
     nonempty(value.completedAt, "operation.completedAt");
     nonempty(value.afterJjOperationId, "operation.afterJjOperationId");
@@ -347,6 +365,10 @@ function validateOperation(value: unknown): asserts value is PersistedJjOperatio
   }
 }
 
+function forbid(value: Record<string, unknown>, fields: readonly string[], label: string): void {
+  const present = fields.filter((field) => value[field] !== undefined);
+  if (present.length) throw new Error(`${label} contains fields from another phase: ${present.join(", ")}`);
+}
 function validateManagedId(value: string, label: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)) throw new Error(`Invalid ${label} ID: ${value}`);
 }

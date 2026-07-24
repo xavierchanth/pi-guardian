@@ -81,6 +81,10 @@ test("shared source validation rejects invalid phase combinations and paths", ()
   traversal.claims[0].paths = ["../outside"];
   assert.throws(() => validateSharedSource(traversal), /Invalid repository-relative path/);
 
+  const mixedPhase = structuredClone(source(root)) as any;
+  mixedPhase.claims[0] = { ...mixedPhase.claims[0], phase: "released", releasedAt: "2026-01-01T00:00:03.000Z" };
+  assert.throws(() => validateSharedSource(mixedPhase), /fields from another phase/);
+
   const duplicate = structuredClone(source(root)) as any;
   duplicate.targets.push(duplicate.targets[0]);
   assert.throws(() => validateSharedSource(duplicate), /Duplicate shared target/);

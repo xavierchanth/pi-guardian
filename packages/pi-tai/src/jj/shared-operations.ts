@@ -67,6 +67,9 @@ export class SharedJjOperations implements JjStatusReader, WipEnsurer, ChangeIns
           });
         }
         if (exact.immutable) return this.block(source, operation.operationId, { kind: "immutable", changeId: exact.changeId });
+        if (!isWipDescription(exact.description)) {
+          return this.block(source, operation.operationId, { kind: "foreign_work", reason: "Recorded WIP Change ID no longer has a managed wip:/private: description." });
+        }
         const receipt: EnsureWipReceipt = {
           wipChangeId: exact.changeId,
           operationId,
@@ -80,7 +83,8 @@ export class SharedJjOperations implements JjStatusReader, WipEnsurer, ChangeIns
       if (inspected.current.immutable) {
         return this.block(source, operation.operationId, { kind: "immutable", changeId: inspected.current.changeId });
       }
-      if (!inspected.current.empty) {
+      const alreadyCanonical = isWipDescription(inspected.current.description);
+      if (!inspected.current.empty && !alreadyCanonical) {
         return this.block(source, operation.operationId, {
           kind: "decision_required",
           reason: "Current @ contains unknown nonempty work and cannot be relabeled as Pi-Tai WIP automatically.",
@@ -93,7 +97,6 @@ export class SharedJjOperations implements JjStatusReader, WipEnsurer, ChangeIns
           paths: [],
         });
       }
-      const alreadyCanonical = isWipDescription(inspected.current.description);
       if (!alreadyCanonical) {
         try {
           await this.kernel.runMutation(source, [

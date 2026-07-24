@@ -42,6 +42,28 @@ test("Real-JJ ensures an empty source WIP without changing its Change ID", async
   }
 });
 
+test("Real-JJ adopts an existing canonical nonempty WIP without rewriting content", async (t) => {
+  const fixture = await RealJjFixture.create("pi-tai-adopt-wip-");
+  try {
+    await fixture.run(fixture.repoPath, ["describe", "--message", "wip: existing private work"], "write");
+    await writeFile(join(fixture.repoPath, "existing.txt"), "existing work\n");
+    const before = await fixture.snapshot();
+    const { operations, source } = await runtime(fixture);
+    const result = await operations.ensureWip(source);
+    assert.equal(result.kind, "completed");
+    if (result.kind !== "completed") return;
+    assert.equal(result.receipt.disposition, "existing");
+    const after = await fixture.snapshot();
+    assert.equal(after.workingCopies[0]?.changeId, before.workingCopies[0]?.changeId);
+    assert.equal(after.workingCopies[0]?.contentHash, before.workingCopies[0]?.contentHash);
+  } catch (error) {
+    const retained = await fixture.retainOnFailure(t.name);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test("Real-JJ refuses to relabel unknown nonempty source work", async (t) => {
   const fixture = await RealJjFixture.create("pi-tai-unknown-wip-");
   try {
