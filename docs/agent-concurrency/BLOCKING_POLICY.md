@@ -63,7 +63,7 @@ Commit IDs are evidence for one observed version only. They may change after ame
 Managed workspace identity is the inclusive Change-ID range:
 
 ```text
-exactly(change_id(<root>), 1)::exactly(change_id(<tip>), 1)
+exactly(change_id(<root>), 1)::exactly(change_id(<content-tip>), 1)
 ```
 
 `root::content-tip` includes both review boundaries. The workspace root and initial working head are captured at allocation; every `workspace_checkpoint` records the next expected working head; report freeze derives the last nonempty content tip. Review derives the interior from that range rather than treating a stored commit list as permanent identity.
@@ -79,7 +79,13 @@ Rebasing the development base onto a newer main line normally rewrites commit ID
 - no unresolved conflict exists; and
 - source/workspace ownership is unchanged.
 
-The original base is useful diagnostic context, but an unchanged base commit ID or exact original parent is not a blocking invariant. Every tracked root, workspace head, content tip, WIP, and inserted target lookup must still resolve exactly one result via `exactly(change_id(<id>), 1)`.
+The original base is useful diagnostic context, but an unchanged base Change ID, base commit ID, or exact original parent is not a blocking invariant. Every tracked root, workspace head, content tip, WIP, and inserted target lookup must still resolve exactly one result via `exactly(change_id(<id>), 1)`.
+
+### Explicit workspace rebase
+
+`rebase_workspace` is a manual semantic operation, not background normalization. It runs only after active workspace writers pause and the local target resolves exactly once. The operation rebases the verified root and all owned descendants together, including the expected empty workspace head. Fetching or bookmark movement is separate.
+
+The root/content-tip/workspace-head Change IDs and exact range membership/order must remain unchanged. The root's parent/base Change ID is expected to change. A range-equivalent clean receipt continues; changed normalized patch evidence requests re-review; owned conflicts route to repair. Foreign descendants, divergent targets, or unquiesced writers stop before rebase.
 
 ### Review after a clean rebase
 
@@ -165,7 +171,12 @@ Out-of-scope existing findings never trigger automatic repair unless they create
 | Private selector missing | Warn | Explain config; do not edit it |
 | WIP is immutable | Stop WIP mutation | Explain config; read-only work may continue |
 | Workspace base commit IDs changed | Continue | Commit IDs are not identity |
-| Workspace base Change ID cleanly rebased | Refresh | Recompute range/patch evidence |
+| User requests workspace rebase to local source `@-` or exact Change ID | Continue after pause | Acquire workspace token/repository mutex and move exact owned descendants together |
+| Workspace root parent/base Change ID changed with rebase receipt | Continue | Base is diagnostic; verify unchanged root/head/content-tip and range membership |
+| Workspace rebase is range-equivalent and conflict-free | Refresh | Preserve or refresh matching review evidence |
+| Workspace rebase changes normalized owned patch | Re-review | Range identity remains valid but prior semantic approval is stale |
+| Workspace rebase records owned conflicts | Repair | Preserve custody and route bounded conflict workflow |
+| Workspace rebase target is divergent/foreign or writer is active | Stop affected rebase | Do not guess target or move an active workspace |
 | Root/head/content-tip remain unique and connected | Continue | Resolve each exactly once and use inclusive `root::content-tip` |
 | Recorded workspace head changes with a `workspace_checkpoint` receipt | Continue | Adopt receipt's `newHeadChangeId` |
 | Tracked Change ID changes without a receipt | Stop automatic mutation | Inspect; user may explicitly authorize verified rebind/resume |

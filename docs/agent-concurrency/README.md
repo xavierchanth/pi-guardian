@@ -62,6 +62,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 | U52 | Root/head/tip identity is divergent or foreign work enters the range | Stop affected mutation and preserve diagnostics | No arbitrary side selection |
 | U53 | Isolated worker completes a coherent unit | Call `workspace_checkpoint` (deterministic describe+new) | Prior head is named and new empty head Change ID is recorded exactly |
 | U54 | Tracked Change ID changes without a tool receipt | Stop automatic mutation; inspect and offer explicit user-authorized rebind/resume tools | Never silently adopt replacement identity |
+| U55 | User wants isolated work moved onto newer fetched trunk/base | Pause writers and call `rebase_workspace` with source `@-` or one exact local Change ID | Root/content-tip/head and range membership remain unchanged; old/new root parent is receipted |
 | U36 | Private-change protection is absent | Explain the recommended `git.private-commits` selector | Pi-Tai does not edit user JJ config |
 | U37 | User asks to publish | Leave publishing outside this subsystem unless separately authorized | No automatic push, bookmark, or config mutation |
 
@@ -104,6 +105,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 22. **Usage is root-scoped but attributable.** Totals retain provider/model, role, context, and execution-cycle breakdowns.
 23. **Shared and isolated checkpoints are different.** Shared source uses `insert_change` plus locked `checkpoint_change`; an isolated workspace serializes writers and uses `workspace_checkpoint` to describe current `@`, create a fresh `@`, and record its Change ID.
 24. **Restart preserves intent, not live locks.** File/workspace queues reset empty, interrupted claims are recorded, and resumed children reacquire before writing.
+25. **Workspace bases may move explicitly.** `rebase_workspace` moves the verified root and all owned descendants onto an exact local base while preserving root/content-tip/head Change IDs and range membership; the root's parent is diagnostic.
 
 ## Ambiguities resolved by this design
 
@@ -135,6 +137,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 | What happens on conflicts? | Owned, unambiguous conflicts enter one bounded reviewer→worker→squash→re-review cycle; foreign or ambiguous conflicts stop mutation. |
 | What happens on crash or `/continue`? | The `/continue` prompt first reconciles children recursively; locks reset, resumed writers reacquire, and an unquiesced writer is never duplicated. |
 | How does isolated work checkpoint? | `workspace_checkpoint` performs deterministic `jj commit` semantics and records old/new workspace-head Change IDs. |
+| Can fetched trunk become the new workspace base? | Yes. After fetching separately, the thinker pauses writers and calls `rebase_workspace` onto source `@-` or an exact local Change ID. The tracked range stays the same; only its parent/base and commit observations may change. |
 | Can an unexpected tracked Change ID be recovered? | Automatic mutation stops, but explicit user-authorized rebind/resume tools can adopt a verified replacement with an audit receipt. |
 
 ## Normative documents

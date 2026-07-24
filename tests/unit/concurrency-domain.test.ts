@@ -82,6 +82,21 @@ test("restart interrupts live claims and workspace writers without preserving ow
     priorOwner: writer.owner,
     expectedHeadChangeId: writer.expectedHeadChangeId,
   });
+
+  const rebasing: WorkspaceWriterToken = {
+    phase: "rebasing",
+    workspaceId: workspaceId("workspace-1"),
+    owner: childContextId("thinker-1"),
+    rootChangeId: changeId("b".repeat(32)),
+    expectedHeadChangeId: changeId("c".repeat(32)),
+    operationId: jjOperationId("operation-3"),
+  };
+  assert.deepEqual(interruptWorkspaceWriter(rebasing), {
+    phase: "interrupted",
+    workspaceId: rebasing.workspaceId,
+    priorOwner: rebasing.owner,
+    expectedHeadChangeId: rebasing.expectedHeadChangeId,
+  });
 });
 
 test("legacy delegation migration loads safe dormant intent and quarantines unproved writers", () => {

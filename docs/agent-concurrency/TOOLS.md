@@ -70,6 +70,7 @@ Legend: **●** available, **○** available only when the role owns an appropri
 | `insert_change` | ● | — | — | — | — | — |
 | `checkpoint_change` | ○ shared source | — | ○ assigned shared change | — | — | — |
 | `workspace_checkpoint` | — | ● | ○ isolated only | — | — | — |
+| `rebase_workspace` | ● explicit/manual | — | — | — | — | — |
 | `prepare_workspace_report` | — | ● | ○ isolated only | — | — | — |
 | `inspect_change_range` | ● | ● | ● bounded | ● | — | — |
 | `inspect_conflicts` | ● | ● | ● bounded | ● | — | — |
@@ -282,6 +283,35 @@ This tool provides deterministic `jj commit` semantics:
 7. persist the head transition and JJ operation ID before releasing the workspace write token.
 
 The receipt contains `checkpointedChangeId`, `previousHeadChangeId`, `newHeadChangeId`, description, parents, conflicts, and operation ID. Any unreceipted change to the tracked workspace head stops automatic workspace writes. A later user-authorized `rebind_tracked_change` may adopt a verified replacement.
+
+### `rebase_workspace`
+
+Thinker-only manual operation for moving one tracked isolated workspace range onto a newer base already present in the local repository. Fetching is separate. The model-visible target is bounded to:
+
+```ts
+{ kind: "source_parent" }
+| { kind: "exact_change"; changeId: ChangeId }
+```
+
+The handler resolves the workspace selector from thinker custody and injects a `WorkspaceRebaseLease`; it never accepts cwd, a root/range revset, or arbitrary JJ arguments. The operation:
+
+1. pauses active workspace writes and proves the previous writer quiescent;
+2. acquires the workspace-wide writer token and repository mutation mutex;
+3. resolves root, content tip, expected workspace head, and target exactly once;
+4. rejects foreign descendants from `root::workspace-head`;
+5. records old root parent, exact range membership/order, descriptions, normalized patch evidence, conflicts, and working-copy state;
+6. rebases the exact root and all verified owned descendants onto the target;
+7. verifies root/content-tip/workspace-head Change IDs and range membership/order are unchanged;
+8. records the new root parent, commit-ID observations, normalized patch evidence, conflicts, and operation ID; and
+9. persists the receipt before releasing the token.
+
+Receipt disposition is exclusive:
+
+- `range_equivalent`: identities/range and normalized owned patch are equivalent; existing review may refresh;
+- `range_changed`: identities/range remain valid but normalized owned patch changed; review is stale;
+- `conflicted`: identities/range remain tracked and exact conflict evidence is returned for repair.
+
+An unexpected identity change, foreign descendant, divergent target, unquiesced writer, or unknown partial phase stops mutation. Rebase never fetches, pushes, edits configuration, or silently chooses a bookmark/revset.
 
 ## Workspace range and review tools
 

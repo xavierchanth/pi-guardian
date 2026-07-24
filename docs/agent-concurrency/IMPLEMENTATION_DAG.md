@@ -24,6 +24,7 @@ graph TD
 
   D0["D0 Workspace allocation and tracked identity"]
   D1["D1 workspace_checkpoint and writer token"]
+  D1R["D1R Manual workspace rebase"]
   D2["D2 Atomic spawn_workspace_child"]
   D3["D3 Freeze, report, exact range, normalization"]
 
@@ -55,9 +56,12 @@ graph TD
 
   C0 --> D0
   D0 --> D1
+  C0 --> D1R
+  D1 --> D1R
   B0 --> D2
   D0 --> D2
   D1 --> D3
+  D1R --> D3
   D2 --> D3
 
   A0 --> E0
@@ -92,7 +96,7 @@ graph TD
 | M0 Foundations | A0–A3 | Strict domain/JJ operation contracts, real-JJ harness, SDK feasibility, opt-in eval runner |
 | M1 In-process child runtime | B0–B4 | Private SDK children push bounded messages, compact, interrupt waits, and resume recursively |
 | M2 Shared-source concurrency | C0–C3 | `insert_change` and locked `checkpoint_change` produce deterministic shared history |
-| M3 Isolated workspace execution | D0–D3 | Workspace root/head are tracked exactly and coherent work uses `workspace_checkpoint` |
+| M3 Isolated workspace execution | D0–D3 + D1R | Workspace root/head are tracked exactly; coherent work checkpoints and the owned range can be manually rebased |
 | M4 Review and integration | E0–E4 | Task plan→reviewer→approval→integration→bounded conflict repair |
 | M5 Recovery and dogfood | F0–F4 | User-directed recovery, closure/UI, optional benchmarks, migration, subprocess removal |
 
@@ -260,6 +264,18 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Exit:** repeated real-JJ checkpoints create named changes plus exactly one tracked empty head; unexpected head stops writes.
 
+### D1R — Manual `rebase_workspace`
+
+**Depends on:** C0, D1
+
+- Add a thinker-only manual rebase operation with an injected `WorkspaceRebaseLease`.
+- Accept only current local source `@-` or one exact local target Change ID; fetching remains separate.
+- Pause writers and verify no foreign descendants before rebasing exact root plus all owned descendants.
+- Preserve root/content-tip/workspace-head Change IDs, range membership/order, and descriptions while allowing the root parent/base and commit IDs to change.
+- Return exclusive `range_equivalent`, `range_changed`, or `conflicted` receipts and reconcile interruption boundaries.
+
+**Exit:** Real-JJ tests move a multi-checkpoint workspace and its empty head onto newer trunk without changing tracked range identity; changed patches/conflicts invalidate review or route repair deterministically.
+
 ### D2 — Atomic `spawn_workspace_child`
 
 **Depends on:** B0, D0
@@ -272,7 +288,7 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 ### D3 — Freeze, report, exact range, and normalization
 
-**Depends on:** D1, D2
+**Depends on:** D1, D1R, D2
 
 - Add `prepare_workspace_report` with workspace-head verification and writer pause.
 - Derive last nonempty content tip from expected empty head.
@@ -389,7 +405,7 @@ After M0, recommended parallel lanes are:
 |---|---|
 | Runtime | B0 → B1 → {B2, B3} → B4 |
 | Shared JJ | C0 → C1 → C2 → C3 |
-| Workspace JJ | C0 → D0 → D1; then B0 + D0 → D2 → D3 |
+| Workspace JJ | C0 → D0 → D1 → D1R; in parallel B0 + D0 → D2; then D1R + D2 → D3 |
 | Review | E0 in parallel; then D3 + B1 + E0 → E1 → E2 |
 | Integration/recovery | E2 + C3 → E3 → E4; B4 + E3 → F0 |
 | Productization | E4 + F0 → F1 → F2 → F4; optional benchmark F1 + A1 + A3 → F3 |

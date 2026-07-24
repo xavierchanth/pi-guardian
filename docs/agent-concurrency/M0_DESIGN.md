@@ -70,6 +70,10 @@ interface JjOperations {
     source: SourceWorkspaceHandle,
     input: Readonly<{ name: WorkspaceName; purpose: WorkspacePurpose }>,
   ): Promise<CreateWorkspaceResult>;
+  rebaseWorkspace(
+    lease: WorkspaceRebaseLease,
+    target: { kind: "source_parent" } | { kind: "exact_change"; changeId: ChangeId },
+  ): Promise<WorkspaceRebaseResult>;
   prepareWorkspaceReport(workspace: FrozenWorkspaceHandle): Promise<WorkspaceReportResult>;
   integrateWorkspace(approval: ApprovedWorkspaceIntegration): Promise<IntegrationResult>;
 }

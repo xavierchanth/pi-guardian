@@ -87,6 +87,7 @@ export type WorkspaceWriterToken =
   | { phase: "available"; workspaceId: WorkspaceId; headChangeId: ChangeId; lastOperationId?: JjOperationId }
   | { phase: "active"; workspaceId: WorkspaceId; owner: ChildContextId; headChangeId: ChangeId }
   | { phase: "checkpointing"; workspaceId: WorkspaceId; owner: ChildContextId; expectedHeadChangeId: ChangeId; operationId: JjOperationId }
+  | { phase: "rebasing"; workspaceId: WorkspaceId; owner: ChildContextId; rootChangeId: ChangeId; expectedHeadChangeId: ChangeId; operationId: JjOperationId }
   | { phase: "interrupted"; workspaceId: WorkspaceId; priorOwner: ChildContextId; expectedHeadChangeId: ChangeId };
 
 export function interruptWorkspaceWriter(token: WorkspaceWriterToken): WorkspaceWriterToken {

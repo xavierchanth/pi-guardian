@@ -7,6 +7,7 @@ import type {
   FrozenWorkspaceHandle,
   IsolatedWorkspaceWriteLease,
   JjOperationId,
+  WorkspaceRebaseLease,
   SourceWorkspaceHandle,
   WorkspaceId,
   WorkspaceName,
@@ -65,6 +66,26 @@ export interface WorkspaceCheckpointReceipt {
   readonly conflicted: boolean;
   readonly operationId: JjOperationId;
 }
+
+export type WorkspaceRebaseTarget =
+  | { readonly kind: "source_parent" }
+  | { readonly kind: "exact_change"; readonly changeId: ChangeId };
+
+interface WorkspaceRebaseReceiptBase {
+  readonly workspaceId: WorkspaceId;
+  readonly rootChangeId: ChangeId;
+  readonly contentTipChangeId: ChangeId;
+  readonly workspaceHeadChangeId: ChangeId;
+  readonly oldBaseChangeId: ChangeId;
+  readonly newBaseChangeId: ChangeId;
+  readonly operationId: JjOperationId;
+}
+
+export type WorkspaceRebaseReceipt = WorkspaceRebaseReceiptBase & (
+  | { readonly disposition: "range_equivalent"; readonly normalizedPatchHash: string }
+  | { readonly disposition: "range_changed"; readonly beforePatchHash: string; readonly afterPatchHash: string }
+  | { readonly disposition: "conflicted"; readonly conflictPaths: readonly string[] }
+);
 
 export type WorkspacePurpose = "relocation" | "delegation";
 
@@ -130,6 +151,13 @@ export interface WorkspaceCreator {
   ): Promise<JjOperationResult<CreateWorkspaceReceipt>>;
 }
 
+export interface WorkspaceRebaser {
+  rebaseWorkspace(
+    lease: WorkspaceRebaseLease,
+    target: WorkspaceRebaseTarget,
+  ): Promise<JjOperationResult<WorkspaceRebaseReceipt>>;
+}
+
 export interface WorkspaceReporter {
   prepareWorkspaceReport(workspace: FrozenWorkspaceHandle): Promise<JjOperationResult<WorkspaceReportReceipt>>;
 }
@@ -145,5 +173,6 @@ export interface JjOperations
     SharedChangeCheckpointer,
     WorkspaceCheckpointer,
     WorkspaceCreator,
+    WorkspaceRebaser,
     WorkspaceReporter,
     WorkspaceIntegrator {}

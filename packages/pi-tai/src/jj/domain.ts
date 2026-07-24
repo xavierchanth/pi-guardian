@@ -86,6 +86,13 @@ export interface CheckpointableFileSetClaim {
   readonly [handleBrand]: "CheckpointableFileSetClaim";
 }
 
+export interface WorkspaceRebaseLease {
+  readonly kind: "workspace_rebase_lease";
+  readonly workspaceId: WorkspaceId;
+  readonly leaseId: WorkspaceWriteLeaseId;
+  readonly [handleBrand]: "WorkspaceRebaseLease";
+}
+
 export interface FrozenWorkspaceHandle {
   readonly kind: "frozen_workspace";
   readonly workspaceId: WorkspaceId;
@@ -112,6 +119,13 @@ export function isolatedWorkspaceWriteLease(
 
 export function checkpointableFileSetClaim(claimId: FileSetClaimId): CheckpointableFileSetClaim {
   return { kind: "checkpointable_file_set_claim", claimId } as CheckpointableFileSetClaim;
+}
+
+export function workspaceRebaseLease(
+  workspaceId: WorkspaceId,
+  leaseId: WorkspaceWriteLeaseId,
+): WorkspaceRebaseLease {
+  return { kind: "workspace_rebase_lease", workspaceId, leaseId } as WorkspaceRebaseLease;
 }
 
 export function frozenWorkspaceHandle(workspaceId: WorkspaceId): FrozenWorkspaceHandle {

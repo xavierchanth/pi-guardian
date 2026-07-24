@@ -128,6 +128,19 @@ A separate handler contract test proves that the model-visible schema contains o
 - Conflict state is reported without losing the head transition.
 - Interruption at describe/new/persist boundaries reconciles deterministically.
 
+### `rebase_workspace`
+
+- Rebase to current local source `@-` changes only the root's parent/base identity and commit-ID observations.
+- Rebase to an exact user-selected local Change ID resolves the target through `exactly(change_id(<id>), 1)`.
+- Root, content-tip, workspace-head, exact range membership/order, and descriptions remain unchanged.
+- The expected empty workspace head moves with all owned descendants.
+- Range-equivalent clean rebase refreshes evidence without mandatory re-review.
+- Changed normalized owned patch returns `range_changed` and invalidates prior review.
+- Owned conflicts return `conflicted` with exact paths while preserving workspace custody.
+- Foreign descendants, divergent targets, active/unquiesced writers, and unknown partial phases stop safely.
+- The operation never fetches, pushes, moves bookmarks, edits config, or accepts arbitrary revsets.
+- Interruption before/after rebase and before receipt persistence reconciles from operation evidence.
+
 ### `spawn_workspace_child`
 
 - Dirty source WIP remains byte-for-byte and Change-ID identical.
@@ -222,7 +235,7 @@ Example cases:
 1. Small shared change creates WIP, inserts a target, edits one file, checkpoints, and leaves WIP clean for that file.
 2. Two shared workers contend for one file and serialize checkpoints.
 3. Planner makes three coherent workspace checkpoints and leaves the expected empty head.
-4. Development base is rebased while planner works; integration continues by Change IDs.
+4. User fetches/updates trunk, manually rebases the workspace onto an exact local target, and integration continues with the same root/content-tip/head Change IDs.
 5. Workspace report contains unnamed/empty changes; normalization occurs before reviewer approval.
 6. Integration creates a trivial owned conflict; worker resolves, deterministic squash targets the correct Change ID, reviewer passes, user receives report.
 7. Complex/foreign conflict stops mutation and asks the user.

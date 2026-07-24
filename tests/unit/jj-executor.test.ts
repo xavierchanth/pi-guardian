@@ -9,6 +9,7 @@ import {
   changeId,
   isolatedWorkspaceWriteLease,
   workspaceId,
+  workspaceRebaseLease,
   workspaceWriteLeaseId,
 } from "../../packages/pi-tai/src/jj/domain.ts";
 import {
@@ -39,6 +40,12 @@ test("JJ semantic values reject ambiguous identities and unbounded descriptions"
   });
   assert.equal("path" in lease, false);
   assert.equal("headChangeId" in lease, false);
+  const rebaseLease = workspaceRebaseLease(workspaceId("workspace-1"), workspaceWriteLeaseId("rebase-1"));
+  assert.deepEqual(rebaseLease, {
+    kind: "workspace_rebase_lease",
+    workspaceId: "workspace-1",
+    leaseId: "rebase-1",
+  });
 });
 
 test("JJ process executor probes 0.43.0 and invokes argv with deterministic global options", async () => {

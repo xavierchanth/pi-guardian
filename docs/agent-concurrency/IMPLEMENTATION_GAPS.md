@@ -41,6 +41,7 @@
 | Shared change target | No deterministic pre-WIP target allocation | `insert_change` returns assigned Change ID and operation receipt | P0 |
 | Shared checkpoint | No owned-file deterministic squash target | `checkpoint_change` verifies owner/lock, squashes, checks, then releases | P0 |
 | Isolated checkpoint | Planner uses arbitrary shell/JJ history mutation | `workspace_checkpoint` provides deterministic describe+new semantics and records every expected head transition | P0 |
+| Workspace rebase | No bounded manual operation; current service assumes recorded base/root topology | Thinker-only `rebase_workspace` moves exact owned descendants to source `@-`/exact local Change ID while preserving range identities | P1 |
 | Workspace source identity | Attachment lacks recorded source WIP/head Change IDs | Capture source WIP, root, expected workspace head, and name/path; base is diagnostic | P0 |
 | Workspace boundary | Service validates stored base/root/head topology rigidly | Root, expected workspace head, and content tip resolve exactly once; tolerate clean base rewrite | P0 |
 | Workspace pause | Tip captured when integration starts | `prepare_workspace_report` freezes writes and captures head plus last nonempty content tip | P0 |
@@ -62,7 +63,7 @@ The complete target is in [TOOLS.md](TOOLS.md). Major additions/replacements:
 - context: metadata-only `child_status`, bounded `request_child_status` and focused `request_child_summary`;
 - coordination: `acquire_file_set`, `release_file_set`;
 - WIP/checkpoint: `jj_concurrency_status`, `ensure_wip_change`, `insert_change`, `checkpoint_change`, `workspace_checkpoint`;
-- workspace pause/review: `prepare_workspace_report`, `inspect_change_range`, `inspect_conflicts`, `normalize_change_range`;
+- workspace lifecycle/review: `rebase_workspace`, `prepare_workspace_report`, `inspect_change_range`, `inspect_conflicts`, `normalize_change_range`;
 - integration/repair: `integrate_workspace`, `squash_resolution`, `verify_integrated_range`, `close_workspace`, `rebind_tracked_change`, `resume_workspace_operation`, `retry_workspace_cleanup`;
 - design/accounting: `task_plan`, `concurrency_usage`.
 

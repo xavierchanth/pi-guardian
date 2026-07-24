@@ -197,7 +197,7 @@ Restart does not blindly replay every interrupted tool call.
 
 - Read-only inspection, status, and await operations may be reissued.
 - An interrupted file edit is retried only after reacquiring locks and re-reading current content.
-- An interrupted `checkpoint_change`, `workspace_checkpoint`, squash, or integration first reconciles its idempotency key, tracked Change IDs, current graph, and operation receipt.
+- An interrupted `checkpoint_change`, `workspace_checkpoint`, `rebase_workspace`, squash, or integration first reconciles its idempotency key, tracked Change IDs, current graph, and operation receipt.
 - If the postcondition already holds, synthesize the missing result and continue.
 - If no mutation boundary was crossed, reissue safely.
 - If completed boundaries cannot be proved, stop affected mutation and request recovery direction.

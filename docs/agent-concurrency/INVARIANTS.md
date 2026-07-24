@@ -32,6 +32,7 @@ The [blocking policy](BLOCKING_POLICY.md) controls whether a detected condition 
 - `checkpoint_change` and workspace integration also serialize through one repository JJ mutation mutex.
 - An isolated workspace permits one writable context at a time and checkpoints only through `workspace_checkpoint`.
 - `workspace_checkpoint` must record the exact previous and new workspace-head Change IDs before releasing the writer.
+- Manual `rebase_workspace` holds the workspace-wide token and repository mutex through identity/range verification and receipt persistence.
 - No active agent edits another active owner's workspace to help or repair it.
 
 ### Roles
@@ -51,7 +52,10 @@ The [blocking policy](BLOCKING_POLICY.md) controls whether a detected condition 
 - Workspace creation branches from source `@-` and leaves source `@` content and Change ID untouched.
 - Durable isolated identity includes root Change ID and expected current workspace-head Change ID; report freeze additionally records the last nonempty content-tip Change ID.
 - Every managed Change ID lookup is wrapped in `exactly(change_id(<id>), 1)`.
-- The original base Change ID is diagnostic context, not a requirement that commit IDs or exact parent versions remain unchanged.
+- The workspace root's parent (the recorded base Change ID) is diagnostic context and may be replaced by an explicit workspace rebase.
+- A workspace rebase preserves the exact root/content-tip/workspace-head Change IDs and owned range membership/order while allowing the root's immediate parent and all observed commit IDs to change.
+- Rebase target resolution is exact and local; rebasing never fetches implicitly or moves an active writer.
+- A range-equivalent clean rebase refreshes evidence without mandatory re-review. Changed normalized range evidence requires re-review; conflicts enter explicit conflict custody.
 - Commit IDs are observed version evidence only. A commit-ID change never blocks by itself.
 - The reviewable workspace range is the inclusive exact `root::content-tip` Change-ID range.
 - Model-visible mutation inputs do not accept cwd, tracked Change IDs, filesets, revsets, or JJ argv; handlers inject opaque tracked handles and active claims/leases.
@@ -189,13 +193,15 @@ type WorkspaceWriterToken =
   | { phase: "available"; workspaceId: WorkspaceId; headChangeId: ChangeId; lastReceipt?: WorkspaceCheckpointReceipt }
   | { phase: "active"; workspaceId: WorkspaceId; owner: ChildContextId; headChangeId: ChangeId }
   | { phase: "checkpointing"; workspaceId: WorkspaceId; owner: ChildContextId; expectedHeadChangeId: ChangeId; operationId: string }
+  | { phase: "rebasing"; workspaceId: WorkspaceId; owner: ChildContextId; rootChangeId: ChangeId; expectedHeadChangeId: ChangeId; operationId: string }
   | { phase: "interrupted"; workspaceId: WorkspaceId; priorOwner: ChildContextId; expectedHeadChangeId: ChangeId };
 ```
 
 - Only one writable context owns an isolated workspace at a time.
 - Acquisition verifies current `@` equals `headChangeId` exactly.
 - `workspace_checkpoint` describes that change, creates one fresh empty child, persists `newHeadChangeId`, then releases.
-- Restart produces `interrupted`, clears ownership, reconciles any checkpoint receipt, and only then returns to `available`.
+- `rebase_workspace` pauses the prior owner, enters `rebasing`, moves exact root plus verified owned descendants, persists unchanged range identities and old/new base, then releases.
+- Restart from `active`, `checkpointing`, or `rebasing` produces `interrupted`, clears ownership, reconciles any operation receipt, and only then returns to `available`.
 - An unreceipted head mismatch stops automatic writes and requires inspection or user-authorized rebind.
 
 ## 6. Workspace custody lifecycle

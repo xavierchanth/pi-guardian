@@ -234,6 +234,20 @@ All child file operations use the isolated path. Before reporting completed work
 
 The child does not claim that this history is accepted. It only declares it ready for review.
 
+### Manual workspace rebase
+
+After an explicitly requested local fetch/update, the thinker may call `rebase_workspace` to move an isolated workspace range onto a newer local base. Fetching is separate and never implicit. The rebase target is either the current source `@-` or one exact user-selected local Change ID; arbitrary revsets are not accepted.
+
+The operation pauses the workspace writer, acquires the workspace-wide token and repository mutex, verifies that `root::workspace-head` has no foreign descendants, and rebases from the exact root so all owned descendants move together. It must preserve:
+
+- root Change ID;
+- content-tip Change ID;
+- expected empty workspace-head Change ID;
+- exact owned range membership and order; and
+- semantic descriptions.
+
+The root's immediate parent/base Change ID and every commit ID may change. The receipt records old/new base, unchanged range identities, normalized patch evidence, conflicts, and JJ operation ID. A clean range-equivalent result refreshes evidence. Changed normalized range evidence requires review again. A conflict is a known `conflict_resolution_required` state, not unknown partial mutation. No active child resumes writes until the receipt is persisted and it reacquires the workspace token.
+
 ### Thinker review
 
 After acknowledging the report, the thinker refreshes from the task plan and obtains a deterministic read-only review bundle:
