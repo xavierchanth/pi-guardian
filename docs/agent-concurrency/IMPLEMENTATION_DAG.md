@@ -246,6 +246,8 @@ The complete accepted sub-slice and cutover plan is in [M1_IMPLEMENTATION_PLAN.m
 
 **Exit:** two contending workers produce deterministic `edit→checkpoint→edit→checkpoint` history in real JJ.
 
+The complete implemented C0–C3 slice and acceptance plan is in [M2_IMPLEMENTATION_PLAN.md](M2_IMPLEMENTATION_PLAN.md).
+
 ### D0 — Workspace allocation and tracked identity
 
 **Depends on:** C0

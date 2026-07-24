@@ -151,6 +151,7 @@ This subsystem coordinates concurrent agents and the work they produce. It cover
 - [Implementation DAG](IMPLEMENTATION_DAG.md) — dependency-ordered milestones and independently testable slices.
 - [M0 foundation design](M0_DESIGN.md) — implemented strict types, JJ executor/Real-JJ fixture, SDK spike, and eval runner.
 - [M1 implementation plan](M1_IMPLEMENTATION_PLAN.md) — implemented in-process child runtime, push protocol, wait/status, usage/compaction, and post-order recovery slices.
+- [M2 implementation plan](M2_IMPLEMENTATION_PLAN.md) — implemented shared-source WIP readiness, FIFO file-set claims, inserted targets, guarded writes, and deterministic checkpoints.
 - [Implementation gaps](IMPLEMENTATION_GAPS.md) — provisional differences between the target model and current implementation.
 
 Legacy context is available under [`../archive/`](../archive/README.md), but this subsystem design controls when the two disagree.

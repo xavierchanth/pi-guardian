@@ -1,6 +1,19 @@
 # M2 shared-source concurrency implementation plan
 
-Status: implementation in progress.
+Status: implemented and validated.
+
+Implemented checkpoints:
+
+- `poyxwnpymmyr` — versioned atomic shared-source state, claims, attempts, and receipts;
+- `nkzktyqplpvo` — repository-scoped mutex, opaque source handles, exact resolver, and operation kernel;
+- `ylnttmrszssn` — canonical atomic FIFO file-set coordinator and recovery evidence;
+- `nqpvkskwrxsn` — shared source-tool and constrained-shell guards;
+- `yrxvvzzrnuow` — WIP readiness and owner-bound inserted target allocation;
+- `xustxxumtnwk` — locked-path checkpointing and Real-JJ contention/recovery proof;
+- `uvnsmlkyxrqo` — production tools, role policy, prompts, and runtime reconciliation;
+- `puyonsxqostr` — strict phase validation and safe adoption of an existing canonical WIP.
+
+The two planned C2 checkpoints were combined because readiness and insertion share one strict semantic operation boundary and Real-JJ fixture. M2 does not provide isolated workspace writer leases or review/integration; those remain M3 and M4.
 
 This plan implements slices C0–C3 from the accepted [implementation DAG](IMPLEMENTATION_DAG.md). It uses the M0 semantic JJ boundary and Real-JJ fixture and integrates with the M1 root-scoped private child runtime.
 

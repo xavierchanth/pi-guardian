@@ -31,15 +31,15 @@
 | Reviewer | No packaged reviewer role | Read-only reviewer with task-plan snapshot and exact inclusive Change-ID inspection | P0 |
 | Review loop | Thinker reviews ad hoc; conflicts are fail-stop | Structured severity/relation, one automatic repair cycle, focused re-review | P0 |
 | Planner routing | Planner can run as normal shared-cwd child | Planner is workspace-only | P0 |
-| Shared writers | Prompt-based re-read and non-overlap advice | Atomic canonical file-set queues held through checkpoint/squash | P0 |
-| Pi file queue | Built-in edit/write queue only each individual mutation | Reuse/extend `withFileMutationQueue()` across semantic edit→checkpoint boundary | P0 |
-| Shell authority | Worker bash can mutate files/JJ | Shared shell constrained; JJ mutation available only through deterministic tools | P0 |
-| JJ boundary | `JjCommandRunner(cwd, args)` and broad workspace service mix process execution with behavior | Strong `JjOperations` consume injected tracked handles/leases; private repository/process executors emit explicit long-form JJ 0.43.0 commands | P0 |
-| JJ configuration | Process inherits config implicitly and command construction uses short options | Deliberately inherit identity/signing/policy, never mutate config, and use built-in commands with long-form options | P0 |
-| WIP identity | No orchestration-change domain model | `ensure_wip_change` records private mutable WIP and config diagnostics | P0 |
+| Shared writers | Atomic canonical FIFO file-set claims now cover edit→validation→checkpoint; ancestor collisions and restart recovery are enforced | Extend the same claim model into later conflict-resolution paths | P1 |
+| Pi file queue | Semantic claims guard Pi `write`/`edit` while each mutation still uses Pi's native per-file queue; bypasses breach before checkpoint | Generalize guarded tool wrapping beyond the shared-source lane | P1 |
+| Shell authority | Shared workers have a conservative read/validation allowlist and cannot mutate JJ through bash | Reuse equivalent constraints for isolated reviewer/repair roles | P1 |
+| JJ boundary | M2 shared operations use opaque handles, exact resolvers, a repository mutex, and long-form JJ 0.43.0 argv; legacy workspace service remains | Migrate D/E workspace behavior onto the semantic kernel | P0 |
+| JJ configuration | M2 inherits identity/signing/immutability, diagnoses private protection, and never mutates config | Migrate remaining legacy workspace argv to the same contract | P1 |
+| WIP identity | `ensure_wip_change` records/adopts private mutable WIP, refuses unknown nonempty work, and reports config protection | Add explicit user-authorized WIP rebind in F0 | P1 |
 | Task plan | Session plan exists but no repository Markdown task artifact | Thinker-owned concise task-plan file in WIP with bounded snapshots | P1 |
-| Shared change target | No deterministic pre-WIP target allocation | `insert_change` returns assigned Change ID and operation receipt | P0 |
-| Shared checkpoint | No owned-file deterministic squash target | `checkpoint_change` verifies owner/lock, squashes, checks, then releases | P0 |
+| Shared change target | `insert_change` creates an exact owner-bound empty target before preserved WIP | Bind task-plan snapshots when E0 lands | P2 |
+| Shared checkpoint | `checkpoint_change` moves only claimed paths, preserves unrelated WIP evidence, receipts before release, and reconciles interruption | Reuse receipts in E3 integration and F0 recovery UI | P1 |
 | Isolated checkpoint | Planner uses arbitrary shell/JJ history mutation | `workspace_checkpoint` provides deterministic describe+new semantics and records every expected head transition | P0 |
 | Workspace rebase | No bounded manual operation; current service assumes recorded base/root topology | Thinker-only `rebase_workspace` moves exact owned descendants to source `@-`/exact local Change ID while preserving range identities | P1 |
 | Workspace source identity | Attachment lacks recorded source WIP/head Change IDs | Capture source WIP, root, expected workspace head, and name/path; base is diagnostic | P0 |
