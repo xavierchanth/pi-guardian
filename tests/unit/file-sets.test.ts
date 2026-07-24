@@ -13,6 +13,7 @@ import { FileSharedSourceStore, type PersistedSharedSourceV1 } from "../../packa
 
 const WIP = "a".repeat(32);
 const TARGETS = ["b", "c", "d"].map((letter) => letter.repeat(32));
+const EMPTY_PATCH_HASH = "0".repeat(64);
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-file-sets-"));
@@ -44,7 +45,11 @@ async function fixture() {
   };
   await store.create(record);
   const source = sourceWorkspaceHandle(sourceWorkspaceId("source-1"));
-  const coordinator = new SharedFileSetCoordinator({ store, now: () => "2026-01-01T00:00:01.000Z" });
+  const coordinator = new SharedFileSetCoordinator({
+    store,
+    verifyBaseline: async () => ({ patchHash: EMPTY_PATCH_HASH, changedPaths: [] }),
+    now: () => "2026-01-01T00:00:01.000Z",
+  });
   return { root, workspace, store, source, coordinator };
 }
 

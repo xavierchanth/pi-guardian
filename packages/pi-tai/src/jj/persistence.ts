@@ -32,12 +32,14 @@ export type PersistedFileSetClaimV1 = PersistedClaimBaseV1 & (
       readonly phase: "active";
       readonly acquiredAt: string;
       readonly fingerprints: readonly PersistedPathFingerprintV1[];
+      readonly baselinePatchHash: string;
       readonly mutatedPaths: readonly string[];
     }
   | {
       readonly phase: "checkpointing";
       readonly acquiredAt: string;
       readonly fingerprints: readonly PersistedPathFingerprintV1[];
+      readonly baselinePatchHash: string;
       readonly mutatedPaths: readonly string[];
       readonly operationId: string;
     }
@@ -248,6 +250,9 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
       throw new Error(`${phase} claim requires one fingerprint per path.`);
     }
     for (const fingerprint of value.fingerprints) validateFingerprint(fingerprint);
+    if (!/^[a-f0-9]{64}$/.test(nonempty(value.baselinePatchHash, "claim.baselinePatchHash"))) {
+      throw new Error("Claim baseline patch hash must be SHA-256.");
+    }
     if (!Array.isArray(value.mutatedPaths)) throw new Error(`${phase} claim requires mutatedPaths.`);
     for (const path of value.mutatedPaths) repositoryPath(nonempty(path, "claim mutated path"));
   }

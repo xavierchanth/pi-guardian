@@ -15,6 +15,17 @@ import type {
 } from "../jj/persistence.ts";
 import { childContextId, fileSetClaimId, rootSessionId } from "./ids.ts";
 
+export interface FileSetBaseline {
+  readonly patchHash: string;
+  readonly changedPaths: readonly string[];
+}
+
+export type FileSetBaselineVerifier = (
+  source: SourceWorkspaceHandle,
+  wipChangeId: string,
+  paths: readonly string[],
+) => Promise<FileSetBaseline>;
+
 export interface AcquireFileSetInput {
   readonly rootSessionId: string;
   readonly ownerContextId: string;
@@ -39,6 +50,7 @@ interface Waiter {
 
 export class SharedFileSetCoordinator {
   private readonly store: SharedSourceStore;
+  private readonly verifyBaseline: FileSetBaselineVerifier;
   private readonly waiters = new Map<string, Waiter[]>();
   private readonly active = new Map<string, Set<string>>();
   private readonly initialized = new Set<string>();
@@ -46,8 +58,9 @@ export class SharedFileSetCoordinator {
   private readonly scheduling = new Map<string, Promise<void>>();
   private readonly now: () => string;
 
-  constructor(options: { store: SharedSourceStore; now?: () => string }) {
+  constructor(options: { store: SharedSourceStore; verifyBaseline: FileSetBaselineVerifier; now?: () => string }) {
     this.store = options.store;
+    this.verifyBaseline = options.verifyBaseline;
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
@@ -259,17 +272,32 @@ export class SharedFileSetCoordinator {
         earlierBlocked.push(current);
         continue;
       }
-      const fingerprints = await fingerprintSet(sourceRecord.workspacePath, current.paths);
+      const baseline = await this.verifyBaseline(source, current.wipChangeId, current.paths);
       const at = this.now();
+      if (baseline.changedPaths.length) {
+        const reason = `Claimed paths contain pre-existing unowned WIP changes: ${baseline.changedPaths.join(", ")}`;
+        await this.store.update(source.sourceId, (record) => ({
+          ...record,
+          claims: record.claims.map((claim): PersistedFileSetClaimV1 => claim.claimId === current.claimId && claim.phase === "queued"
+            ? { ...claimBase(claim), phase: "breached", reason, observedAt: at }
+            : claim),
+          updatedAt: at,
+        }));
+        this.removeWaiter(waiter);
+        waiter.reject(new Error(reason));
+        continue;
+      }
+      if (!/^[a-f0-9]{64}$/.test(baseline.patchHash)) throw new Error("File-set baseline verifier returned an invalid patch hash.");
+      const fingerprints = await fingerprintSet(sourceRecord.workspacePath, current.paths);
       await this.store.update(source.sourceId, (record) => ({
         ...record,
         claims: record.claims.map((claim): PersistedFileSetClaimV1 => claim.claimId === current.claimId && claim.phase === "queued"
-          ? { ...claim, phase: "active", acquiredAt: at, fingerprints, mutatedPaths: [] }
+          ? { ...claim, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths: [] }
           : claim),
         updatedAt: at,
       }));
       activeIds.add(current.claimId);
-      activeClaims.push({ ...current, phase: "active", acquiredAt: at, fingerprints, mutatedPaths: [] });
+      activeClaims.push({ ...current, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths: [] });
       this.active.set(source.sourceId, activeIds);
       this.removeWaiter(waiter);
       waiter.resolve(checkpointableFileSetClaim(fileSetClaimId(current.claimId)));

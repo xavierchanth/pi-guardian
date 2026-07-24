@@ -61,8 +61,10 @@ export interface InsertChangeReceipt {
 export interface CheckpointChangeReceipt {
   readonly checkpointedChangeId: ChangeId;
   readonly wipChangeId: ChangeId;
+  readonly claimId: string;
   readonly changedPaths: readonly string[];
   readonly parentChangeIds: readonly ChangeId[];
+  readonly unownedWipPatchHash: string;
   readonly conflicted: boolean;
   readonly operationId: JjOperationId;
 }

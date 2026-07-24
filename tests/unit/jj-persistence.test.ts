@@ -40,6 +40,7 @@ function source(root: string): PersistedSharedSourceV1 {
       queuedAt: "2026-01-01T00:00:00.000Z",
       acquiredAt: "2026-01-01T00:00:01.000Z",
       fingerprints: [{ path: "src/a.ts", digest: DIGEST }],
+      baselinePatchHash: DIGEST,
       mutatedPaths: [],
     }],
     operations: [{
