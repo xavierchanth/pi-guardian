@@ -606,7 +606,8 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     getAllTools: () => TOOL_NAMES.map((name) => ({ name })),
     setActiveTools(next: string[]) { active = [...next]; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
-    sendUserMessage(message: string) { injectedMessages.push(message); },
+    sendUserMessage(message: string) { injectedMessages.push(`user:${message}`); },
+    sendMessage(message: { content: string; display?: boolean }) { injectedMessages.push(`custom:${message.display}:${message.content}`); },
     getThinkingLevel: () => effort,
     setThinkingLevel(next: string) { effort = next; },
     setModel: async (model: { id: string }) => { selectedModel = model.id; return true; },
@@ -789,7 +790,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   assert.deepEqual(waitProgress?.details?.nodes?.map((node) => node.id), ["visible", "active-worker", "active-scout"]);
 
   await handlers.get("agent_settled")?.[0]({}, ctx);
-  assert.match(injectedMessages.at(-1) ?? "", /call wait_for_children repeatedly/);
+  assert.match(injectedMessages.at(-1) ?? "", /^custom:false:.*unresolved or unacknowledged/);
 
   await tools.get("workspace_subagent")?.execute(
     "tool",

@@ -6,6 +6,10 @@ export type SubagentMode = (typeof SUBAGENT_MODES)[number];
 export const PARENT_TOOL_NAMES = [
   "subagent",
   "message_child",
+  "await_child_event",
+  "ack_child_event",
+  "request_child_status",
+  "request_child_summary",
   "wait_for_children",
   "child_status",
   "collect_status",
@@ -15,7 +19,7 @@ export const PARENT_TOOL_NAMES = [
   "integrate_workspace",
   "describe_integrated_changes",
 ] as const;
-export const CHILD_PROTOCOL_TOOL_NAMES = ["report_to_parent", "report_status", "ask_parent"] as const;
+export const CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status", "ask_parent"] as const;
 export const ROLE_TOOL_NAMES = [...PARENT_TOOL_NAMES, ...CHILD_PROTOCOL_TOOL_NAMES] as const;
 
 export type SubagentsCommand =

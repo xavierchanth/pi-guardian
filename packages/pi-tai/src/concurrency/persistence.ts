@@ -9,7 +9,7 @@ export type PersistedExecutionCycleV4 =
   | { phase: "created"; cycleId: string }
   | { phase: "starting"; cycleId: string; startedAt: string }
   | { phase: "running"; cycleId: string; startedAt: string; sessionId: string; sessionFile: string }
-  | { phase: "awaiting_parent"; cycleId: string; questionEventId: string; sessionId: string; sessionFile: string }
+  | { phase: "awaiting_parent"; cycleId: string; questionEventId: string; startedAt: string; sessionId: string; sessionFile: string }
   | { phase: "interrupted"; cycleId: string; reason: string; interruptedAt: string; sessionFile?: string }
   | { phase: "completed" | "blocked" | "failed" | "cancelled"; cycleId: string; terminalEventId: string; finishedAt: string }
   | { phase: "incident"; cycleId?: string; reason: string; stoppedAt: string };

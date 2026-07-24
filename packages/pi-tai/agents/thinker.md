@@ -17,6 +17,10 @@ tools:
   - update_plan
   - subagent
   - message_child
+  - await_child_event
+  - ack_child_event
+  - request_child_status
+  - request_child_summary
   - wait_for_children
   - child_status
   - collect_status

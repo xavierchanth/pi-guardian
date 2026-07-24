@@ -12,7 +12,8 @@ import type { SessionCapabilityController } from "../capabilities/controller.ts"
 import type { PiTaiConfigService } from "../config/register.ts";
 import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
 import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
-import { FileChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
+import { FileChildContextStore, type ChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
+import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
@@ -74,6 +75,8 @@ export interface SubagentDependencies {
   workspace?: WorkspacePort;
   config?: PiTaiConfigService;
   coordinator?: ChildContextCoordinator;
+  contextStore?: ChildContextStore;
+  protocol?: ChildEventProtocol;
   agentDir?: string;
 }
 
@@ -90,13 +93,17 @@ export function registerSubagents(
     launcher: new PiChildProcessLauncher(store),
   });
   const stateRoot = dirname(storeRoot);
+  const contextStore = dependencies.contextStore ?? new FileChildContextStore(join(stateRoot, "context-records"));
   const coordinator = dependencies.coordinator ?? (dependencies.config
     ? new ChildContextCoordinator({
-        store: new FileChildContextStore(join(stateRoot, "context-records")),
+        store: contextStore,
         sessionFactory: new PrivateChildSessionFactory({ config: dependencies.config }),
         stateRoot,
         agentDir,
       })
+    : undefined);
+  const protocol = dependencies.protocol ?? (coordinator
+    ? new ChildEventProtocol({ store: contextStore, coordinator, rootBridge: pi })
     : undefined);
   const capabilities = dependencies.capabilities;
   const workspace = dependencies.workspace ?? new JjWorkspacePort();
@@ -152,6 +159,8 @@ export function registerSubagents(
           store,
           orchestrator,
           coordinator,
+          contextStore,
+          ...(protocol ? { protocol } : {}),
           ...(dependencies.config ? { config: dependencies.config } : {}),
           loadInstructions,
           discoverAgents: discover,
@@ -189,6 +198,13 @@ export function registerSubagents(
       },
     });
     return orchestrator.child(context.contextId);
+  };
+
+  const emitChildEvent = async (input: Parameters<ChildEventProtocol["emit"]>[2]) => {
+    if (!protocol || !childDelegation) return undefined;
+    const context = await contextStore.get(childDelegation.id);
+    if (!context?.execution.cycleId) return undefined;
+    return protocol.emit(childDelegation.id, context.execution.cycleId, input);
   };
 
   const loadCatalog = (ctx: ExtensionContext): AgentCatalog => {
@@ -496,9 +512,14 @@ export function registerSubagents(
       const outstanding = (await orchestrator.children(ctx.sessionManager.getSessionId()))
         .filter((record) => !isResolvedDelegation(record) || !record.parentCollectedAt);
       if (outstanding.length > 0) {
-        pi.sendUserMessage(
-          `You still own ${outstanding.length} unresolved or uncollected direct child result(s). Continue the orchestration loop now: handle questions and call wait_for_children repeatedly until all are resolved and collected.`,
-        );
+        if (typeof pi.sendMessage === "function") {
+          pi.sendMessage({
+            customType: "pi-tai-child-event-v1",
+            content: `You still own ${outstanding.length} unresolved or unacknowledged direct child result(s). Continue the orchestration loop now.`,
+            display: false,
+            details: { kind: "outstanding_children", count: outstanding.length },
+          }, { deliverAs: "steer", triggerTurn: true });
+        }
         return;
       }
     }
@@ -507,7 +528,21 @@ export function registerSubagents(
       childDelegation.id,
       (settledAssistantText ?? "Child agent settled without an explicit report.").slice(0, 16_000),
     );
-    if (isResolvedDelegation(childDelegation)) ctx.shutdown();
+    if (isResolvedDelegation(childDelegation)) {
+      const report = childReport(childDelegation);
+      const context = await contextStore.get(childDelegation.id);
+      if (report && context && !context.events.some((event) => event.kind === "terminal")) {
+        await emitChildEvent({
+          kind: "terminal",
+          outcome: report.outcome,
+          summary: report.summary,
+          ...(report.validation ? { validation: report.validation } : {}),
+          ...(report.changedFiles ? { changedFiles: report.changedFiles } : {}),
+          ...(report.concerns ? { concerns: report.concerns } : {}),
+        });
+      }
+      ctx.shutdown();
+    }
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
@@ -715,8 +750,42 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      if (coordinator?.getRuntime(params.delegationId)) {
+        await coordinator.message(params.delegationId, {
+          customType: "pi-tai-parent-message-v1",
+          content: params.message,
+          details: { kind: "instruction", content: params.message },
+          delivery: params.delivery ?? "steer",
+          triggerTurn: true,
+        });
+        const record = await orchestrator.child(params.delegationId);
+        return result(`Sent ${params.delivery ?? "steer"} message to ${record.id}.`, record);
+      }
       const record = await orchestrator.message(params.delegationId, params.message, params.delivery ?? "steer");
       return result(`Sent ${params.delivery ?? "steer"} message to ${record.id}.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "ack_child_event",
+    label: "Acknowledge Child Event",
+    description: "Acknowledge one delivered child event without reading child history.",
+    parameters: Type.Object({
+      contextId: Type.String(),
+      eventId: Type.String(),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
+      if (!protocol) throw new Error("Typed child event protocol is unavailable.");
+      const event = await protocol.acknowledge(params.contextId, params.eventId);
+      if (event.kind === "terminal") {
+        await store.update(params.contextId, (record) => ({
+          ...record,
+          parentCollectedAt: record.parentCollectedAt ?? new Date().toISOString(),
+        }));
+      }
+      return result(`Acknowledged ${event.kind} event ${event.eventId}.`, event);
     },
   });
 
@@ -752,6 +821,15 @@ export function registerSubagents(
           onUpdate?.(result(text, { nodes: visible.map((record) => ({ id: record.id, parentDelegationId: record.parentDelegationId, phase: record.execution.phase })) }));
         },
       });
+      if (protocol) {
+        for (const record of records) {
+          const context = await contextStore.get(record.id);
+          if (!context || !["completed", "blocked", "failed", "cancelled"].includes(context.execution.phase)) continue;
+          const terminalId = "terminalEventId" in context.execution ? context.execution.terminalEventId : undefined;
+          const terminal = terminalId ? context.events.find((event) => event.eventId === terminalId) : undefined;
+          if (terminal?.delivery.phase === "delivered") await protocol.acknowledge(record.id, terminal.eventId);
+        }
+      }
       if (records.length !== 1 || records[0]?.execution.phase === "awaiting_parent" || records[0]?.usageAttributedAt) {
         return result(formatRecords(records), records.map(compactRecord));
       }
@@ -833,7 +911,14 @@ export function registerSubagents(
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
-      await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      const direct = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      if (protocol && await contextStore.get(params.delegationId)) {
+        await protocol.answerQuestion(params.delegationId, params.questionId, params.response);
+        const record = direct.execution.phase === "awaiting_parent"
+          ? await orchestrator.respond(params.delegationId, direct.execution.question.id, params.response)
+          : direct;
+        return result(`Answered ${params.questionId} for ${record.id}.`, record);
+      }
       const record = await orchestrator.respond(params.delegationId, params.questionId, params.response);
       return result(`Answered ${params.questionId} for ${record.id}.`, record);
     },
@@ -847,9 +932,36 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
+      if (coordinator?.getRuntime(params.delegationId)) {
+        await coordinator.cancel(params.delegationId);
+        const record = await store.update(params.delegationId, (current) => ({
+          ...current,
+          execution: { phase: "cancelled", report: { outcome: "cancelled", summary: "Cancelled by parent.", reportedAt: new Date().toISOString() } },
+        }));
+        await refreshChildWidget(ctx);
+        return result(`Cancelled child ${record.id}; workspace custody was preserved.`, record);
+      }
       const record = await orchestrator.abandon(params.delegationId);
       await refreshChildWidget(ctx);
       return result(`Abandoned child ${record.id}; shared files were left untouched.`, record);
+    },
+  });
+
+  pi.registerTool({
+    name: "message_parent",
+    label: "Message Parent",
+    description: "Push a bounded typed status or incident event to the direct parent.",
+    parameters: Type.Object({
+      kind: StringEnum(["status", "incident"] as const),
+      summary: Type.String({ minLength: 1, maxLength: 4_000 }),
+    }),
+    async execute(_id, params) {
+      if (mode !== "child" || !childDelegation) throw new Error("message_parent requires a delegated child.");
+      const event = params.kind === "status"
+        ? await emitChildEvent({ kind: "status", requestId: randomUUID(), summary: params.summary })
+        : await emitChildEvent({ kind: "incident", reason: params.summary, recoveryDisposition: "retryable" });
+      if (!event) throw new Error("Typed child event protocol is unavailable.");
+      return result(`Pushed ${params.kind} event ${event.eventId}.`, event);
     },
   });
 
@@ -871,6 +983,7 @@ export function registerSubagents(
     async execute(_id, params) {
       if (mode !== "child" || !childDelegation) throw new Error("report_status requires a delegated child.");
       childDelegation = await orchestrator.reportStatus(childDelegation.id, params);
+      await emitChildEvent({ kind: "status", ...params });
       return result(`Reported status for ${params.requestId}; continue the prior task.`, { requestId: params.requestId });
     },
   });
@@ -892,6 +1005,12 @@ export function registerSubagents(
       }
       const record = await orchestrator.askParent(childDelegation.id, params);
       childDelegation = record;
+      await emitChildEvent({
+        kind: "question",
+        question: params.question,
+        ...(params.options ? { options: params.options } : {}),
+        ...(params.recommendation ? { recommendation: params.recommendation } : {}),
+      });
       return result(
         `Waiting for parent response to ${record.execution.phase === "awaiting_parent" ? record.execution.question.id : "question"}.`,
         record,
@@ -920,6 +1039,7 @@ export function registerSubagents(
       if (outstanding.length > 0) throw new Error(`Resolve and collect ${outstanding.length} child delegation(s) before reporting.`);
       const record = await orchestrator.report(childDelegation.id, params);
       childDelegation = record;
+      await emitChildEvent({ kind: "terminal", ...params });
       ctx.shutdown();
       return { ...result(`Reported ${record.execution.phase} to parent.`, record), terminate: true };
     },
