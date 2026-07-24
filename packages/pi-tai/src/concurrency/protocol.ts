@@ -23,6 +23,7 @@ export interface ChildEventProtocolOptions {
   rootBridge: ExtensionAPI;
   now?: () => string;
   id?: () => string;
+  onDelivered?: (event: PersistedChildEventV4) => void;
 }
 
 export class ChildEventProtocol {
@@ -31,6 +32,7 @@ export class ChildEventProtocol {
   private readonly rootBridge: ExtensionAPI;
   private readonly now: () => string;
   private readonly id: () => string;
+  private readonly onDelivered?: (event: PersistedChildEventV4) => void;
 
   constructor(options: ChildEventProtocolOptions) {
     this.store = options.store;
@@ -38,6 +40,7 @@ export class ChildEventProtocol {
     this.rootBridge = options.rootBridge;
     this.now = options.now ?? (() => new Date().toISOString());
     this.id = options.id ?? randomUUID;
+    this.onDelivered = options.onDelivered;
   }
 
   async emit(contextId: string, cycleId: string, input: ChildEventInput): Promise<PersistedChildEventV4> {
@@ -165,13 +168,15 @@ export class ChildEventProtocol {
       }, { deliverAs: "steer", triggerTurn: true });
     }
     const deliveredAt = this.now();
-    await this.store.update(context.contextId, (current) => ({
+    const updated = await this.store.update(context.contextId, (current) => ({
       ...current,
       events: current.events.map((candidate) => candidate.eventId === event.eventId && candidate.delivery.phase === "persisted"
         ? { ...candidate, delivery: { phase: "delivered", createdAt: candidate.delivery.createdAt, deliveredAt } }
         : candidate),
       updatedAt: deliveredAt,
     }));
+    const delivered = updated.events.find((candidate) => candidate.eventId === event.eventId);
+    if (delivered) this.onDelivered?.(delivered);
   }
 
   private async requireContext(contextId: string, cycleId?: string): Promise<PersistedChildContextV4> {

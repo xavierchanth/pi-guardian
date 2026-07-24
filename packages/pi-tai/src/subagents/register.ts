@@ -14,6 +14,7 @@ import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
 import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
 import { FileChildContextStore, type ChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
 import { ChildEventProtocol } from "../concurrency/protocol.ts";
+import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import type { WorkspaceAttachment, WorkspacePort } from "../workspaces/domain.ts";
 import { JjWorkspacePort } from "../workspaces/jj.ts";
 import {
@@ -77,6 +78,7 @@ export interface SubagentDependencies {
   coordinator?: ChildContextCoordinator;
   contextStore?: ChildContextStore;
   protocol?: ChildEventProtocol;
+  waits?: ChildEventWaitRegistry;
   agentDir?: string;
 }
 
@@ -102,8 +104,9 @@ export function registerSubagents(
         agentDir,
       })
     : undefined);
+  const waits = dependencies.waits ?? new ChildEventWaitRegistry();
   const protocol = dependencies.protocol ?? (coordinator
-    ? new ChildEventProtocol({ store: contextStore, coordinator, rootBridge: pi })
+    ? new ChildEventProtocol({ store: contextStore, coordinator, rootBridge: pi, onDelivered: (event) => waits.notify(event) })
     : undefined);
   const capabilities = dependencies.capabilities;
   const workspace = dependencies.workspace ?? new JjWorkspacePort();
@@ -161,6 +164,7 @@ export function registerSubagents(
           coordinator,
           contextStore,
           ...(protocol ? { protocol } : {}),
+          waits,
           ...(dependencies.config ? { config: dependencies.config } : {}),
           loadInstructions,
           discoverAgents: discover,
@@ -428,6 +432,11 @@ export function registerSubagents(
     );
   };
 
+  pi.on("input", (_event, ctx) => {
+    const callerId = childDelegation?.id ?? ctx.sessionManager.getSessionId();
+    waits.interrupt(callerId);
+  });
+
   pi.on("session_start", async (event, ctx) => {
     const persisted = reconstructSubagentState(ctx.sessionManager.getEntries());
     const fresh = event.reason === "new" || event.reason === "fork";
@@ -546,6 +555,7 @@ export function registerSubagents(
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
+    waits.cancel(childDelegation?.id ?? ctx.sessionManager.getSessionId());
     stopChildWidget(ctx);
     if (event.reason === "quit" && mode === "child" && childDelegation?.id) {
       await orchestrator.cleanupChildControl(childDelegation.id);
@@ -790,6 +800,42 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "await_child_event",
+    label: "Await Child Event",
+    description: "Suspend without polling until one direct-child event, cancellation, timeout, or interactive user input.",
+    parameters: Type.Object({
+      contextIds: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
+      kinds: Type.Optional(Type.Array(StringEnum(["question", "status", "terminal", "incident"] as const), { maxItems: 4 })),
+      timeoutMs: Type.Optional(Type.Number({ minimum: 1, maximum: 300_000 })),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      const direct = await orchestrator.children(ctx.sessionManager.getSessionId());
+      const selectedIds = params.contextIds ?? direct.map((record) => record.id);
+      for (const id of selectedIds) await requireDirectChild(orchestrator, id, ctx.sessionManager.getSessionId());
+      const kinds = new Set<"question" | "status" | "terminal" | "incident">(
+        params.kinds ?? ["question", "terminal", "incident"],
+      );
+      for (const contextId of selectedIds) {
+        const context = await contextStore.get(contextId);
+        const existing = context?.events.find((event) => event.delivery.phase === "delivered" && kinds.has(event.kind));
+        if (existing) return result(`Received ${existing.kind} event ${existing.eventId} from ${contextId}.`, existing);
+      }
+      const callerId = childDelegation?.id ?? ctx.sessionManager.getSessionId();
+      const waited = await waits.wait({
+        callerId,
+        contextIds: selectedIds,
+        kinds: [...kinds],
+        signal,
+        ...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}),
+      });
+      return waited.reason === "event"
+        ? result(`Received ${waited.event.kind} event ${waited.event.eventId} from ${waited.event.contextId}.`, waited.event)
+        : result(`Child-event wait ended: ${waited.reason}.`, waited);
+    },
+  });
+
+  pi.registerTool({
     name: "wait_for_children",
     label: "Wait for Children",
     description: "Wait-any for the next direct-child completion or question; call repeatedly to collect all delegated results.",
@@ -883,6 +929,52 @@ export function registerSubagents(
         timedOutIds: collected.timedOutIds,
         records: selected.map(compactRecord),
       });
+    },
+  });
+
+  pi.registerTool({
+    name: "request_child_status",
+    label: "Request Child Status",
+    description: "Request one fresh bounded semantic status turn from a direct child without reading its history.",
+    parameters: Type.Object({ contextId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
+      if (!coordinator?.getRuntime(params.contextId)) throw new Error("Child has no active SDK runtime.");
+      const requestId = randomUUID();
+      await coordinator.message(params.contextId, {
+        customType: "pi-tai-parent-message-v1",
+        content: `Provide bounded status for request ${requestId}, then continue your prior work.`,
+        details: { kind: "status_request", requestId },
+        delivery: "steer",
+        triggerTurn: true,
+      });
+      return result(`Requested status ${requestId} from ${params.contextId}.`, { requestId, contextId: params.contextId });
+    },
+  });
+
+  pi.registerTool({
+    name: "request_child_summary",
+    label: "Request Child Summary",
+    description: "Request a focused bounded child-authored summary without reading child history.",
+    parameters: Type.Object({
+      contextId: Type.String(),
+      focus: Type.String({ minLength: 1, maxLength: 2_000 }),
+      questions: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), { maxItems: 8 })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
+      if (!coordinator?.getRuntime(params.contextId)) throw new Error("Child has no active SDK runtime.");
+      const requestId = randomUUID();
+      await coordinator.message(params.contextId, {
+        customType: "pi-tai-parent-message-v1",
+        content: `Provide a bounded status summary focused on: ${params.focus}`,
+        details: { kind: "status_request", requestId, focus: params.focus, questions: params.questions ?? [] },
+        delivery: "steer",
+        triggerTurn: true,
+      });
+      return result(`Requested focused summary ${requestId} from ${params.contextId}.`, { requestId, contextId: params.contextId });
     },
   });
 
