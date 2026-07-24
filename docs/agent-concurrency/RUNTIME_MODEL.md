@@ -45,7 +45,9 @@ A child context is identified by a concurrency-owned context ID and linked to:
 - current lifecycle and resume point; and
 - cumulative usage ledger.
 
-The coordinator may use Pi `SessionManager` internally, but child journals live in a private Pi-Tai state directory rather than the normal project session directory. They are not listed by `/resume`, `/fork`, `/tree`, or other user session navigation.
+The coordinator is root-scoped: separate visible root sessions never share context trees, waits, event queues, or usage attribution. M1 imposes no Pi-Tai active-turn cap; provider behavior and file/workspace ownership provide backpressure until telemetry justifies a scheduler.
+
+The coordinator uses file-backed Pi `SessionManager` instances internally, but child journals live in context-specific private Pi-Tai state directories rather than the normal project session directory. They are not listed by `/resume`, `/fork`, `/tree`, or other user session navigation. Journals remain while work is resumable, blocked, incidented, or has unresolved workspace custody. Clean objective closure deletes raw journals only after bounded reports, receipts, events, and usage are durable.
 
 ## Child-to-parent events
 
@@ -60,7 +62,7 @@ type ChildEvent =
   | { kind: "lifecycle"; phase: "stalled" | "resumed" | "cancelled"; summary: string };
 ```
 
-The coordinator injects the event into the parent as a custom message such as `pi-tai-child-event`, never as a user message. The visible TUI renderer identifies the child role and ID.
+The coordinator injects the event into the parent as a hidden custom message such as `pi-tai-child-event` with `display: false`, never as a user message. Questions, terminal reports, and incidents are rendered separately from structured coordinator state; status and continuation traffic remains quiet.
 
 Delivery policy:
 
@@ -69,7 +71,8 @@ Delivery policy:
 - if the parent is streaming, delivery occurs at Pi's safe steering boundary after the current assistant turn's tool calls;
 - routine progress is persisted but not injected;
 - status is injected only in response to a request; and
-- simultaneous events are coalesced into one bounded envelope when possible.
+- simultaneous status events may be coalesced before delivery under an explicit supersession record; question/terminal identities are never merged; and
+- each child execution cycle permits at most one unresolved blocking question.
 
 This lets a child finish while the parent is working and be steered into the parent's next model turn without impersonating the user.
 
@@ -104,7 +107,7 @@ Therefore:
 - user message while awaiting: the input hook immediately resolves/cancels only the active await before Pi's normal steering path, so the message is not trapped behind a wait that depends on a child;
 - final completion: a deterministic gate still requires every direct child to be terminal and acknowledged.
 
-“Acknowledged” replaces transcript collection. The parent acknowledges the bounded child-authored report and usage receipt; it never imports the child's conversation history.
+Event lifecycle is `created → persisted → delivered → acknowledged`. Delivery means the same semantic event ID was durably appended to the parent journal; append failure remains retryable without minting another event. “Acknowledged” replaces transcript collection. Terminal settlement requires explicit parent acknowledgement of the delivered bounded report; it never imports the child's conversation history.
 
 ## Context boundary
 
@@ -161,13 +164,18 @@ When the root Pi process restarts, all in-memory child `AgentSession` objects ar
 
 1. loads durable child-context records linked to the root session;
 2. reconciles workspace heads, tracked Change IDs, and persisted JJ operation receipts;
-3. marks prior file/workspace lock claims interrupted and starts with empty in-memory lock queues;
-4. recreates every child that was `running`, `starting`, or safely `suspended`;
-5. restores each managed context journal, model, tools, cwd, compaction state, and resume point;
-6. sends a custom continuation message to each recreated child, which must reacquire its file set or workspace write token before writing; and
-7. injects one bounded aggregate lifecycle event into the root.
+3. marks prior file/workspace lock claims interrupted and starts with empty in-memory lock queues and no waiters;
+4. traverses the durable tree post-order, reconciling deepest descendants before their parents;
+5. recreates only quiescent contexts that were `running`, `starting`, or safely `suspended`;
+6. restores each managed context journal, model, tools, cwd, compaction state, and resume point;
+7. persists descendant dispositions before sending each recreated parent a quiet hidden continuation message; and
+8. injects one bounded aggregate lifecycle event into the root.
 
-Terminal, cancelled, `attention_required`, and parent-question states are not blindly restarted. An unanswered question is re-presented to the parent. An acknowledged terminal child remains terminal.
+Terminal, cancelled, `attention_required`, and mutation-stopped states are not blindly restarted. An unanswered question is re-presented to the parent without recreating a second question. An acknowledged terminal child remains terminal.
+
+### Cancellation
+
+Aborting or steering the visible root turn does not cancel children. Explicit `cancel_child` aborts and settles only the selected execution cycle, preserving its durable context, reports, descendants unless recursive cancellation was explicitly requested, and independent workspace custody. Cancelled cycles are terminal and are not recreated automatically by `/continue`; an intentional retry creates a new linked cycle.
 
 ### Child crash
 
@@ -210,7 +218,7 @@ Every child SDK context uses Pi-Tai's automatic compaction policy independently,
 
 ### `/continue`
 
-`/continue` is a visible prompt template like `/parallelize`. Its first action is `reconcile_children`; it then resumes the root task and uses `await_child_event` only when no independent work remains. Reconciliation is recursive for delegating children. It does not relaunch terminal work or bypass workspace incidents.
+`/continue` is a visible prompt template like `/parallelize`. Its first action is deterministic `reconcile_children`; it then resumes the root task and uses `await_child_event` only when no independent work remains. Reconciliation is post-order for delegating children. The coordinator sends recreated contexts quiet hidden typed continuation messages, not user-role prompts. It does not relaunch terminal/cancelled work or bypass workspace incidents.
 
 ## Usage and cost accounting
 
@@ -230,10 +238,10 @@ Every child assistant message contributes intrinsic usage exactly once. Nested d
 
 Pi currently includes assistant-message usage directly and nested tool-result `usage` in native session totals, but nested tool usage is grouped as `Tools/summaries`, not by the child model. The target integration should therefore:
 
-1. preserve the detailed concurrency ledger as the source of model/role/context attribution;
+1. treat the immutable detailed concurrency ledger as authoritative for model/role/context attribution;
 2. expose one combined total in the root UI and session inspection;
-3. attach child usage to exactly one parent acknowledgement/tool receipt when possible so native Pi totals remain accurate; and
-4. avoid adding the same usage through both child completion and later acknowledgement.
+3. keep event delivery and acknowledgement from creating usage entries; and
+4. reconcile native Pi totals where possible without copying child totals into ancestor intrinsic entries.
 
 If Pi gains an attributable custom-message usage API, child event delivery can carry the receipt directly. Until then, detailed per-model child attribution remains a Pi-Tai ledger layered beside Pi's native total.
 

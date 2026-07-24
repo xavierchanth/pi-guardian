@@ -6,19 +6,22 @@ The [blocking policy](BLOCKING_POLICY.md) controls whether a detected condition 
 
 ### Runtime and context
 
-- There is one user-visible root Pi session and one root thinker.
+- Each user-visible root Pi session owns one thinker and one isolated coordinator; separate roots never share child trees, waits, events, or usage attribution.
 - Every child is a private in-process Pi SDK context with exactly one direct parent.
 - Child contexts are not user-selectable Pi sessions and never appear in `/resume`, `/fork`, or `/tree`.
 - No child inherits parent conversation history.
-- Parent/child protocol uses typed custom messages, never user messages.
+- Parent/child protocol uses hidden (`display: false`) typed custom messages, never user messages; visible UI derives from structured event state.
 - Parents receive bounded child-authored reports, never child histories or raw tool streams.
 - Questions and terminal reports are pushed; awaiting is an optional token-free barrier.
 - A task packet, role snapshot, assigned shared Change ID or workspace head, and active coordination token are the child's complete authority.
 - A delegating context cannot terminally report while a direct child is unresolved or unacknowledged.
-- Terminal report and acknowledgement each occur at most once per execution cycle.
+- Event delivery and acknowledgement are distinct: delivery is durable custom-message append; terminal settlement additionally requires explicit parent acknowledgement.
+- Terminal report and acknowledgement each occur at most once per execution cycle; one unresolved blocking question is allowed per cycle.
 - Status is correlated and nonterminal.
-- `/continue` recursively reconciles resumable descendants without relaunching terminal or mutation-stopped work.
-- A replacement child writer cannot start until the prior writer and its mutation operations are proved quiescent.
+- Root-turn abort does not cancel children; explicit child cancellation terminates only the selected cycle unless recursive cancellation is requested, and cancelled cycles do not auto-resume.
+- `/continue` reconciles resumable descendants post-order without relaunching terminal, cancelled, or mutation-stopped work.
+- A replacement child writer cannot start until the prior SDK or legacy subprocess writer and its mutation operations are proved quiescent.
+- M1 imposes no Pi-Tai active-turn cap; adding a scheduler requires a later evidence-backed policy decision.
 
 ### Writers and queues
 
@@ -88,6 +91,8 @@ The [blocking policy](BLOCKING_POLICY.md) controls whether a detected condition 
 - Parent-model projections contain only bounded reports and lifecycle metadata.
 - User UI may show richer structured diagnostics, but it does not provide a way to enter the child context.
 - Hidden reasoning is never projected.
+- The immutable Pi-Tai side ledger is authoritative for child usage attribution; delivery and acknowledgement create no usage entries.
+- Raw private journals are deleted only after clean objective closure and durable bounded reports/events/receipts/usage; blocked, incidented, or unresolved workspace custody retains them.
 - Intrinsic usage is recorded once per assistant message/execution cycle.
 - Root totals preserve provider/model, role, child-context, and execution-cycle attribution.
 - Cleanup snapshots usage before deleting disposable runtime artifacts and validates canonical containment/symlinks.

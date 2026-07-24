@@ -152,9 +152,9 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Depends on:** A0, A2
 
-- Own child SDK contexts, parent links, private journals, cancellation, heartbeats, and execution cycles.
-- Replace PID/FIFO identity internally while retaining compatibility migration.
-- Expose typed create/get/list operations.
+- Own root-scoped child SDK contexts, parent links, private file-backed journals, cancellation, heartbeats, and execution cycles.
+- Cut every new launch to in-process SDK contexts; retain PID/FIFO records only for inspect/cancel/recovery compatibility.
+- Expose typed create/get/list operations and exact clean-closure journal retention.
 
 **Exit:** nested private contexts survive coordinator-controlled disposal/recreation in tests.
 
@@ -162,10 +162,10 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Depends on:** B0
 
-- Implement typed child events and parent messages as custom Pi messages.
-- Push terminal/question events at steer boundaries and trigger idle parents.
-- Add acknowledgement and bounded report caps.
-- Remove model-facing child-history projection.
+- Implement typed child events and parent messages as hidden (`display: false`) custom Pi messages.
+- Persist before delivery; push terminal/question events at steer boundaries and trigger idle parents.
+- Add delivered/acknowledged lifecycle, one unresolved question per cycle, and bounded report caps.
+- Project visible UI from structured events and remove model-facing child-history projection.
 
 **Exit:** active and idle root delivery, event coalescing, exactly-once acknowledgement, and no-history tests pass.
 
@@ -183,10 +183,10 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 
 **Depends on:** B1
 
-- Record intrinsic usage by model, role, context, and execution cycle.
-- Attach usage once at event acknowledgement without double counting descendants.
+- Record immutable intrinsic usage by model, role, context, and execution cycle; the side ledger is authoritative.
+- Keep delivery/acknowledgement from adding usage and never copy descendant totals into ancestors.
 - Apply Pi-Tai auto-compaction settings independently to children.
-- Restore compacted private child journals.
+- Restore compacted private journals and delete raw journals only after proved clean objective closure.
 
 **Exit:** mixed-model nested run totals reconcile exactly and compaction does not leak child history to root.
 
@@ -195,12 +195,15 @@ M1, M2, and the early parts of M3 can progress in parallel after M0.
 **Depends on:** B2, B3
 
 - Make `/continue` a visible prompt template that calls `reconcile_children` first.
-- Restore resumable context trees recursively.
-- Clear live lock ownership and queue positions on restart; mark old claims interrupted.
+- Restore resumable context trees post-order, descendants before parents, using quiet hidden continuation messages.
+- Exclude terminal/cancelled/mutation-stopped cycles and preserve one unanswered question.
+- Clear live waits, lock ownership, and queue positions on restart; mark old claims interrupted.
 - Classify interrupted tool calls as safe reissue, already complete, or unknown.
-- Prove old writer quiescence before replacement.
+- Prove old SDK/legacy subprocess writer quiescence before replacement.
 
 **Exit:** restart during nested work resumes safely, reacquires locks, and never duplicates a writer.
+
+The complete accepted sub-slice and cutover plan is in [M1_IMPLEMENTATION_PLAN.md](M1_IMPLEMENTATION_PLAN.md).
 
 ### C0 — Deterministic JJ command/receipt kernel
 

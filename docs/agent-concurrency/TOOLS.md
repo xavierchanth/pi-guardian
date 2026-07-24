@@ -433,7 +433,7 @@ Returns bounded root/subtree usage without reading histories:
 - child-context and execution-cycle breakdown;
 - unattributed/missing telemetry warnings.
 
-The ledger sums immutable intrinsic usage events once. Parent acknowledgement marks attribution but does not duplicate descendant usage.
+The authoritative side ledger sums immutable intrinsic usage events once. Parent delivery/acknowledgement changes event state only and creates no usage entry; native Pi totals are reconciled separately where possible.
 
 ## Tools intentionally absent
 

@@ -152,10 +152,13 @@ Out-of-scope existing findings never trigger automatic repair unless they create
 | Child finishes while parent is active | Continue | Push a bounded custom child event at Pi's steer boundary |
 | Parent has no independent work | Wait | `await_child_event` sleeps token-free; push wakes it |
 | User talks while parent awaits | Continue immediately | Resolve only `await_child_event` before normal Pi steering; children keep running |
+| Root turn is aborted/cancelled | Continue child work | Root-turn control does not imply child cancellation |
+| `cancel_child` targets one active cycle | Cancel that cycle | Preserve context/workspace custody; do not auto-resume cancelled cycle |
+| Recursive child cancellation explicitly requested | Cancel selected subtree post-order | Do not affect unrelated siblings |
 | Child status metadata requested | Continue | Read coordinator state only |
 | Fresh semantic status requested | Continue | Ask child for bounded summary; resume prior activity |
 | Child transcript requested by parent model | Stop that access | Request a summary instead; preserve context boundary |
-| Root process restarted | Refresh | Clear live lock ownership/queue positions, recreate resumable contexts, and require reacquisition |
+| Root process restarted | Refresh | Clear live waits/lock ownership/queue positions, reconcile descendants post-order, recreate resumable contexts, and require reacquisition |
 | Child SDK run crashed | Refresh/retry | Start linked replacement cycle after proving old mutation quiescent |
 | Child appears quiet | Continue | Quiet is not hung; request status after role-specific deadline |
 | Child is unresponsive but abort settles | Refresh/retry | Recreate one writer from durable state |
@@ -198,7 +201,9 @@ Out-of-scope existing findings never trigger automatic repair unless they create
 | Reviewer finds minor or out-of-scope issue | Warn/defer | Surface in final report |
 | Verification fails for unrelated flaky check | Retry boundedly/warn | Distinguish infrastructure from implementation failure |
 | Verification proves requested behavior wrong | Repair or ask | Apply loop budget and severity policy |
-| Usage log missing but lifecycle is recoverable | Continue with accounting warning | Do not block code work solely for cost telemetry |
+| Usage log missing but lifecycle is recoverable | Continue with accounting warning | Side ledger remains authoritative; do not fabricate data or block code work solely for telemetry |
+| Clean objective closes with all receipts durable | Cleanup | Delete exact raw private journals; retain bounded reports/events/receipts/usage |
+| Child is blocked/incidented or workspace custody unresolved | Retain | Private journal remains recovery evidence |
 
 ## Conditions that remain hard mutation stops
 

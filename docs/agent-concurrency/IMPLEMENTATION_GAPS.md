@@ -27,7 +27,7 @@
 | Child compaction | Subprocess child inherits current CLI behavior indirectly | Every child SDK context uses Pi-Tai auto-compaction and restores compacted state | P1 |
 | Hang recovery | Process liveness is the main signal | Heartbeat/status/abort/quiescence proof before a linked replacement cycle | P0 |
 | Usage | Recursive intrinsic totals and once-only attribution exist | Root ledger additionally groups by provider/model, role, context, and execution cycle | P1 |
-| Native Pi totals | Child usage is returned through current tool results | Async push needs acknowledgement receipt or SDK support for attributable custom messages | P1 |
+| Native Pi totals | Child usage is returned through current tool results | Immutable side ledger is authoritative; reconcile native totals where possible without adding usage at delivery/acknowledgement | P1 |
 | Reviewer | No packaged reviewer role | Read-only reviewer with task-plan snapshot and exact inclusive Change-ID inspection | P0 |
 | Review loop | Thinker reviews ad hoc; conflicts are fail-stop | Structured severity/relation, one automatic repair cycle, focused re-review | P0 |
 | Planner routing | Planner can run as normal shared-cwd child | Planner is workspace-only | P0 |
@@ -71,7 +71,7 @@ Current `collect_status`, `respond_to_child`, `report_status`, `report_to_parent
 
 ## Implementation sequence
 
-The dependency-ordered milestones and parallelizable slices are defined in [IMPLEMENTATION_DAG.md](IMPLEMENTATION_DAG.md). It supersedes a linear C0–C5 sequence so runtime, shared-JJ, workspace-JJ, review, and testing foundations can progress independently where their dependencies permit.
+The dependency-ordered milestones and parallelizable slices are defined in [IMPLEMENTATION_DAG.md](IMPLEMENTATION_DAG.md). It supersedes a linear C0–C5 sequence so runtime, shared-JJ, workspace-JJ, review, and testing foundations can progress independently where their dependencies permit. The accepted B0–B4 cutover details are in [M1_IMPLEMENTATION_PLAN.md](M1_IMPLEMENTATION_PLAN.md).
 
 ## Required scenario suites
 

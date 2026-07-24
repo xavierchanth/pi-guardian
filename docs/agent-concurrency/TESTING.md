@@ -202,11 +202,14 @@ A separate handler contract test proves that the model-visible schema contains o
 - Interactive user input during normal root work preserves Pi's default steer/follow-up behavior.
 - Specific child-summary requests return bounded answers without history access.
 - Child auto-compaction at configured threshold persists and resumes.
-- Root restart clears lock ownership, marks prior claims interrupted, and requires reacquisition.
+- Root-turn abort leaves children running; explicit cancellation terminates only selected cycles/subtrees and preserves workspace custody.
+- Root restart clears waits/lock ownership, marks prior claims interrupted, and requires reacquisition.
 - Read-only interrupted tools may reissue; mutating tools reconcile receipts first.
-- `/continue` recursively recreates resumable descendants but not terminal/incident states.
-- Old and replacement writers are never simultaneously active.
-- Usage is counted exactly once and broken down by model, role, context, and execution cycle.
+- `/continue` reconciles post-order and recreates resumable descendants but not terminal/cancelled/incident states.
+- Old SDK or legacy subprocess writers and replacements are never simultaneously active.
+- Usage side-ledger entries are counted exactly once by model, role, context, and execution cycle; delivery/acknowledgement adds none.
+- Clean objective closure removes only exact raw private journals after durable reports/receipts/usage; incidents retain journals.
+- Separate root coordinators cannot observe each other's contexts, waits, events, or usage.
 
 ## Policy eval benchmark without JJ
 
