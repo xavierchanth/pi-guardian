@@ -29,13 +29,21 @@ export type JjOperationResult<Receipt> =
 export interface JjStatus {
   readonly sourceChangeId: ChangeId;
   readonly operationId: JjOperationId;
+  readonly description: string;
+  readonly empty: boolean;
   readonly conflicted: boolean;
+  readonly immutable: boolean;
+  readonly parentChangeIds: readonly ChangeId[];
+  readonly trackedWipChangeId?: ChangeId;
+  readonly privateProtection: "present" | "missing";
 }
 
 export interface EnsureWipReceipt {
   readonly wipChangeId: ChangeId;
   readonly operationId: JjOperationId;
   readonly disposition: "existing" | "described_existing" | "created";
+  readonly description: ChangeDescription;
+  readonly privateProtection: "present" | "missing";
 }
 
 export interface InsertChangeReceipt {
@@ -44,6 +52,9 @@ export interface InsertChangeReceipt {
   readonly owner: ChildContextId;
   readonly description: ChangeDescription;
   readonly parentChangeIds: readonly ChangeId[];
+  readonly priorWipParentChangeIds: readonly ChangeId[];
+  readonly wipParentChangeIds: readonly ChangeId[];
+  readonly wipPatchHash: string;
   readonly operationId: JjOperationId;
 }
 
