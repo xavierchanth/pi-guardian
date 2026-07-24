@@ -50,12 +50,16 @@ export interface PrivateChildSessionHandle {
   dispose(): void;
 }
 
+export interface PrivateChildSessionFactoryPort {
+  create(request: PrivateChildSessionRequest): Promise<PrivateChildSessionHandle>;
+}
+
 export interface PrivateChildSessionFactoryDependencies {
   config: PiTaiConfigService;
   createSession?: typeof createAgentSession;
 }
 
-export class PrivateChildSessionFactory {
+export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPort {
   private readonly config: PiTaiConfigService;
   private readonly createSession: typeof createAgentSession;
 
