@@ -23,7 +23,7 @@ import {
 import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
-import { registerSubagents } from "./src/subagents/register.ts";
+import { registerSubagents, type SubagentRuntimeMode } from "./src/subagents/register.ts";
 import { registerWebTools } from "./src/web/register.ts";
 import type { HostServiceClientPort } from "./src/concurrency/host-repository.ts";
 import {
@@ -32,6 +32,7 @@ import {
 } from "./src/work-context/persistence.ts";
 
 export interface PiTaiRuntime {
+  mode: Exclude<SubagentRuntimeMode, "legacy-child-process">;
   config: PiTaiConfigService;
   workContext: WorkContextStore;
   titleGenerator: TitleGenerator;
@@ -83,6 +84,7 @@ const productionRegistrars: PiTaiRegistrars = {
   },
   subagents: (pi, runtime) => {
     registerSubagents(pi, {
+      runtime: runtime.mode,
       capabilities: runtime.capabilities,
       config: runtime.config,
       agentDir: runtime.agentDir,
@@ -109,6 +111,7 @@ const productionRegistrars: PiTaiRegistrars = {
 
 function createProductionRuntime(): PiTaiRuntime {
   return {
+    mode: "pi-cli",
     config: createPiTaiConfigService(),
     workContext: createPiSessionWorkContextStore(),
     titleGenerator: generateModelTitle,

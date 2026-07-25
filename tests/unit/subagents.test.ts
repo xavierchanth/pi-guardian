@@ -23,7 +23,10 @@ import {
   managedChildRuntimePaths,
 } from "../../packages/pi-tai/src/subagents/launcher.ts";
 import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
-import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
+import {
+  registerSubagents,
+  usesPrivateSdkSubagentContexts,
+} from "../../packages/pi-tai/src/subagents/register.ts";
 import {
   FileDelegationStore,
   MemoryDelegationStore,
@@ -48,6 +51,12 @@ const TOOL_NAMES = [
   "read", "write", "edit", "grep", "find", "ls", "bash", "update_plan",
   ...PARENT_TOOL_NAMES, "report_to_parent", "ask_parent",
 ];
+
+test("runtime mode explicitly selects private SDK or legacy child-process composition", () => {
+  assert.equal(usesPrivateSdkSubagentContexts("pi-cli"), true);
+  assert.equal(usesPrivateSdkSubagentContexts("host-worker"), true);
+  assert.equal(usesPrivateSdkSubagentContexts("legacy-child-process"), false);
+});
 
 test("subagent mode tools are exact and unified command parsing remains stable", () => {
   assert.deepEqual(parseSubagentsCommand(""), { action: "toggle" });
@@ -634,6 +643,7 @@ test("abandon_child reports pending cancellation instead of hanging the public t
     all: async () => [child],
   } as unknown as SubagentOrchestrator;
   registerSubagents(pi, {
+    runtime: "legacy-child-process",
     store, orchestrator, coordinator, contextStore: new FileChildContextStore(join(root, "contexts")), agentDir: root,
     discoverAgents: () => agentCatalog(), loadInstructions: () => ({ system: "" }),
   });
@@ -667,6 +677,7 @@ test("acknowledging a terminal child attributes its full tree usage exactly once
     setActiveTools() {}, appendEntry() {}, sendMessage() {}, getThinkingLevel: () => "low", setThinkingLevel() {}, setModel: async () => true,
   } as unknown as ExtensionAPI;
   registerSubagents(pi, {
+    runtime: "legacy-child-process",
     store,
     orchestrator: {
       children: async () => [child],
@@ -761,6 +772,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   capabilities.bindTools({ getActiveTools: () => active, setActiveTools: (next) => { active = next; } });
   const catalog = agentCatalog();
   registerSubagents(pi, {
+    runtime: "legacy-child-process",
     store: {} as DelegationStore,
     orchestrator: {
       children: async () => childRecords,

@@ -54,6 +54,7 @@ test("composition root registers every feature once in order", async () => {
       },
     },
     () => ({
+      mode: "pi-cli",
       config: createPiTaiConfigService(),
       workContext: createPiSessionWorkContextStore(),
       titleGenerator: async () => "test title",

@@ -368,7 +368,7 @@ projection belong to a separate client adapter and must not leak Pi dependencies
 | # | Checkpoint | Risk | Depends on | Acceptance boundary |
 |---|---|---|---|---|
 | 1 | Align the roadmap and initiative scopes with this plan | None | — | I01–I04 and I10 consistently describe ACP, the Pi client feasibility gate, and Host policy authority |
-| 2 | Replace the implicit optional-config runtime discriminator (P3) | Low | — | Runtime mode is explicit and tests cover both `pi-cli` and `host-worker` wiring |
+| 2 | **[Complete]** Replace the implicit optional-config runtime discriminator (P3) | Low | — | Runtime mode is explicit and tests cover `pi-cli`, `host-worker`, and the named legacy child-process compatibility path |
 | 3 | Split `SessionPolicy`, `HostMachineConfig`, and client-local preference types while preserving the current loader | Low | 1 | Existing behavior is unchanged; Pi themes and notifications are client-only |
 | 4 | Add provenance, digests, scope, and privileged tags; reject privileged project values | Low | 3 | Every resolved policy field is explainable and project privilege tests fail closed |
 | 5 | Implement the pure Rust resolver and generated TypeScript bindings | Medium | 4 | Fixture/differential tests agree with preserved loader behavior; invalid values warn rather than abort |
@@ -463,8 +463,10 @@ production runtime" is an invisible coupling that neither the type system nor th
 explains. Anyone wiring `config` for an unrelated reason silently switches persistence and
 launch strategy.
 
-Replace with an explicit `runtime: "pi-cli" | "host-worker"` field. One-hour fix; removes a
-landmine that will otherwise be tripped during steps 3–6.
+**[Complete]** Runtime composition is now explicit: `"pi-cli"` and `"host-worker"` require a
+configuration service and private SDK child contexts, while `"legacy-child-process"` represents
+the existing compatibility launcher and forbids configuration in the type. The compatibility
+variant is removed with legacy harness paths no later than checkpoint 11.
 
 ### P4 — Split `subagents/register.ts`
 

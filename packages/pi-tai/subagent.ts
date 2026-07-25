@@ -10,6 +10,7 @@ export default function registerPiTaiSubagentRuntime(pi: ExtensionAPI): void {
   registerWorkContext(pi, workContext);
   registerWebTools(pi);
   registerSubagents(pi, {
+    runtime: "legacy-child-process",
     agentDir: getAgentDir(),
   });
   registerApprovalGuardian(pi, { workContext: () => workContext.current() });

@@ -289,6 +289,7 @@ export class PiSdkRuntimePort implements RuntimePort {
       const capabilities = new SessionCapabilityController();
       this.capabilityController = capabilities;
       return {
+        mode: "host-worker",
         config: createPiTaiConfigService(agentDir),
         workContext: createPiSessionWorkContextStore(),
         titleGenerator: async () => "Hosted session",

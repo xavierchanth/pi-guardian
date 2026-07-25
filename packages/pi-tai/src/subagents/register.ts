@@ -79,7 +79,13 @@ const ALLOWED_ENV = "PI_TAI_ALLOWED_CHILDREN";
 const CHILD_WIDGET_KEY = "pi-tai-subagents";
 const CHILD_WIDGET_INTERVAL_MS = 500;
 
-export interface SubagentDependencies {
+export type SubagentRuntimeMode = "pi-cli" | "host-worker" | "legacy-child-process";
+
+export function usesPrivateSdkSubagentContexts(runtime: SubagentRuntimeMode): boolean {
+  return runtime === "pi-cli" || runtime === "host-worker";
+}
+
+interface SubagentDependencyPorts {
   store?: DelegationStore;
   orchestrator?: SubagentOrchestrator;
   loadInstructions?: InstructionLoader;
@@ -87,7 +93,6 @@ export interface SubagentDependencies {
   childDelegationId?: string;
   capabilities?: SessionCapabilityController;
   workspace?: WorkspacePort;
-  config?: PiTaiConfigService;
   coordinator?: ChildContextCoordinator;
   contextStore?: ChildContextStore;
   protocol?: ChildEventProtocol;
@@ -103,17 +108,36 @@ export interface SubagentDependencies {
   rootSessionId?: string;
 }
 
+export type SubagentDependencies = SubagentDependencyPorts & (
+  | { runtime: "pi-cli" | "host-worker"; config: PiTaiConfigService }
+  | { runtime: "legacy-child-process"; config?: never }
+);
+
+function requireRuntimeConfig(dependencies: SubagentDependencies): PiTaiConfigService {
+  if (dependencies.config) return dependencies.config;
+  throw new Error(`${dependencies.runtime} subagent runtime requires an explicit configuration service.`);
+}
+
+function childRuntimeSelection(dependencies: SubagentDependencies):
+  | { runtime: "pi-cli" | "host-worker"; config: PiTaiConfigService }
+  | { runtime: "legacy-child-process"; config?: never } {
+  return dependencies.runtime === "legacy-child-process"
+    ? { runtime: "legacy-child-process" }
+    : { runtime: dependencies.runtime, config: dependencies.config };
+}
+
 export function registerSubagents(
   pi: ExtensionAPI,
-  dependencies: SubagentDependencies = {},
+  dependencies: SubagentDependencies,
 ): void {
+  const usesPrivateSdkContexts = usesPrivateSdkSubagentContexts(dependencies.runtime);
   const agentDir = dependencies.agentDir ?? getAgentDir();
   const storeRoot = process.env[STORE_ENV]
     || join(agentDir, "pi-tai", "subagents", "delegations");
-  const store = dependencies.store ?? (dependencies.config ? new MemoryDelegationStore() : new FileDelegationStore(storeRoot));
+  const store = dependencies.store ?? (usesPrivateSdkContexts ? new MemoryDelegationStore() : new FileDelegationStore(storeRoot));
   const orchestrator = dependencies.orchestrator ?? new SubagentOrchestrator({
     store,
-    launcher: dependencies.config ? {
+    launcher: usesPrivateSdkContexts ? {
       launch: async () => { throw new Error("Production child launch requires a private Pi SDK context."); },
       message: async () => { throw new Error("Production child messaging requires a live private Pi SDK context."); },
       cleanup: async () => undefined,
@@ -129,14 +153,14 @@ export function registerSubagents(
     ? new HostChildContextStore({ repository: hostConcurrency, rootSessionId: dependencies.rootSessionId, runtimeGeneration: 1 })
     : new FileChildContextStore(join(stateRoot, "context-records")));
   const usageLedger = dependencies.usageLedger ?? new ChildUsageLedger(contextStore);
-  const legacyMigrator = hostState && dependencies.config ? new HostLegacyContextMigrator(contextStore, hostState) : undefined;
+  const legacyMigrator = hostState && usesPrivateSdkContexts ? new HostLegacyContextMigrator(contextStore, hostState) : undefined;
   let legacyMigration: Promise<unknown> | undefined;
   const enrollment = dependencies.enrollment ?? new RepositoryEnrollmentService({ store: dependencies.hostServices ? new HostRepositoryEnrollmentStore(dependencies.hostServices) : new FileRepositoryEnrollmentStore(join(stateRoot, "repository-enrollments")) });
   const retention = dependencies.retention ?? new ChildJournalRetention(contextStore, stateRoot);
-  const coordinator = dependencies.coordinator ?? (dependencies.config
+  const coordinator = dependencies.coordinator ?? (usesPrivateSdkContexts
     ? new ChildContextCoordinator({
         store: contextStore,
-        sessionFactory: new PrivateChildSessionFactory({ config: dependencies.config }),
+        sessionFactory: new PrivateChildSessionFactory({ config: requireRuntimeConfig(dependencies) }),
         usageLedger,
         stateRoot,
         agentDir,
@@ -303,6 +327,7 @@ export function registerSubagents(
   const childRuntimeExtensions = (contextId: string) => [{
     name: `pi-tai-child-runtime-${contextId}`,
     factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
+      ...childRuntimeSelection(dependencies),
       store,
       orchestrator,
       coordinator,
@@ -314,7 +339,6 @@ export function registerSubagents(
       ...(reconciler ? { reconciler } : {}),
       sharedJj,
       isolatedJj,
-      ...(dependencies.config ? { config: dependencies.config } : {}),
       loadInstructions,
       discoverAgents: discover,
       childDelegationId: contextId,
@@ -635,7 +659,7 @@ export function registerSubagents(
   });
 
   pi.on("session_start", async (event, ctx) => {
-    if (dependencies.config) {
+    if (usesPrivateSdkContexts) {
       if (legacyMigrator && !legacyMigration) legacyMigration = new FileDelegationStore(storeRoot).list().then((records) => legacyMigrator.run(authoritativeRootSessionId(ctx), records));
       await legacyMigration;
       const contexts = (await contextStore.list()).filter((record) => record.rootSessionId === authoritativeRootSessionId(ctx));
@@ -1682,7 +1706,7 @@ export function registerSubagents(
     },
   });
 
-  if (!dependencies.config) pi.registerTool({
+  if (!usesPrivateSdkContexts) pi.registerTool({
     name: "wait_for_children",
     label: "Wait for Children",
     description: "Wait-any for the next direct-child completion or question; call repeatedly to collect all delegated results.",
@@ -1747,7 +1771,7 @@ export function registerSubagents(
     },
   });
 
-  if (!dependencies.config) pi.registerTool({
+  if (!usesPrivateSdkContexts) pi.registerTool({
     name: "collect_status",
     label: "Collect Status",
     description: "Request fresh non-terminal reports from every unresolved descendant and aggregate replies for up to 30 seconds.",
@@ -1827,7 +1851,7 @@ export function registerSubagents(
     },
   });
 
-  if (!dependencies.config) pi.registerTool({
+  if (!usesPrivateSdkContexts) pi.registerTool({
     name: "child_status",
     label: "Child Status",
     description: "Inspect one direct child or list all direct children without consuming completions.",
