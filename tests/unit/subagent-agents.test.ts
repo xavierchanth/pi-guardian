@@ -95,6 +95,9 @@ test("packaged delegating prompts require pushed-event acknowledgement before co
     /Do not use workspaces for simple tasks.*explicit workspace lifecycle administration/s,
   );
   assert.match(catalog.root.systemPrompt, /ensure_wip_change.*insert_change/s);
+  assert.match(catalog.root.systemPrompt, /generic `jj-guidelines` advice.*does not apply to you/s);
+  assert.match(catalog.root.systemPrompt, /Remain on the tracked orchestration\/WIP change/);
+  assert.match(catalog.root.systemPrompt, /overrides skill guidance only for this exception/);
   assert.match(catalog.byName.get("worker")?.systemPrompt ?? "", /acquire_file_set.*checkpoint_change/s);
   for (const name of ["planner", "worker"]) {
     assert.match(
