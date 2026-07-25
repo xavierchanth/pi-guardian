@@ -5,6 +5,7 @@ node_modules/
 coverage/
 *.tsbuildinfo
 /dist/
+/apps/*/dist/
 target/
 apps/*/src-tauri/gen/
 *.tgz
