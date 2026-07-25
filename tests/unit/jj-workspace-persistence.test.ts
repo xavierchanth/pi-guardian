@@ -7,7 +7,7 @@ import { FileIsolatedWorkspaceStore, validateIsolatedWorkspace, type PersistedIs
 
 const A = "a".repeat(32); const B = "b".repeat(32); const C = "c".repeat(32); const D = "d".repeat(32); const HASH = "0".repeat(64);
 function active(root: string): PersistedIsolatedWorkspaceV1 {
-  return { version: 1, phase: "active", identity: { workspaceId: "workspace-1", rootSessionId: "root-1", sourceId: "source-1", sourceWipChangeId: A, baseChangeId: B, name: "planned", path: join(root, "planned"), rootChangeId: C, expectedHeadChangeId: C }, writer: { phase: "leased", ownerContextId: "child-1", leaseId: "lease-1", headChangeId: C, generation: 1, acquiredAt: "2026-01-01T00:00:00Z" }, operations: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  return { version: 1, phase: "active", identity: { workspaceId: "workspace-1", rootSessionId: "root-1", sourceId: "source-1", sourceWipChangeId: A, baseChangeId: B, name: "planned", path: join(root, "planned"), rootChangeId: C, expectedHeadChangeId: C }, writer: { phase: "leased", ownerContextId: "child-1", leaseId: "lease-1", headChangeId: C, generation: 1, acquiredAt: "2026-01-01T00:00:00Z" }, targets: [], claims: [], operations: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
 }
 
 test("isolated workspace store round trips and serializes updates", async () => {
@@ -18,6 +18,11 @@ test("isolated workspace store round trips and serializes updates", async () => 
     const value = await store.get("workspace-1"); assert.equal(value?.phase, "active"); if (value?.phase === "active") assert.equal(value.writer.generation, 11);
     const interrupted = await store.interruptLiveWriters("workspace-1", "restart", "2026-01-02T00:00:00Z"); assert.equal(interrupted.phase, "active"); if (interrupted.phase === "active") { assert.equal(interrupted.writer.phase, "interrupted"); assert.equal(interrupted.writer.expectedHeadChangeId, C); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("legacy active workspace records migrate empty file targets and claims", () => {
+  const value = active("/tmp/repo") as any; delete value.targets; delete value.claims;
+  const migrated = validateIsolatedWorkspace(value); assert.equal(migrated.phase, "active"); if (migrated.phase === "active") { assert.deepEqual(migrated.targets, []); assert.deepEqual(migrated.claims, []); }
 });
 
 test("isolated workspace validation rejects cross-phase and identity-invalid state", () => {

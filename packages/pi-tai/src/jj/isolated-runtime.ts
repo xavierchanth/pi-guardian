@@ -13,6 +13,8 @@ import { WorkspaceIntegrationService } from "./workspace-integration.ts";
 import { JjWorkspaceRepositoryKernel } from "./workspace-repository.ts";
 import { WorkspaceReviewCoordinator } from "./workspace-review.ts";
 import { WorkspaceRecoveryInspector, WorkspaceRecoveryPlanner } from "./workspace-recovery.ts";
+import { WorkspaceFileSetCoordinator } from "./workspace-file-sets.ts";
+import { WorkspaceFileCheckpointer } from "./workspace-file-checkpoint.ts";
 
 export class IsolatedJjRuntime {
   readonly shared: SharedJjRuntime;
@@ -28,6 +30,8 @@ export class IsolatedJjRuntime {
   readonly operations: IsolatedJjOperations;
   readonly recoveryInspector: WorkspaceRecoveryInspector;
   readonly recoveryPlanner: WorkspaceRecoveryPlanner;
+  readonly workspaceFileSets: WorkspaceFileSetCoordinator;
+  readonly workspaceFileCheckpointer: WorkspaceFileCheckpointer;
   private initialization?: Promise<void>;
   constructor(options: { stateRoot: string; executor?: JjExecutor; workspaces?: IsolatedWorkspaceStore; taskStore?: TaskStore; reviewStore?: ReviewStore; shared?: SharedJjRuntime; failpoint?: (operation: string, boundary: string) => void }) {
     const executor = options.executor ?? new JjProcessExecutor();
@@ -44,12 +48,15 @@ export class IsolatedJjRuntime {
     this.operations = new IsolatedJjOperations({ sources: this.shared.kernel, workspaces: this.workspaces, repository: this.repository, artifacts: this.artifacts, executor, ...(options.failpoint ? { failpoint: options.failpoint } : {}) });
     this.recoveryInspector = new WorkspaceRecoveryInspector(this.workspaces, this.repository);
     this.recoveryPlanner = new WorkspaceRecoveryPlanner();
+    this.workspaceFileSets = new WorkspaceFileSetCoordinator({ workspaces: this.workspaces, repository: this.repository });
+    this.workspaceFileCheckpointer = new WorkspaceFileCheckpointer({ workspaces: this.workspaces, repository: this.repository, fileSets: this.workspaceFileSets });
   }
   initialize(): Promise<void> {
     if (!this.initialization) this.initialization = this.workspaces.list().then(async (records) => {
       for (const record of records) {
         if (record.phase === "incident" && record.lastSafePhase === "allocating") await this.operations.reconcileAllocation(workspaceId(record.workspaceId));
         if (record.phase === "active") {
+          await this.workspaces.interruptLiveClaims(record.identity.workspaceId, "process restart");
           if (record.writer.phase !== "available" && record.writer.phase !== "interrupted") await this.workspaces.interruptLiveWriters(record.identity.workspaceId, "process restart");
           await this.operations.reconcileInterrupted(workspaceId(record.identity.workspaceId));
         }

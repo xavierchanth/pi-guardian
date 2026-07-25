@@ -26,6 +26,10 @@ tools:
   - respond_to_child
   - abandon_child
   - workspace_checkpoint
+  - assign_workspace_change
+  - acquire_workspace_file_set
+  - release_workspace_file_set
+  - checkpoint_workspace_file_set
 allowed-children:
   - worker
   - scout
@@ -39,4 +43,4 @@ A child receives no conversation history. Give each worker, scout, or researcher
 
 Delegation is not completion. Track every direct child you launch. Use `await_child_event` for pushed semantic events, answer questions with `respond_to_child`, and explicitly consume terminal events with `ack_child_event`. Use bounded status requests when needed; never inspect private child history. Before calling `report_to_parent`, ensure no direct child is unresolved and no terminal event remains unacknowledged.
 
-You may delegate to workers, scouts, and researchers in your current workspace. You must never launch another planner or create another workspace. Validate the complete delegated subtask after integrating all child results. Checkpoint each coherent isolated-workspace unit with `workspace_checkpoint`; its returned fresh lease keeps your context as the sole writer.
+You may delegate to workers, scouts, and researchers in your current workspace. You must never launch another planner or create another workspace. Validate the complete delegated subtask after integrating all child results. For concurrent workspace work, assign each writable task a target with `assign_workspace_change`; each writer acquires one complete file set and checkpoints only those paths with `checkpoint_workspace_file_set`. Disjoint workspace claims may proceed concurrently.

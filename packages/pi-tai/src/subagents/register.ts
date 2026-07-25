@@ -25,7 +25,7 @@ import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
 import { ChildContextReconciler } from "../concurrency/reconcile.ts";
 import { classifySharedShellCommand, registerSharedMutationGuard } from "../concurrency/source-guard.ts";
-import { changeDescription, changeId, conflictResolutionLease, isolatedWorkspaceWriteLease, workspaceId as jjWorkspaceId, workspaceName as jjWorkspaceName, workspaceRebaseLease, workspaceWriteLeaseId } from "../jj/domain.ts";
+import { changeDescription, changeId, checkpointableFileSetClaim, conflictResolutionLease, isolatedWorkspaceWriteLease, workspaceId as jjWorkspaceId, workspaceName as jjWorkspaceName, workspaceRebaseLease, workspaceWriteLeaseId } from "../jj/domain.ts";
 import { IsolatedJjRuntime } from "../jj/isolated-runtime.ts";
 import { FileRepositoryEnrollmentStore, HostRepositoryEnrollmentStore, RepositoryEnrollmentService } from "../jj/repository-enrollment.ts";
 import { SharedJjRuntime } from "../jj/runtime.ts";
@@ -229,6 +229,7 @@ export function registerSubagents(
   const canonicalPath = async (path: string) => realpath(path).catch(() => resolve(path));
   const containsPath = (root: string, target: string) => { const remainder = relative(root, target); return remainder === "" || (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder)); };
   const overlapsTaskState = async (path: string) => { const target = await canonicalPath(path); for (const root of taskStateRoots) { const canonicalRoot = await canonicalPath(root); if (containsPath(canonicalRoot, target) || containsPath(target, canonicalRoot)) return true; } return false; };
+  const isolatedAuthorizedMutations = new Map<string, { workspaceId: string; ownerContextId: string; path: string }>();
 
   pi.on("tool_call", async (event, ctx) => {
     if (mode !== "child" || !childDelegation) return undefined;
@@ -260,11 +261,30 @@ export function registerSubagents(
       const decision = classifySharedShellCommand(typeof reviewerInput.command === "string" ? reviewerInput.command : "");
       return decision.kind === "allowed" ? undefined : { block: true, reason: `Reviewer shell is read-only: ${decision.reason}` };
     }
-    if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== context.contextId) return { block: true, reason: "Isolated workspace mutation requires this context's current writer lease." };
+    if (!tracked || tracked.phase !== "active") return { block: true, reason: "Isolated workspace mutation requires active workspace custody." };
+    const legacyWriter = tracked.writer.phase === "leased" && tracked.writer.ownerContextId === context.contextId;
+    const workspaceClaim = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(context.workspaceId), context.contextId);
+    if (event.toolName === "write" || event.toolName === "edit") {
+      const path = typeof (event.input as Record<string, unknown>).path === "string" ? String((event.input as Record<string, unknown>).path) : undefined;
+      if (!path) return { block: true, reason: "Workspace mutation requires a concrete file path." };
+      if (workspaceClaim?.record.phase === "active") {
+        const authorizedPath = await isolatedJj.workspaceFileSets.authorizePath(jjWorkspaceId(context.workspaceId), context.contextId, path);
+        isolatedAuthorizedMutations.set(event.toolCallId, { workspaceId: context.workspaceId, ownerContextId: context.contextId, path: authorizedPath });
+      } else if (!legacyWriter) return { block: true, reason: "Isolated workspace mutation requires an active covering workspace file-set claim." };
+    }
+    if (event.toolName === "bash" && !workspaceClaim && !legacyWriter) return { block: true, reason: "Isolated workspace validation requires an active workspace file-set claim." };
     if (event.toolName === "bash") {
       const decision = classifySharedShellCommand(typeof event.input.command === "string" ? event.input.command : "");
       if (decision.kind !== "allowed") return { block: true, reason: decision.reason.replaceAll("Shared-worker", "Isolated-worker").replaceAll("shared workers", "isolated workers") };
     }
+    return undefined;
+  });
+
+  pi.on("tool_result", async (event) => {
+    const mutation = isolatedAuthorizedMutations.get(event.toolCallId);
+    if (!mutation) return undefined;
+    isolatedAuthorizedMutations.delete(event.toolCallId);
+    if (!event.isError) await isolatedJj.workspaceFileSets.recordOwnedMutation(jjWorkspaceId(mutation.workspaceId), mutation.ownerContextId, mutation.path);
     return undefined;
   });
 
@@ -1101,6 +1121,64 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "assign_workspace_change",
+    label: "Assign Workspace Change",
+    description: "Assign one semantic target Change ID inside an isolated workspace to a direct writable child.",
+    parameters: Type.Object({ ownerContextId: Type.String(), description: Type.String({ minLength: 1, maxLength: 4096 }) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireOrchestrator(currentAgent);
+      const owner = await requireDirectChild(orchestrator, params.ownerContextId, ctx.sessionManager.getSessionId());
+      const context = await contextStore.get(owner.id); if (!context?.workspaceId) throw new Error("Assigned workspace target requires a tracked isolated child.");
+      const tracked = await isolatedJj.workspaces.get(context.workspaceId);
+      if (tracked?.phase === "active" && tracked.writer.phase === "leased" && tracked.writer.ownerContextId === context.contextId) await isolatedJj.operations.releaseWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(context.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId)));
+      const targetChangeId = await isolatedJj.workspaceFileSets.assignTarget(jjWorkspaceId(context.workspaceId), { ownerContextId: context.contextId, description: changeDescription(params.description) });
+      return result(`Assigned workspace target ${targetChangeId} to ${context.contextId}.`, { workspaceId: context.workspaceId, ownerContextId: context.contextId, targetChangeId });
+    },
+  });
+
+  pi.registerTool({
+    name: "acquire_workspace_file_set",
+    label: "Acquire Workspace File Set",
+    description: "Acquire one complete canonical path set inside this isolated workspace; disjoint writers may proceed concurrently.",
+    parameters: Type.Object({ paths: Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 128 }) }),
+    async execute(_id, params, signal) {
+      if (mode !== "child" || !childDelegation) throw new Error("Workspace file claims are available only to delegated isolated contexts.");
+      const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) throw new Error("This context has no tracked isolated workspace.");
+      const claim = await isolatedJj.workspaceFileSets.acquire(jjWorkspaceId(context.workspaceId), { ownerContextId: context.contextId, paths: params.paths, signal });
+      const active = await isolatedJj.workspaceFileSets.requireActive(claim);
+      return result(`Acquired workspace claim ${claim.claimId}.`, { workspaceId: context.workspaceId, claimId: claim.claimId, paths: active.record.paths, targetChangeId: active.record.targetChangeId });
+    },
+  });
+
+  pi.registerTool({
+    name: "release_workspace_file_set",
+    label: "Release Workspace File Set",
+    description: "Release this context's unused isolated-workspace file set.",
+    parameters: Type.Object({}),
+    async execute() {
+      if (mode !== "child" || !childDelegation) throw new Error("Workspace file claims are available only to delegated isolated contexts.");
+      const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) throw new Error("This context has no tracked isolated workspace.");
+      const active = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(context.workspaceId), context.contextId); if (!active) throw new Error("This context has no active workspace file-set claim.");
+      await isolatedJj.workspaceFileSets.releaseUnused(active.handle);
+      return result(`Released workspace claim ${active.handle.claimId}.`, { workspaceId: context.workspaceId, claimId: active.handle.claimId });
+    },
+  });
+
+  pi.registerTool({
+    name: "checkpoint_workspace_file_set",
+    label: "Checkpoint Workspace File Set",
+    description: "Checkpoint only this context's claimed isolated-workspace paths into its assigned target and release the claim.",
+    parameters: Type.Object({}),
+    async execute() {
+      if (mode !== "child" || !childDelegation) throw new Error("Workspace file checkpointing is available only to delegated isolated contexts.");
+      const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) throw new Error("This context has no tracked isolated workspace.");
+      const active = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(context.workspaceId), context.contextId); if (!active) throw new Error("This context has no active workspace file-set claim.");
+      const outcome = await isolatedJj.workspaceFileCheckpointer.checkpoint(jjWorkspaceId(context.workspaceId), checkpointableFileSetClaim(fileSetClaimId(active.handle.claimId)));
+      return result(outcome.kind === "completed" ? `Checkpointed ${outcome.receipt.changedPaths.length} workspace path(s).` : `Workspace file checkpoint stopped: ${outcome.blocker.kind}.`, outcome);
+    },
+  });
+
+  pi.registerTool({
     name: "workspace_checkpoint",
     label: "Workspace Checkpoint",
     description: "Checkpoint the current coherent isolated-workspace change and continue on one fresh empty head.",
@@ -1182,6 +1260,18 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "workspace_review_status",
+    label: "Workspace Review Status",
+    description: "Inspect the authoritative persisted review report, complete findings, dispositions, and approval eligibility for a workspace.",
+    parameters: Type.Object({ workspaceId: Type.String() }),
+    async execute(_id, params) {
+      requireWorkspaceThinker(currentAgent);
+      const status = await isolatedJj.reviewCoordinator.status(jjWorkspaceId(params.workspaceId));
+      return result(`Inspected authoritative review state for ${params.workspaceId}.`, status);
+    },
+  });
+
+  pi.registerTool({
     name: "submit_workspace_review",
     label: "Submit Workspace Review",
     description: "Submit one immutable structured p0-p4 report for the injected frozen workspace review.",
@@ -1205,8 +1295,25 @@ export function registerSubagents(
     description: "Thaw one changes-requested workspace for its single automatic repair cycle.",
     parameters: Type.Object({ delegationId: Type.String(), objective: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const caller = requireWorkspaceThinker(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId || !context.taskId) throw new Error("Delegation has no tracked workspace task."); await isolatedJj.reviewCoordinator.beginRepair(jjWorkspaceId(context.workspaceId)); const worker = loadCatalog(ctx).byName.get("worker"); if (!worker) throw new Error("Worker agent is unavailable."); const repairTask = await isolatedJj.tasks.assign(context.taskId, { ownerRole: "worker", creatorContextId: `thinker-${ctx.sessionManager.getSessionId()}`, objective: params.objective ?? "Repair all blocking p0/p1 review findings", constraints: ["One bounded repair cycle", "Checkpoint coherent repair before reporting"] }); const repairContextId = randomUUID(); const lease = await isolatedJj.operations.acquireWriter(jjWorkspaceId(context.workspaceId), repairContextId);
-      try { const repair = await spawnManagedChild({ contextId: repairContextId, taskId: repairTask.taskId, task: { objective: params.objective ?? "Repair all blocking workspace review findings", context: ["Use task_status for immutable goal and review context"], constraints: ["One repair cycle", "Call workspace_checkpoint"], expectedOutput: "Validated focused repair", uncertaintyHandling: "ask-parent" }, agent: worker, caller, parentCwd: context.cwd, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: context.workspaceId, modelRegistry: ctx.modelRegistry }); await isolatedJj.tasks.bind(repairTask.taskId, repair.id); return result(`Started repair worker ${repair.id} in ${context.workspaceId}.`, repair); } catch (error) { await isolatedJj.operations.releaseWriter(lease); throw error; }
+      const caller = requireWorkspaceThinker(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId || !context.taskId) throw new Error("Delegation has no tracked workspace task.");
+      const reviewStatus = await isolatedJj.reviewCoordinator.status(jjWorkspaceId(context.workspaceId)) as any;
+      const findings = Array.isArray(reviewStatus.blockingFindings) ? reviewStatus.blockingFindings : [];
+      const repairPaths: string[] = [...new Set<string>(findings.flatMap((finding: any) => Array.isArray(finding.paths) ? finding.paths.map(String) : []) as string[])].sort();
+      if (!findings.length || !repairPaths.length) throw new Error("Workspace repair requires current blocking findings with exact affected paths.");
+      await isolatedJj.reviewCoordinator.beginRepair(jjWorkspaceId(context.workspaceId));
+      const worker = loadCatalog(ctx).byName.get("worker"); if (!worker) throw new Error("Worker agent is unavailable.");
+      const repairTask = await isolatedJj.tasks.assign(context.taskId, { ownerRole: "worker", creatorContextId: `thinker-${ctx.sessionManager.getSessionId()}`, objective: params.objective ?? "Repair all blocking p0/p1 review findings", constraints: ["One bounded repair cycle", "Checkpoint only the assigned workspace file set"] });
+      const repairContextId = randomUUID(); const repairAttemptId = `repair-${randomUUID()}`;
+      const targetChangeId = await isolatedJj.workspaceFileSets.assignTarget(jjWorkspaceId(context.workspaceId), { ownerContextId: repairContextId, description: changeDescription("fix: address workspace review findings") });
+      const claim = await isolatedJj.workspaceFileSets.acquire(jjWorkspaceId(context.workspaceId), { ownerContextId: repairContextId, paths: repairPaths });
+      try {
+        const repair = await spawnManagedChild({ contextId: repairContextId, taskId: repairTask.taskId, task: { objective: params.objective ?? "Repair all blocking workspace review findings", context: [`Review ${reviewStatus.reviewId}`, ...findings.map((finding: any) => `${finding.findingId}: ${finding.summary} — ${finding.evidence}`)], resources: repairPaths.map((path) => ({ type: "file" as const, value: path, reason: "Blocking review finding" })), constraints: ["One repair cycle", "Call checkpoint_workspace_file_set", `Modify only: ${repairPaths.join(", ")}`], expectedOutput: "Validated focused repair", uncertaintyHandling: "ask-parent" }, agent: worker, caller, parentCwd: context.cwd, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: context.workspaceId, modelRegistry: ctx.modelRegistry });
+        const launched = await contextStore.get(repair.id); const active = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(context.workspaceId), repairContextId);
+        if (!launched || launched.execution.phase !== "running" || !active || active.handle.claimId !== claim.claimId) throw new Error("Repair runtime and workspace claim did not become active together.");
+        await isolatedJj.tasks.bind(repairTask.taskId, repair.id);
+        const receipt = { repairAttemptId, taskId: repairTask.taskId, contextId: repair.id, executionCycleId: launched.execution.cycleId, workspaceId: context.workspaceId, reviewId: reviewStatus.reviewId, claimId: claim.claimId, targetChangeId, paths: repairPaths };
+        return result(`Started repair worker ${repair.id} in ${context.workspaceId}.`, { child: repair, repairReceipt: receipt });
+      } catch (error) { await isolatedJj.workspaceFileSets.interrupt(jjWorkspaceId(context.workspaceId), "repair child startup failed"); throw error; }
     },
   });
 
@@ -1277,8 +1384,10 @@ export function registerSubagents(
         throw error;
       }
       if (params.taskId) await isolatedJj.tasks.bind(params.taskId, record.id);
+      const launched = await contextStore.get(record.id);
+      const launchReceipt = { taskId: launched?.taskId, contextId: record.id, parentContextId: launched?.parentContextId, executionCycleId: launched?.execution.cycleId, workspaceId: created.receipt.workspaceId, workspacePath: created.receipt.path, rootChangeId: created.receipt.rootChangeId, workspaceHeadChangeId: created.receipt.workspaceHeadChangeId, operationId: created.receipt.operationId };
       await refreshChildWidget(ctx);
-      return result(`Spawned ${target.name} ${record.id} in tracked JJ workspace ${created.receipt.path}.`, record);
+      return result(`Spawned ${target.name} ${record.id} in tracked JJ workspace ${created.receipt.path}.`, { child: record, launchReceipt });
     },
   });
 
@@ -1495,6 +1604,11 @@ export function registerSubagents(
             const parentContext = terminalContext.parentContextId ? await contextStore.get(terminalContext.parentContextId) : undefined;
             if (parentContext?.workspaceId === terminalContext.workspaceId) await isolatedJj.operations.transferWriter(lease, parentContext.contextId);
             else await isolatedJj.operations.releaseWriter(lease);
+          }
+          const claim = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(terminalContext.workspaceId), terminalContext.contextId);
+          if (claim) {
+            try { await isolatedJj.workspaceFileSets.releaseUnused(claim.handle); }
+            catch { await isolatedJj.workspaceFileSets.interrupt(jjWorkspaceId(terminalContext.workspaceId), "terminal context retained uncheckpointed workspace paths"); }
           }
         }
         if (!legacy.workspace && !coordinator?.getRuntime(params.contextId)) await retention.closeClean(params.contextId, true);

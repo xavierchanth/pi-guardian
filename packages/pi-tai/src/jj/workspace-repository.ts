@@ -22,6 +22,10 @@ export class JjWorkspaceRepositoryKernel {
     return { identity, head, operationId };
   }
   async resolveTracked(workspaceId: WorkspaceId, id: ChangeId): Promise<ResolvedJjChange> { return this.resolve(await this.identity(workspaceId), exactChange(id)); }
+  async resolveRevision(workspaceId: WorkspaceId, revision: string): Promise<ResolvedJjChange> { return this.resolve(await this.identity(workspaceId), revision); }
+  async currentChangeId(workspaceId: WorkspaceId): Promise<ChangeId> { return (await this.resolveRevision(workspaceId, "@")).changeId; }
+  async changedPaths(workspaceId: WorkspaceId, revision: string, filesets: readonly string[] = []): Promise<string[]> { const identity = await this.identity(workspaceId); return lines(await this.execute(identity, ["diff", "--revision", revision, "--name-only", ...filesets], "read")).sort(); }
+  async patchEvidence(workspaceId: WorkspaceId, revision: string, filesets: readonly string[] = []): Promise<string> { const identity = await this.identity(workspaceId); return this.execute(identity, ["diff", "--revision", revision, "--git", ...filesets], "read"); }
   async range(workspaceId: WorkspaceId, root: ChangeId, head: ChangeId): Promise<WorkspaceRangeEntry[]> {
     const identity = await this.identity(workspaceId);
     const revisions = `${exactChange(root)}::${exactChange(head)}`;

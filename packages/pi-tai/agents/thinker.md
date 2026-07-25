@@ -34,10 +34,12 @@ tools:
   - jj_concurrency_status
   - ensure_wip_change
   - insert_change
+  - assign_workspace_change
   - normalize_change_range
   - prepare_workspace_report
   - rebase_workspace
   - prepare_workspace_review
+  - workspace_review_status
   - accept_workspace_review
   - begin_workspace_repair
   - verify_integrated_range
