@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
-import { DEFAULT_PI_TAI_CONFIG } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
 import { registerAutoCompaction } from "../../packages/pi-tai/src/compaction/register.ts";
 
 type Handler = (event: unknown, ctx: any) => Promise<void> | void;
@@ -22,14 +21,14 @@ function harness(options: {
     },
   } as unknown as ExtensionAPI;
   const config = {
-    current: () => ({
-      ...DEFAULT_PI_TAI_CONFIG,
+    sessionPolicy: () => ({
+      ...DEFAULT_SESSION_POLICY,
       compaction: {
         enabled: options.enabled ?? true,
         thresholdPercent: options.thresholdPercent ?? 90,
       },
     }),
-  } as PiTaiConfigService;
+  };
   const ctx = {
     isIdle: () => options.idle ?? true,
     getContextUsage: () => ({

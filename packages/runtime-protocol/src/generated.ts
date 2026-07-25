@@ -7,11 +7,45 @@ export type AcceptedResult = {
 
 export type CommandFrameKind = "command";
 
+export type CompactionConfig = {
+	enabled: boolean,
+	thresholdPercent: number,
+};
+
+export type ConfigLayer = "default" | "machine" | "user" | "project";
+
+export type ConfigProvenance = ConfigProvenance_Serialize | ConfigProvenance_Deserialize;
+
+export type ConfigProvenance_Deserialize = { [key in string]: FieldOrigin_Deserialize };
+
+export type ConfigProvenance_Serialize = { [key in string]: FieldOrigin_Serialize };
+
+export type ConfigScope = "machine" | "project" | "session";
+
 export type EmptyParams = Record<string, never>;
 
 export type EmptyResult = Record<string, never>;
 
 export type EventFrameKind = "event";
+
+export type FieldDescriptor = {
+	scope: ConfigScope,
+	privileged: boolean,
+};
+
+export type FieldOrigin = FieldOrigin_Serialize | FieldOrigin_Deserialize;
+
+export type FieldOrigin_Deserialize = {
+	layer: ConfigLayer,
+	path?: string | null,
+	digest?: string | null,
+};
+
+export type FieldOrigin_Serialize = {
+	layer: ConfigLayer,
+	path?: string | null,
+	digest?: string | null,
+};
 
 export type HostServiceResponseParams = HostServiceResponseParams_Serialize | HostServiceResponseParams_Deserialize;
 
@@ -36,6 +70,13 @@ export type InterruptionData = {
 export type ModelInfo = {
 	provider: string,
 	model: string,
+};
+
+export type ModelProfile = {
+	name: string,
+	provider: string,
+	model: string,
+	effort: ThinkingEffort,
 };
 
 export type ProtocolRange = {
@@ -198,6 +239,8 @@ export type SessionCreateParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
+	sessionPolicy: SessionPolicy_Deserialize,
+	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
 
@@ -207,6 +250,8 @@ export type SessionCreateParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
+	sessionPolicy: SessionPolicy_Serialize,
+	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
 };
 
@@ -224,6 +269,8 @@ export type SessionOpenParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
+	sessionPolicy: SessionPolicy_Deserialize,
+	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
 
@@ -233,7 +280,23 @@ export type SessionOpenParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
+	sessionPolicy: SessionPolicy_Serialize,
+	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
+};
+
+export type SessionPolicy = SessionPolicy_Serialize | SessionPolicy_Deserialize;
+
+export type SessionPolicy_Deserialize = {
+	sessionTitle: SessionTitleConfig_Deserialize,
+	compaction: CompactionConfig,
+	modelProfiles: ModelProfile[],
+};
+
+export type SessionPolicy_Serialize = {
+	sessionTitle: SessionTitleConfig_Serialize,
+	compaction: CompactionConfig,
+	modelProfiles: ModelProfile[],
 };
 
 export type SessionPromptParams = {
@@ -264,6 +327,24 @@ export type SessionTextParams = {
 	text: string,
 };
 
+export type SessionTitleConfig = SessionTitleConfig_Serialize | SessionTitleConfig_Deserialize;
+
+export type SessionTitleConfig_Deserialize = {
+	provider?: string | null,
+	model?: string | null,
+	effort: TitleEffort,
+	maxWords: number,
+	fallback: string,
+};
+
+export type SessionTitleConfig_Serialize = {
+	provider?: string | null,
+	model?: string | null,
+	effort: TitleEffort,
+	maxWords: number,
+	fallback: string,
+};
+
 export type SessionTitleData = SessionTitleData_Serialize | SessionTitleData_Deserialize;
 
 export type SessionTitleData_Deserialize = {
@@ -278,11 +359,15 @@ export type TextDeltaData = {
 	delta: string,
 };
 
+export type ThinkingEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export type ThinkingInfo = {
 	level: ThinkingLevel,
 };
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export type TitleEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ToolLifecycleData = ToolLifecycleData_Serialize | ToolLifecycleData_Deserialize;
 

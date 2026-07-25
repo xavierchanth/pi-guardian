@@ -67,6 +67,15 @@ pub struct HostCommand<T = Value> {
     pub payload: T,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateSessionPayload {
+    pub cwd: String,
+    /// Temporary trust-on-assertion input; D8 replaces this with the Host-owned digest-bound store.
+    #[serde(default)]
+    pub client_asserted_project_trust: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HostEvent<T = Value> {

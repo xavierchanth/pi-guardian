@@ -1,0 +1,98 @@
+{
+  "config": {
+    "sessionPolicy": {
+      "sessionTitle": {
+        "effort": "low",
+        "maxWords": 8,
+        "fallback": "heuristic",
+        "provider": "u",
+        "model": "um"
+      },
+      "compaction": {
+        "enabled": true,
+        "thresholdPercent": 90
+      },
+      "modelProfiles": [
+        {
+          "name": "u",
+          "provider": "p",
+          "model": "m",
+          "effort": "low"
+        }
+      ]
+    },
+    "clientPreferences": {
+      "ansiTheme": {
+        "darkTheme": "ansi-dark",
+        "lightTheme": "ansi-light",
+        "pollIntervalMs": 2000
+      },
+      "notifications": {
+        "reviewFailure": true,
+        "agentCompletion": true
+      }
+    },
+    "hostMachine": {}
+  },
+  "provenance": {
+    "sessionPolicy.sessionTitle.provider": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "sessionPolicy.sessionTitle.model": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "sessionPolicy.sessionTitle.effort": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "sessionPolicy.sessionTitle.maxWords": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "sessionPolicy.sessionTitle.fallback": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "sessionPolicy.compaction.enabled": {
+      "layer": "default"
+    },
+    "sessionPolicy.compaction.thresholdPercent": {
+      "layer": "default"
+    },
+    "sessionPolicy.modelProfiles": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "41f8d7be2207a9cb8b848f2c0ad282fb7ec272f95aeff61a59e3904f28e64f8a"
+    },
+    "clientPreferences.ansiTheme.darkTheme": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.lightTheme": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.pollIntervalMs": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.reviewFailure": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.agentCompletion": {
+      "layer": "default"
+    }
+  },
+  "warnings": [
+    "Ignored privileged sessionPolicy.sessionTitle.provider from project.json: privileged fields cannot be set by a project.",
+    "Ignored privileged sessionPolicy.sessionTitle.model from project.json: privileged fields cannot be set by a project.",
+    "Ignored privileged sessionPolicy.sessionTitle.effort from project.json: privileged fields cannot be set by a project.",
+    "Ignored privileged sessionPolicy.sessionTitle.maxWords from project.json: privileged fields cannot be set by a project.",
+    "Ignored privileged sessionPolicy.sessionTitle.fallback from project.json: privileged fields cannot be set by a project.",
+    "Ignored privileged sessionPolicy.modelProfiles from project.json: privileged fields cannot be set by a project."
+  ]
+}

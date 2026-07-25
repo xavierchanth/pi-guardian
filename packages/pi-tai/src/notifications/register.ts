@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { ClientPreferencesReader } from "../config/register.ts";
 import {
   GUARDIAN_REVIEW_FAILED_EVENT,
   type GuardianReviewFailedEvent,
@@ -11,7 +11,7 @@ import {
 
 export function registerNotifications(
   pi: ExtensionAPI,
-  configService: PiTaiConfigService,
+  configService: ClientPreferencesReader,
   send: NotificationSender = sendNativeTerminalNotification,
 ): void {
   const notify = (title: string, body: string) => {
@@ -24,7 +24,7 @@ export function registerNotifications(
 
   pi.events.on(GUARDIAN_REVIEW_FAILED_EVENT, (data) => {
     const event = data as GuardianReviewFailedEvent;
-    if (event.mode !== "tui" || !configService.current().notifications.reviewFailure) return;
+    if (event.mode !== "tui" || !configService.clientPreferences().notifications.reviewFailure) return;
     const body = event.kind === "timeout"
       ? "Automatic action review timed out."
       : "Automatic action review failed.";
@@ -32,7 +32,7 @@ export function registerNotifications(
   });
 
   pi.on("agent_settled", (_event, ctx) => {
-    if (ctx.mode !== "tui" || !configService.current().notifications.agentCompletion) return;
+    if (ctx.mode !== "tui" || !configService.clientPreferences().notifications.agentCompletion) return;
     notify("Pi-Tai", "Ready for input.");
   });
 }

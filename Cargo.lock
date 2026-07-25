@@ -2539,6 +2539,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-tai-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "specta",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "pi-tai-ctl"
 version = "0.1.0"
 dependencies = [
@@ -2588,10 +2599,12 @@ name = "pi-tai-host-kernel"
 version = "0.1.0"
 dependencies = [
  "pi-tai-broker",
+ "pi-tai-config",
  "pi-tai-event-store",
  "pi-tai-host-protocol",
  "pi-tai-runtime-protocol",
  "pi-tai-runtime-supervisor",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
@@ -2655,6 +2668,7 @@ dependencies = [
 name = "pi-tai-runtime-protocol"
 version = "0.1.0"
 dependencies = [
+ "pi-tai-config",
  "serde",
  "serde_json",
  "specta",
@@ -2667,6 +2681,7 @@ dependencies = [
 name = "pi-tai-runtime-supervisor"
 version = "0.1.0"
 dependencies = [
+ "pi-tai-config",
  "pi-tai-runtime-protocol",
  "serde_json",
  "tempfile",

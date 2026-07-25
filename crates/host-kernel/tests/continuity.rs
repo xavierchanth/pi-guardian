@@ -45,6 +45,7 @@ async fn a_turn_survives_client_detach_and_continues_for_an_observer() {
         .create_session(CreateSession {
             client_id: first_client.clone(),
             cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
         })
         .await
         .unwrap();
@@ -94,14 +95,23 @@ async fn a_turn_survives_client_detach_and_continues_for_an_observer() {
         if event.event_type == "assistant.text_delta" {
             text.push_str(event.payload["delta"].as_str().unwrap());
         }
-        if event.event_type == "usage.replaced" { usage = Some(event.payload.clone()); }
+        if event.event_type == "usage.replaced" {
+            usage = Some(event.payload.clone());
+        }
         if event.event_type == "session.idle" {
             break;
         }
     }
     assert_eq!(text, "slow response");
     let usage = usage.expect("usage projection");
-    assert_eq!((usage["total"]["input"].as_u64(), usage["total"]["output"].as_u64(), usage["total"]["cost"].as_f64()), (Some(2), Some(3), Some(0.03)));
+    assert_eq!(
+        (
+            usage["total"]["input"].as_u64(),
+            usage["total"]["output"].as_u64(),
+            usage["total"]["cost"].as_f64()
+        ),
+        (Some(2), Some(3), Some(0.03))
+    );
     assert_eq!(usage["byModel"]["pi-tai/faux"]["output"].as_u64(), Some(3));
     let complete = kernel.snapshot(created.session_id).await.unwrap();
     assert!(matches!(
@@ -118,15 +128,42 @@ async fn runtime_core_transactions_are_host_acknowledged_and_projected() {
     let workspace = temporary.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
     let kernel = HostKernel::start(kernel_config(&temporary)).unwrap();
-    let created = kernel.create_session(CreateSession { client_id: "core-client".into(), cwd: workspace.to_string_lossy().into_owned() }).await.unwrap();
+    let created = kernel
+        .create_session(CreateSession {
+            client_id: "core-client".into(),
+            cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
+        })
+        .await
+        .unwrap();
     let mut events = kernel.subscribe();
-    kernel.prompt(PromptSession { client_id: "core-client".into(), session_id: created.session_id.clone(), operation_id: "operation-host-service".into(), expected_revision: created.revision, text: "host-service proof".into() }).await.unwrap();
+    kernel
+        .prompt(PromptSession {
+            client_id: "core-client".into(),
+            session_id: created.session_id.clone(),
+            operation_id: "operation-host-service".into(),
+            expected_revision: created.revision,
+            text: "host-service proof".into(),
+        })
+        .await
+        .unwrap();
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(3), events.recv()).await.unwrap().unwrap();
-        if event.session_id == created.session_id && event.event_type == "session.idle" { break; }
+        let event = tokio::time::timeout(Duration::from_secs(3), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if event.session_id == created.session_id && event.event_type == "session.idle" {
+            break;
+        }
     }
-    let replay = kernel.replay(created.session_id.clone(), 0, 100).await.unwrap();
-    let projected = replay.iter().find(|event| event.event_type == "concurrency.replaced").expect("Host concurrency projection event");
+    let replay = kernel
+        .replay(created.session_id.clone(), 0, 100)
+        .await
+        .unwrap();
+    let projected = replay
+        .iter()
+        .find(|event| event.event_type == "concurrency.replaced")
+        .expect("Host concurrency projection event");
     assert_eq!(projected.payload["revision"], 1);
     assert_eq!(projected.payload["projection"]["version"], 1);
     kernel.shutdown().await.unwrap();
@@ -143,6 +180,7 @@ async fn restart_marks_an_unfinished_turn_interrupted_without_replaying_it() {
         .create_session(CreateSession {
             client_id: "interrupted-client".into(),
             cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
         })
         .await
         .unwrap();
@@ -182,7 +220,67 @@ async fn restart_marks_an_unfinished_turn_interrupted_without_replaying_it() {
 }
 
 #[tokio::test]
-async fn restart_recovers_stable_identity_and_replays_durable_events() {
+async fn resolved_policy_projection_rebuilds_from_canonical_event() {
+    let temporary = tempfile::tempdir().unwrap();
+    let workspace = temporary.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config = kernel_config(&temporary);
+    std::fs::create_dir_all(&config.agent_dir).unwrap();
+    std::fs::write(
+        config.agent_dir.join("pi-tai.json"),
+        r#"{"compaction":{"thresholdPercent":65}}"#,
+    )
+    .unwrap();
+    let first = HostKernel::start(config.clone()).unwrap();
+    let created = first
+        .create_session(CreateSession {
+            client_id: "rebuild-client".into(),
+            cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
+        })
+        .await
+        .unwrap();
+    first.shutdown().await.unwrap();
+
+    let connection = rusqlite::Connection::open(&config.database_path).unwrap();
+    let snapshot_json: String = connection
+        .query_row(
+            "SELECT snapshot_json FROM broker_sessions WHERE session_id = ?1",
+            [&created.session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    snapshot.as_object_mut().unwrap().remove("resolvedPolicy");
+    connection
+        .execute(
+            "UPDATE broker_sessions SET snapshot_json = ?1 WHERE session_id = ?2",
+            rusqlite::params![serde_json::to_string(&snapshot).unwrap(), created.session_id],
+        )
+        .unwrap();
+    drop(connection);
+    std::fs::write(
+        config.agent_dir.join("pi-tai.json"),
+        r#"{"compaction":{"thresholdPercent":25}}"#,
+    )
+    .unwrap();
+
+    let recovered = HostKernel::start(config).unwrap();
+    let session = recovered.list_sessions().await.unwrap().remove(0);
+    assert_eq!(
+        session
+            .resolved_policy
+            .unwrap()
+            .session_policy
+            .compaction
+            .threshold_percent,
+        65.0
+    );
+    recovered.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn old_projection_backfills_policy_once_and_keeps_it_durable() {
     let temporary = tempfile::tempdir().unwrap();
     let workspace = temporary.path().join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -190,8 +288,74 @@ async fn restart_recovers_stable_identity_and_replays_durable_events() {
     let first = HostKernel::start(config.clone()).unwrap();
     let created = first
         .create_session(CreateSession {
+            client_id: "backfill-client".into(),
+            cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
+        })
+        .await
+        .unwrap();
+    first.shutdown().await.unwrap();
+
+    let connection = rusqlite::Connection::open(&config.database_path).unwrap();
+    let snapshot_json: String = connection
+        .query_row(
+            "SELECT snapshot_json FROM broker_sessions WHERE session_id = ?1",
+            [&created.session_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut snapshot: serde_json::Value = serde_json::from_str(&snapshot_json).unwrap();
+    snapshot.as_object_mut().unwrap().remove("resolvedPolicy");
+    connection
+        .execute(
+            "UPDATE broker_sessions SET snapshot_json = ?1 WHERE session_id = ?2",
+            rusqlite::params![serde_json::to_string(&snapshot).unwrap(), created.session_id],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "DELETE FROM session_events WHERE session_id = ?1 AND event_type = 'session.policy_resolved'",
+            [&created.session_id],
+        )
+        .unwrap();
+    drop(connection);
+
+    let recovered = HostKernel::start(config.clone()).unwrap();
+    assert!(recovered.list_sessions().await.unwrap()[0].resolved_policy.is_some());
+    recovered.shutdown().await.unwrap();
+    let recovered_again = HostKernel::start(config).unwrap();
+    let replay = recovered_again
+        .replay(created.session_id, 0, 100)
+        .await
+        .unwrap();
+    assert_eq!(
+        replay
+            .iter()
+            .filter(|event| event.event_type == "session.policy_resolved")
+            .count(),
+        1
+    );
+    recovered_again.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn restart_recovers_stable_identity_and_replays_durable_events() {
+    let temporary = tempfile::tempdir().unwrap();
+    let workspace = temporary.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let config = kernel_config(&temporary);
+    std::fs::create_dir_all(&config.agent_dir).unwrap();
+    std::fs::write(
+        config.agent_dir.join("pi-tai.json"),
+        r#"{"compaction":{"thresholdPercent":70}}"#,
+    )
+    .unwrap();
+    let first = HostKernel::start(config.clone()).unwrap();
+    let created = first
+        .create_session(CreateSession {
             client_id: "recovery-client".into(),
             cwd: workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
         })
         .await
         .unwrap();
@@ -233,6 +397,10 @@ async fn restart_recovers_stable_identity_and_replays_durable_events() {
         .replay(created.session_id.clone(), 0, 100)
         .await
         .unwrap();
+    assert_eq!(
+        before_restart.first().map(|event| event.event_type.as_str()),
+        Some("session.policy_resolved")
+    );
     assert!(
         before_restart
             .iter()
@@ -251,14 +419,29 @@ async fn restart_recovers_stable_identity_and_replays_durable_events() {
         .unwrap()
         .runtime_generation;
     first.shutdown().await.unwrap();
+    std::fs::write(
+        config.agent_dir.join("pi-tai.json"),
+        r#"{"compaction":{"thresholdPercent":30}}"#,
+    )
+    .unwrap();
 
-    let recovered = HostKernel::start(config).unwrap();
+    let recovered = HostKernel::start(config.clone()).unwrap();
     let sessions = recovered.list_sessions().await.unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].session_id, created.session_id);
     assert!(sessions[0].runtime_generation > old_generation);
     assert!(matches!(sessions[0].runtime, RuntimeSnapshot::Ready { .. }));
     assert_eq!(sessions[0].attachment_count, 0);
+    assert_eq!(
+        sessions[0]
+            .resolved_policy
+            .as_ref()
+            .unwrap()
+            .session_policy
+            .compaction
+            .threshold_percent,
+        70.0
+    );
 
     let replayed = recovered
         .replay(created.session_id.clone(), 0, 100)
@@ -279,6 +462,33 @@ async fn restart_recovers_stable_identity_and_replays_durable_events() {
         replayed
             .iter()
             .any(|event| event.event_type == "session.replaced")
+    );
+    assert_eq!(
+        replayed
+            .iter()
+            .filter(|event| event.event_type == "session.policy_resolved")
+            .count(),
+        1
+    );
+
+    let new_workspace = temporary.path().join("new-workspace");
+    std::fs::create_dir_all(&new_workspace).unwrap();
+    let new_session = recovered
+        .create_session(CreateSession {
+            client_id: "new-policy-client".into(),
+            cwd: new_workspace.to_string_lossy().into_owned(),
+            client_asserted_project_trust: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        new_session
+            .resolved_policy
+            .unwrap()
+            .session_policy
+            .compaction
+            .threshold_percent,
+        30.0
     );
     recovered.shutdown().await.unwrap();
 }

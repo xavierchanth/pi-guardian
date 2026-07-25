@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+pi-tai-config = { path = "../config" }
 serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true

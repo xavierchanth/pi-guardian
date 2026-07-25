@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
-import { DEFAULT_PI_TAI_CONFIG } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/config/schema.ts";
 import { registerAnsiTheme } from "../../packages/pi-tai/src/ansi-theme/register.ts";
 
 type Handler = (event: unknown, ctx: any) => unknown;
@@ -15,13 +14,13 @@ function harness() {
     },
   } as unknown as ExtensionAPI;
   const config = {
-    ...DEFAULT_PI_TAI_CONFIG,
-    ansiTheme: { ...DEFAULT_PI_TAI_CONFIG.ansiTheme, pollIntervalMs: 60_000 },
+    ...DEFAULT_CLIENT_PREFERENCES,
+    ansiTheme: { ...DEFAULT_CLIENT_PREFERENCES.ansiTheme, pollIntervalMs: 60_000 },
   };
   return {
     handlers,
     pi,
-    config: { current: () => config } as PiTaiConfigService,
+    config: { clientPreferences: () => config },
   };
 }
 

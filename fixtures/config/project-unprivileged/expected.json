@@ -1,0 +1,93 @@
+{
+  "config": {
+    "sessionPolicy": {
+      "sessionTitle": {
+        "effort": "minimal",
+        "maxWords": 6,
+        "fallback": "heuristic"
+      },
+      "compaction": {
+        "enabled": true,
+        "thresholdPercent": 75
+      },
+      "modelProfiles": [
+        {
+          "name": "sol-low",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "low"
+        },
+        {
+          "name": "sol-medium",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "medium"
+        },
+        {
+          "name": "sol-high",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      ]
+    },
+    "clientPreferences": {
+      "ansiTheme": {
+        "darkTheme": "ansi-dark",
+        "lightTheme": "project-light",
+        "pollIntervalMs": 2000
+      },
+      "notifications": {
+        "reviewFailure": true,
+        "agentCompletion": true
+      }
+    },
+    "hostMachine": {}
+  },
+  "provenance": {
+    "sessionPolicy.sessionTitle.provider": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.model": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.effort": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.maxWords": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.fallback": {
+      "layer": "default"
+    },
+    "sessionPolicy.compaction.enabled": {
+      "layer": "default"
+    },
+    "sessionPolicy.compaction.thresholdPercent": {
+      "layer": "project",
+      "path": "project.json",
+      "digest": "28641b3d83012210592a4e3b8c2138dbc674c7b32761d83e3a016f51476ef24a"
+    },
+    "sessionPolicy.modelProfiles": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.darkTheme": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.lightTheme": {
+      "layer": "project",
+      "path": "project.json",
+      "digest": "28641b3d83012210592a4e3b8c2138dbc674c7b32761d83e3a016f51476ef24a"
+    },
+    "clientPreferences.ansiTheme.pollIntervalMs": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.reviewFailure": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.agentCompletion": {
+      "layer": "default"
+    }
+  },
+  "warnings": []
+}

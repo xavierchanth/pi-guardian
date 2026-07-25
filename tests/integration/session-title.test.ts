@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
-import { DEFAULT_PI_TAI_CONFIG } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
 import { registerSessionTitle } from "../../packages/pi-tai/src/session-title/register.ts";
 
 type Handler = (event: any, ctx: any) => unknown;
@@ -22,13 +21,13 @@ function harness(options: { configured?: boolean; existingName?: string } = {}) 
     },
   } as unknown as ExtensionAPI;
   const config = {
-    ...DEFAULT_PI_TAI_CONFIG,
+    ...DEFAULT_SESSION_POLICY,
     sessionTitle: {
-      ...DEFAULT_PI_TAI_CONFIG.sessionTitle,
+      ...DEFAULT_SESSION_POLICY.sessionTitle,
       ...(options.configured ? { provider: "luna", model: "title-model" } : {}),
     },
   };
-  const service = { current: () => config } as PiTaiConfigService;
+  const service = { sessionPolicy: () => config };
   return { handlers, names, pi, service };
 }
 

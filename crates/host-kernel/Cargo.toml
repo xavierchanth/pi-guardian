@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 pi-tai-broker = { path = "../broker" }
+pi-tai-config = { path = "../config" }
 pi-tai-host-protocol = { path = "../host-protocol" }
 pi-tai-event-store = { path = "../event-store" }
 pi-tai-runtime-protocol = { path = "../runtime-protocol" }
@@ -20,4 +21,5 @@ tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 tempfile.workspace = true

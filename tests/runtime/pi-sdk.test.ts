@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
 import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
+import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/config/provenance.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
+
+function pinnedPolicy() {
+  return {
+    sessionPolicy: {
+      ...DEFAULT_SESSION_POLICY,
+      modelProfiles: [...DEFAULT_SESSION_POLICY.modelProfiles],
+    },
+    policyProvenance: Object.fromEntries(
+      Object.keys(FIELD_DESCRIPTORS).map((path) => [path, { layer: "default" as const }]),
+    ),
+  };
+}
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-sdk-"));
@@ -13,7 +27,7 @@ async function fixture() {
   const agentDir = join(root, "agent");
   const sessionDir = join(root, "sessions");
   await (await import("node:fs/promises")).mkdir(cwd, { recursive: true });
-  return { root, cwd, agentDir, sessionDir };
+  return { root, cwd, agentDir, sessionDir, ...pinnedPolicy() };
 }
 
 test("hosted extension UI rejects interaction and redacts notifications", async () => {
@@ -24,6 +38,41 @@ test("hosted extension UI rejects interaction and redacts notifications", async 
   assert.equal(records[0]?.event, "extension_notification");
   assert.deepEqual(records[0]?.data, { characters: 20 });
   assert.equal(JSON.stringify(records).includes("private notification"), false);
+});
+
+test("Pi SDK create and open prefer pinned policy without reading configuration files", async () => {
+  const paths = await fixture();
+  await (await import("node:fs/promises")).mkdir(paths.agentDir, { recursive: true });
+  await writeFile(join(paths.agentDir, "pi-tai.json"), "{");
+  const policy = {
+    ...DEFAULT_SESSION_POLICY,
+    compaction: { enabled: false, thresholdPercent: 42 },
+    modelProfiles: [...DEFAULT_SESSION_POLICY.modelProfiles],
+  };
+  const provenance = Object.fromEntries(
+    Object.keys(FIELD_DESCRIPTORS).map((path) => [path, { layer: "default" as const }]),
+  );
+  const first = new PiSdkRuntimePort();
+  const session = await first.createSession({
+    ...paths,
+    faux: true,
+    sessionPolicy: policy,
+    policyProvenance: provenance,
+  }, () => {});
+  assert.deepEqual(first.sessionPolicy(), policy);
+  await first.disposeSession();
+
+  const second = new PiSdkRuntimePort();
+  await second.openSession({
+    sessionFile: session.sessionFile,
+    agentDir: paths.agentDir,
+    sessionDir: paths.sessionDir,
+    faux: true,
+    sessionPolicy: policy,
+    policyProvenance: provenance,
+  }, () => {});
+  assert.deepEqual(second.sessionPolicy(), policy);
+  await second.shutdown();
 });
 
 test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async () => {
@@ -55,6 +104,7 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
     sessionFile: session.sessionFile,
     agentDir: paths.agentDir,
     sessionDir: paths.sessionDir,
+    ...pinnedPolicy(),
     faux: true,
   }, (event) => secondEvents.push(event));
   const turnB = await second.startPrompt(
@@ -111,6 +161,7 @@ test("Pi SDK session replacement rebinds events to only the new session", async 
     sessionFile: secondSession.sessionFile,
     agentDir: firstPaths.agentDir,
     sessionDir: firstPaths.sessionDir,
+    ...pinnedPolicy(),
     faux: true,
   }, (event) => replacementEvents.push(event));
   const prompt = await port.startPrompt(

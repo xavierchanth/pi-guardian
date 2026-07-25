@@ -10,7 +10,7 @@ import {
   type ExtensionContext,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
 import { registerAutoCompaction } from "../compaction/register.ts";
 import type { AgentDefinitionSnapshot } from "../subagents/store.ts";
 import { privateContextPaths } from "./persistence.ts";
@@ -56,12 +56,12 @@ export interface PrivateChildSessionFactoryPort {
 }
 
 export interface PrivateChildSessionFactoryDependencies {
-  config: PiTaiConfigService;
+  config: SessionPolicyReader;
   createSession?: typeof createAgentSession;
 }
 
 export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPort {
-  private readonly config: PiTaiConfigService;
+  private readonly config: SessionPolicyReader;
   private readonly createSession: typeof createAgentSession;
 
   constructor(dependencies: PrivateChildSessionFactoryDependencies) {

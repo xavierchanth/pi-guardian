@@ -85,7 +85,9 @@ A reconnect supplies a cursor. For replay from the beginning or an older cursor:
 5. release buffered later events without duplication;
 6. continue live delivery.
 
-Replay favors complete current item snapshots where a wire protocol permits them. Chunk boundaries are not product identity.
+Replay favors complete current item snapshots where a wire protocol permits them. A replayed session
+includes the resolved policy and provenance it executed under, so continuation never depends on
+re-reading mutable configuration files. Chunk boundaries are not product identity.
 
 ## Client-local state
 

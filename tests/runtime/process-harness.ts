@@ -33,7 +33,7 @@ export class RuntimeProcessHarness {
   }
 
   command(id: string, method: string, params: unknown): Promise<any> {
-    this.send({ protocolVersion: 1, kind: "command", id, method, params });
+    this.send({ protocolVersion: 2, kind: "command", id, method, params });
     return this.waitFor((frame) => frame.kind === "response" && frame.id === id);
   }
 
@@ -95,8 +95,19 @@ export class RuntimeProcessHarness {
   }
 }
 
+export const pinnedPolicyParams = {
+  sessionPolicy: {
+    sessionTitle: { effort: "minimal", maxWords: 6, fallback: "heuristic" },
+    compaction: { enabled: true, thresholdPercent: 90 },
+    modelProfiles: [
+      { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
+    ],
+  },
+  policyProvenance: {},
+};
+
 export const initializeParams = (generation: number) => ({
-  protocol: { minVersion: 1, maxVersion: 1 },
+  protocol: { minVersion: 2, maxVersion: 2 },
   workerId: `worker-${generation}`,
   runtimeGeneration: generation,
 });

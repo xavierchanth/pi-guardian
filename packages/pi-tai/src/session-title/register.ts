@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
 import type { TitleGenerator } from "./generate.ts";
 import {
   heuristicSessionTitle,
@@ -9,7 +9,7 @@ import {
 
 export function registerSessionTitle(
   pi: ExtensionAPI,
-  configService: PiTaiConfigService,
+  configService: SessionPolicyReader,
   generateTitle: TitleGenerator,
 ): void {
   let candidatePrompt: string | undefined;
@@ -35,7 +35,7 @@ export function registerSessionTitle(
     attempted = true;
     const prompt = candidatePrompt;
     candidatePrompt = undefined;
-    const config = configService.current().sessionTitle;
+    const config = configService.sessionPolicy().sessionTitle;
     const activeGeneration = generation;
     let raw = "";
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   AcceptedResult,
+  ConfigProvenance,
   EmptyParams,
   EmptyResult,
   HostServiceResponseParams,
@@ -20,6 +21,7 @@ import type {
   SessionCreateParams,
   SessionInfo,
   SessionOpenParams,
+  SessionPolicy,
   SessionPromptParams,
   SessionRelocateWorkspaceParams,
   SessionSetCapabilityParams,
@@ -32,7 +34,7 @@ import type {
   ToolLifecycleData,
 } from "./generated.ts";
 
-export const CURRENT_RUNTIME_PROTOCOL_VERSION = 1;
+export const CURRENT_RUNTIME_PROTOCOL_VERSION = 2;
 export const MAX_PROTOCOL_STRING_LENGTH = 1_000_000;
 
 const nonEmptyString = z.string().min(1).max(MAX_PROTOCOL_STRING_LENGTH);
@@ -96,12 +98,40 @@ export const RuntimeInitializeParamsSchema: z.ZodType<RuntimeInitializeParams> =
   runtimeGeneration: safeUInt,
 }).strict();
 
+const SessionPolicySchema: z.ZodType<SessionPolicy> = z.object({
+  sessionTitle: z.object({
+    provider: nonEmptyString.optional(),
+    model: nonEmptyString.optional(),
+    effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]),
+    maxWords: z.number().int().min(1).max(20),
+    fallback: z.literal("heuristic"),
+  }).strict(),
+  compaction: z.object({
+    enabled: z.boolean(),
+    thresholdPercent: z.number().finite().min(1).max(100),
+  }).strict(),
+  modelProfiles: z.array(z.object({
+    name: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
+    provider: nonEmptyString,
+    model: nonEmptyString,
+    effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]),
+  }).strict()),
+}).strict();
+
+const ConfigProvenanceSchema: z.ZodType<ConfigProvenance> = z.record(z.string(), z.object({
+  layer: z.enum(["default", "machine", "user", "project"]),
+  path: nonEmptyString.optional(),
+  digest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict());
+
 export const SessionCreateParamsSchema: z.ZodType<SessionCreateParams> = z.object({
   cwd: nonEmptyString,
   rootSessionId: nonEmptyString.nullish().transform((value) => value ?? null),
   runtimeGeneration: safeUInt.nullish().transform((value) => value ?? null),
   agentDir: nonEmptyString,
   sessionDir: nonEmptyString,
+  sessionPolicy: SessionPolicySchema,
+  policyProvenance: ConfigProvenanceSchema,
   faux: z.boolean().optional(),
 }).strict();
 
@@ -111,6 +141,8 @@ export const SessionOpenParamsSchema: z.ZodType<SessionOpenParams> = z.object({
   runtimeGeneration: safeUInt.nullish().transform((value) => value ?? null),
   agentDir: nonEmptyString,
   sessionDir: nonEmptyString,
+  sessionPolicy: SessionPolicySchema,
+  policyProvenance: ConfigProvenanceSchema,
   faux: z.boolean().optional(),
 }).strict();
 

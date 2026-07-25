@@ -1,11 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { ClientPreferencesReader } from "../config/register.ts";
 import { detectThemeMode, type ThemeMode } from "./color.ts";
 import type { QueryTerminalBackground } from "./query.ts";
 
 export function registerAnsiTheme(
   pi: ExtensionAPI,
-  configService: PiTaiConfigService,
+  configService: ClientPreferencesReader,
   queryBackground: QueryTerminalBackground,
 ): void {
   let currentMode: ThemeMode | undefined;
@@ -42,7 +42,7 @@ export function registerAnsiTheme(
           const mode = detectThemeMode(background);
           if (mode !== currentMode) {
             currentMode = mode;
-            const config = configService.current().ansiTheme;
+            const config = configService.clientPreferences().ansiTheme;
             const theme = mode === "dark" ? config.darkTheme : config.lightTheme;
             ctx.ui.setTheme(theme);
           }
@@ -51,7 +51,7 @@ export function registerAnsiTheme(
         }
       }
 
-      const interval = configService.current().ansiTheme.pollIntervalMs;
+      const interval = configService.clientPreferences().ansiTheme.pollIntervalMs;
       timer = setTimeout(() => void poll(), interval);
     };
 

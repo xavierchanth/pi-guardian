@@ -1,10 +1,10 @@
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "kind": "response",
   "id": "command-1",
   "ok": true,
   "result": {
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "workerId": "worker-1",
     "runtimeGeneration": 7,
     "capabilities": {

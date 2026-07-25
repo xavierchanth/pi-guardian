@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { RuntimeProcessHarness, initializeParams } from "./process-harness.ts";
+import { RuntimeProcessHarness, initializeParams, pinnedPolicyParams } from "./process-harness.ts";
 
 async function isolatedRoot() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-blackbox-"));
@@ -29,6 +29,7 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
     cwd: paths.cwd,
     agentDir: paths.agentDir,
     sessionDir: paths.sessionDir,
+    ...pinnedPolicyParams,
     faux: true,
   });
   assert.equal(created.ok, true);
@@ -48,6 +49,7 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
     sessionFile,
     agentDir: paths.agentDir,
     sessionDir: paths.sessionDir,
+    ...pinnedPolicyParams,
     faux: true,
   })).ok, true);
   assert.equal((await second.command("prompt-b", "session.prompt", {
@@ -74,7 +76,7 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
   assert.match(await readFile(sessionFile, "utf8"), /first persisted turn/);
   assert.doesNotMatch(first.stderr + second.stderr, /first persisted turn|verify history|slow response/);
   for (const frame of [...first.frames, ...second.frames]) {
-    assert.equal(frame.protocolVersion, 1);
+    assert.equal(frame.protocolVersion, 2);
   }
 });
 
@@ -92,6 +94,7 @@ test("SIGTERM interrupts an active Pi turn and leaves parseable session history"
     cwd: paths.cwd,
     agentDir: paths.agentDir,
     sessionDir: paths.sessionDir,
+    ...pinnedPolicyParams,
     faux: true,
   });
   await worker.command("slow", "session.prompt", { turnId: "turn-signal", text: "slow response" });

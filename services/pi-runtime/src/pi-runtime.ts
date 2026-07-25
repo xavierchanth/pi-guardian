@@ -28,10 +28,12 @@ import type {
   SessionTextParams,
   ThinkingInfo,
 } from "@pi-tai/runtime-protocol";
+import type { SessionPolicy } from "../../../packages/pi-tai/src/config/schema.ts";
+import type { ConfigProvenance } from "../../../packages/pi-tai/src/config/provenance.ts";
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
-import { createPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
+import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
 import { HostRepositoryEnrollmentStore, RepositoryEnrollmentService } from "../../../packages/pi-tai/src/jj/repository-enrollment.ts";
 import { HostRepositoryMutationCoordinator, HostSessionWorkspaceStore, SessionWorkspaceService } from "../../../packages/pi-tai/src/jj/session-workspace.ts";
@@ -40,6 +42,11 @@ import type { HostServicePort } from "./host-services.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";
 import { createHeadlessUiContext } from "./headless-ui.ts";
 import type { PromptStart, RuntimeEventSink, RuntimePort } from "./runtime-port.ts";
+
+export interface PinnedSessionPolicy {
+  policy: SessionPolicy;
+  provenance: ConfigProvenance;
+}
 
 export class PiSdkRuntimePort implements RuntimePort {
   private modelRuntime?: ModelRuntime;
@@ -52,6 +59,7 @@ export class PiSdkRuntimePort implements RuntimePort {
   private active?: { commandId: string; turnId: string; emit: RuntimeEventSink };
   private hostServices?: HostServicePort;
   private rootSessionId?: string;
+  private pinnedPolicy?: PinnedSessionPolicy;
   private readonly diagnostics: DiagnosticSink;
 
   constructor(diagnostics: DiagnosticSink = () => {}) {
@@ -59,6 +67,8 @@ export class PiSdkRuntimePort implements RuntimePort {
   }
 
   bindHostServices(services: HostServicePort): void { this.hostServices = services; }
+
+  sessionPolicy(): SessionPolicy | undefined { return this.pinnedPolicy?.policy; }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     if (!this.runtime) {
@@ -90,6 +100,10 @@ export class PiSdkRuntimePort implements RuntimePort {
     await this.disposeSession();
     await this.ensureModelRuntime(params.agentDir, params.faux ?? false);
     this.rootSessionId = params.rootSessionId ?? undefined;
+    this.pinnedPolicy = {
+      policy: params.sessionPolicy as SessionPolicy,
+      provenance: params.policyProvenance as ConfigProvenance,
+    };
     const cwd = await this.managedSessionCwd(params);
     const sessionManager = SessionManager.create(cwd, params.sessionDir);
     this.runtime = await this.createRuntime(cwd, params.agentDir, sessionManager);
@@ -104,15 +118,16 @@ export class PiSdkRuntimePort implements RuntimePort {
   }
 
   async openSession(params: SessionOpenParams, emit: RuntimeEventSink): Promise<SessionInfo> {
+    await this.disposeSession();
     this.rootSessionId = params.rootSessionId ?? undefined;
+    this.pinnedPolicy = {
+      policy: params.sessionPolicy as SessionPolicy,
+      provenance: params.policyProvenance as ConfigProvenance,
+    };
     await this.ensureModelRuntime(params.agentDir, params.faux ?? false);
-    if (this.runtime) {
-      await this.runtime.switchSession(params.sessionFile);
-    } else {
-      const sessionManager = SessionManager.open(params.sessionFile, params.sessionDir);
-      this.runtime = await this.createRuntime(sessionManager.getCwd(), params.agentDir, sessionManager);
-      await this.bindSession(this.runtime.session);
-    }
+    const sessionManager = SessionManager.open(params.sessionFile, params.sessionDir);
+    this.runtime = await this.createRuntime(sessionManager.getCwd(), params.agentDir, sessionManager);
+    await this.bindSession(this.runtime.session);
     const info = sessionInfo(this.runtime.session, this.runtime.cwd);
     emit({
       event: "session.replaced",
@@ -290,7 +305,10 @@ export class PiSdkRuntimePort implements RuntimePort {
       this.capabilityController = capabilities;
       return {
         mode: "host-worker",
-        config: createPiTaiConfigService(agentDir),
+        config: createPinnedPiTaiConfigService(
+          this.pinnedPolicy?.policy ?? failMissingPinnedPolicy(),
+          this.pinnedPolicy?.provenance ?? failMissingPinnedPolicy(),
+        ),
         workContext: createPiSessionWorkContextStore(),
         titleGenerator: async () => "Hosted session",
         queryTerminalBackground: async () => { throw new Error("TTY access is disabled in hosted mode."); },
@@ -415,6 +433,10 @@ export class PiSdkRuntimePort implements RuntimePort {
     if (!this.runtime) throw new Error("No Pi session is loaded.");
     return this.runtime.session;
   }
+}
+
+function failMissingPinnedPolicy(): never {
+  throw new Error("Host-managed sessions require pinned session policy and provenance.");
 }
 
 function sessionInfo(session: AgentSession, cwd: string): SessionInfo {

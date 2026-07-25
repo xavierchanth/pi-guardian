@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
-import { DEFAULT_PI_TAI_CONFIG } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
 import { DEFAULT_MODEL_PROFILES } from "../../packages/pi-tai/src/model-profiles/domain.ts";
 import {
   matchingProfile,
@@ -49,8 +48,8 @@ function createHarness(options: {
     },
   };
   const config = {
-    current: () => DEFAULT_PI_TAI_CONFIG,
-  } as PiTaiConfigService;
+    sessionPolicy: () => DEFAULT_SESSION_POLICY,
+  };
   return {
     pi, ctx, config, commands, shortcuts, notifications, selectedModels, selectedEfforts,
   };

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_PI_TAI_CONFIG, type PiTaiConfig } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_CLIENT_PREFERENCES, type NotificationsConfig } from "../../packages/pi-tai/src/config/schema.ts";
 import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/notifications/events.ts";
 import { terminalNotificationSequence } from "../../packages/pi-tai/src/notifications/native.ts";
 import { registerNotifications } from "../../packages/pi-tai/src/notifications/register.ts";
 
-function harness(notifications: PiTaiConfig["notifications"] = DEFAULT_PI_TAI_CONFIG.notifications) {
+function harness(notifications: NotificationsConfig = DEFAULT_CLIENT_PREFERENCES.notifications) {
   const handlers = new Map<string, (event: unknown, ctx: any) => void>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const sent: Array<{ title: string; body: string }> = [];
@@ -21,8 +21,8 @@ function harness(notifications: PiTaiConfig["notifications"] = DEFAULT_PI_TAI_CO
     },
   } as unknown as ExtensionAPI;
   const config = {
-    current: () => ({ ...DEFAULT_PI_TAI_CONFIG, notifications }),
-  } as never;
+    clientPreferences: () => ({ ...DEFAULT_CLIENT_PREFERENCES, notifications }),
+  };
   registerNotifications(pi, config, (title, body) => sent.push({ title, body }));
   return { handlers, eventHandlers, sent };
 }

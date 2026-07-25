@@ -1,3 +1,6 @@
+use pi_tai_config::{
+    ConfigLayer, ConfigProvenance, ConfigScope, FieldDescriptor, FieldOrigin, SessionPolicy,
+};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use serde_json::Value;
 use specta::{Type, Types};
@@ -5,7 +8,7 @@ use specta_serde::PhasesFormat as SerdeFormat;
 use specta_typescript::{Number, Typescript, Unknown};
 use thiserror::Error;
 
-pub const CURRENT_RUNTIME_PROTOCOL_VERSION: u32 = 1;
+pub const CURRENT_RUNTIME_PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -100,32 +103,44 @@ pub struct RuntimeInitializeParams {
     pub runtime_generation: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionCreateParams {
     pub cwd: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_safe_u64", default)]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_u64",
+        default
+    )]
     #[specta(type = Option<Number>)]
     pub runtime_generation: Option<u64>,
     pub agent_dir: String,
     pub session_dir: String,
+    pub session_policy: SessionPolicy,
+    pub policy_provenance: ConfigProvenance,
     #[serde(default)]
     pub faux: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionOpenParams {
     pub session_file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_safe_u64", default)]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_safe_u64",
+        default
+    )]
     #[specta(type = Option<Number>)]
     pub runtime_generation: Option<u64>,
     pub agent_dir: String,
     pub session_dir: String,
+    pub session_policy: SessionPolicy,
+    pub policy_provenance: ConfigProvenance,
     #[serde(default)]
     pub faux: bool,
 }
@@ -322,7 +337,9 @@ where
     const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
     let value = Option::<u64>::deserialize(deserializer)?;
     if value.is_some_and(|value| value > MAX_SAFE_INTEGER) {
-        return Err(D::Error::custom("value exceeds JavaScript safe integer range"));
+        return Err(D::Error::custom(
+            "value exceeds JavaScript safe integer range",
+        ));
     }
     Ok(value)
 }
@@ -343,6 +360,12 @@ where
 
 pub fn protocol_types() -> Types {
     Types::default()
+        .register::<SessionPolicy>()
+        .register::<FieldOrigin>()
+        .register::<ConfigLayer>()
+        .register::<ConfigScope>()
+        .register::<FieldDescriptor>()
+        .register::<ConfigProvenance>()
         .register::<RuntimeCommand>()
         .register::<RuntimeResponse>()
         .register::<RuntimeEvent>()

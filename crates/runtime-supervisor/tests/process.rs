@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
+use pi_tai_config::schema::default_config;
 use pi_tai_runtime_protocol::SessionInfo;
 use pi_tai_runtime_supervisor::{RuntimeProcessSpec, RuntimeSupervisor, SupervisorNotice};
 use serde_json::json;
@@ -14,9 +15,9 @@ rl.on('line', (line) => {
   if (command.method === 'runtime.initialize') {
     generation = command.params.runtimeGeneration;
     process.stdout.write(JSON.stringify({
-      protocolVersion: 1, kind: 'response', id: command.id, ok: true,
+      protocolVersion: 2, kind: 'response', id: command.id, ok: true,
       result: {
-        protocolVersion: 1,
+        protocolVersion: 2,
         workerId: command.params.workerId,
         runtimeGeneration: generation,
         capabilities: { methods: [], tools: [], commands: [], sessionCapabilities: [], extensionErrors: [] }
@@ -24,19 +25,19 @@ rl.on('line', (line) => {
     }) + '\n');
   } else if (command.method === 'test.echo') {
     process.stdout.write(JSON.stringify({
-      protocolVersion: 1, kind: 'response', id: command.id, ok: true, result: command.params
+      protocolVersion: 2, kind: 'response', id: command.id, ok: true, result: command.params
     }) + '\n');
     process.stdout.write(JSON.stringify({
-      protocolVersion: 1, kind: 'event', workerSequence: 1,
+      protocolVersion: 2, kind: 'event', workerSequence: 1,
       runtimeGeneration: generation - 1, event: 'stale.event', data: {}
     }) + '\n');
     process.stdout.write(JSON.stringify({
-      protocolVersion: 1, kind: 'event', workerSequence: 2,
+      protocolVersion: 2, kind: 'event', workerSequence: 2,
       runtimeGeneration: generation, event: 'runtime.ready', data: {}
     }) + '\n');
   } else if (command.method === 'runtime.shutdown') {
     process.stdout.write(JSON.stringify({
-      protocolVersion: 1, kind: 'response', id: command.id, ok: true, result: {}
+      protocolVersion: 2, kind: 'response', id: command.id, ok: true, result: {}
     }) + '\n');
     process.exit(0);
   }
@@ -136,6 +137,8 @@ async fn supervises_the_real_typescript_worker_boundary() {
                 "cwd": cwd,
                 "agentDir": agent_dir,
                 "sessionDir": session_dir,
+                "sessionPolicy": default_config().session_policy,
+                "policyProvenance": {},
                 "faux": true
             }),
         )

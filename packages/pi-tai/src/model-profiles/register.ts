@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
 import { PROFILE_CYCLE_SHORTCUT } from "../keybindings/register.ts";
 import {
   THINKING_EFFORTS,
@@ -12,9 +12,9 @@ import {
 
 export function registerModelProfiles(
   pi: ExtensionAPI,
-  config: PiTaiConfigService,
+  config: SessionPolicyReader,
 ): void {
-  const profiles = () => config.current().modelProfiles;
+  const profiles = () => config.sessionPolicy().modelProfiles;
 
   pi.registerCommand("profile", {
     description: "Select a configured model-and-effort profile",

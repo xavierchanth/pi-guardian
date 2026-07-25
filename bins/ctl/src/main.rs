@@ -82,7 +82,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "session.create",
             None,
             None,
-            json!({ "cwd": cwd.canonicalize()?.to_string_lossy() }),
+            json!({
+                "cwd": cwd.canonicalize()?.to_string_lossy(),
+                "clientAssertedProjectTrust": false,
+            }),
             None,
         ),
         Command::Attach { session_id } => {

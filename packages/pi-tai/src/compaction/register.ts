@@ -1,14 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
 
 export function registerAutoCompaction(
   pi: ExtensionAPI,
-  config: PiTaiConfigService,
+  config: SessionPolicyReader,
 ): void {
   let compactionInProgress = false;
 
   pi.on("agent_settled", async (_event, ctx) => {
-    const policy = config.current().compaction;
+    const policy = config.sessionPolicy().compaction;
     if (!policy.enabled || compactionInProgress || !ctx.isIdle()) return;
 
     const usage = ctx.getContextUsage();

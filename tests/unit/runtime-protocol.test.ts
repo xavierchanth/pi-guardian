@@ -20,7 +20,7 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
   const command = decodeRuntimeCommand(fixture("initialize-command.json"));
   assert.equal(command.method, "runtime.initialize");
   assert.deepEqual(decodeMethodParams(command.method, command.params), {
-    protocol: { minVersion: 1, maxVersion: 1 },
+    protocol: { minVersion: 2, maxVersion: 2 },
     workerId: "worker-1",
     runtimeGeneration: 7,
   });
@@ -36,9 +36,47 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
   }), { backend: "git", name: "focused-task" });
 });
 
+test("session create policy round trips through strict method schemas", () => {
+  const policy = {
+    sessionTitle: { effort: "minimal", maxWords: 6, fallback: "heuristic" },
+    compaction: { enabled: true, thresholdPercent: 90 },
+    modelProfiles: [
+      { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
+    ],
+  };
+  const provenance = {
+    "sessionPolicy.compaction.enabled": { layer: "default" },
+  };
+  assert.deepEqual(decodeMethodParams("session.create", {
+    cwd: "/tmp/project",
+    agentDir: "/tmp/agent",
+    sessionDir: "/tmp/sessions",
+    sessionPolicy: policy,
+    policyProvenance: provenance,
+  }), {
+    cwd: "/tmp/project",
+    rootSessionId: null,
+    runtimeGeneration: null,
+    agentDir: "/tmp/agent",
+    sessionDir: "/tmp/sessions",
+    sessionPolicy: policy,
+    policyProvenance: provenance,
+  });
+  assert.throws(
+    () => decodeMethodParams("session.create", {
+      cwd: "/tmp/project",
+      agentDir: "/tmp/agent",
+      sessionDir: "/tmp/sessions",
+      sessionPolicy: { ...policy, compaction: { enabled: true, thresholdPercent: 500 } },
+      policyProvenance: provenance,
+    }),
+    RuntimeDecodeError,
+  );
+});
+
 test("generic envelopes preserve unsupported methods while known params validate separately", () => {
   const command = decodeRuntimeCommand({
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "command",
     id: "unknown-1",
     method: "future.method",
@@ -57,7 +95,7 @@ test("runtime schemas reject unknown fields, unsafe counters, and invalid respon
   assert.throws(() => decodeRuntimeCommand(fixture("invalid-extra-field.json")), RuntimeDecodeError);
   assert.equal(RuntimeEventSchema.safeParse(fixture("invalid-unsafe-sequence.json")).success, false);
   assert.equal(RuntimeResponseSchema.safeParse({
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "response",
     id: "bad",
     ok: false,
@@ -66,7 +104,7 @@ test("runtime schemas reject unknown fields, unsafe counters, and invalid respon
 
 test("response constructors validate outbound frames", () => {
   assert.deepEqual(successResponse("ok-1", {}), {
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "response",
     id: "ok-1",
     ok: true,
@@ -77,7 +115,7 @@ test("response constructors validate outbound frames", () => {
     message: "Unsupported command.",
     retryable: false,
   }), {
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "response",
     id: "bad-1",
     ok: false,

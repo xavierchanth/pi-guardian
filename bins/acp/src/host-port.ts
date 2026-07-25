@@ -59,6 +59,7 @@ export class HostBrokerPort implements BrokerPort {
   async create(input: { cwd: string }): Promise<BrokerSessionSummary> {
     const result = sessionSchema.parse(await this.command("session.create", undefined, undefined, {
       cwd: input.cwd,
+      clientAssertedProjectTrust: false,
     }));
     return summary(result);
   }

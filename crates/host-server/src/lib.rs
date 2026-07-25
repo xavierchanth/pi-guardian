@@ -6,8 +6,8 @@ use pi_tai_host_kernel::{
     CancelSession, CreateSession, HostKernel, HostKernelError, PromptSession,
 };
 use pi_tai_host_protocol::{
-    CURRENT_PROTOCOL_VERSION, ClientFrame, HostCommand, HostProtocolError, HostResponse,
-    HostResponseOutcome, ServerFrame,
+    CURRENT_PROTOCOL_VERSION, ClientFrame, CreateSessionPayload, HostCommand, HostProtocolError,
+    HostResponse, HostResponseOutcome, ServerFrame,
 };
 use pi_tai_local_ipc::{IpcConnection, IpcError, IpcListener};
 use serde::Deserialize;
@@ -153,11 +153,12 @@ async fn execute_command(
             attachment: None,
         }),
         "session.create" => {
-            let payload: CreatePayload = decode_payload(&command.payload)?;
+            let payload: CreateSessionPayload = decode_payload(&command.payload)?;
             let snapshot = kernel
                 .create_session(CreateSession {
                     client_id: command.client_id.clone(),
                     cwd: payload.cwd,
+                    client_asserted_project_trust: payload.client_asserted_project_trust,
                 })
                 .await?;
             let attachment = Some((command.client_id.clone(), snapshot.session_id.clone()));
@@ -248,12 +249,6 @@ async fn execute_command(
         }
         _ => Err(CommandError::UnsupportedCommand(command.kind.clone())),
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreatePayload {
-    cwd: String,
 }
 
 #[derive(Deserialize)]

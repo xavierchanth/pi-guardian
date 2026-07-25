@@ -4,7 +4,13 @@ use pi_tai_broker::{
     BrokerError, BrokerRecovery, BrokerSession, BrokerSessionId, ClientId, ForegroundState,
     OperationId, PiSessionBinding, RuntimeEventDisposition, RuntimeHealth, StopReason,
 };
-use pi_tai_event_store::{CoreAppendOutcome, CoreEvent, CoreTransaction, EventStore, OperationCommit, SessionProjection, StoreError, UsageEntry};
+use pi_tai_config::{
+    ConfigDocument, ConfigLayer, ConfigProvenance, ProjectTrust, Resolution, SessionPolicy, resolve,
+};
+use pi_tai_event_store::{
+    CoreAppendOutcome, CoreEvent, CoreTransaction, EventStore, OperationCommit, SessionProjection,
+    StoreError, UsageEntry,
+};
 use pi_tai_host_protocol::{CURRENT_PROTOCOL_VERSION, HostEvent};
 use pi_tai_runtime_protocol::{RuntimeEvent, SessionInfo};
 use pi_tai_runtime_supervisor::{
@@ -29,6 +35,8 @@ pub struct HostKernelConfig {
 pub struct CreateSession {
     pub client_id: String,
     pub cwd: String,
+    /// Temporary trust-on-assertion input; D8 replaces this with the Host-owned digest-bound store.
+    pub client_asserted_project_trust: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +89,7 @@ pub struct PiSessionSnapshot {
     pub cwd: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSnapshot {
     pub session_id: String,
@@ -93,6 +101,16 @@ pub struct SessionSnapshot {
     pub attachment_count: usize,
     pub active_client_id: Option<String>,
     pub control_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_policy: Option<ResolvedSessionPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolvedSessionPolicy {
+    pub session_policy: SessionPolicy,
+    pub policy_provenance: ConfigProvenance,
+    pub client_asserted_project_trust: bool,
 }
 
 #[derive(Clone)]
@@ -266,6 +284,7 @@ enum KernelCommand {
 
 struct ManagedSession {
     state: BrokerSession,
+    resolved_policy: ResolvedSessionPolicy,
     worker: Option<RuntimeWorkerHandle>,
     sequence: u64,
     cancelled_operations: Vec<OperationId>,
@@ -308,10 +327,7 @@ async fn run_actor(
                 let _ = reply.send(result);
             }
             KernelCommand::List { reply } => {
-                let result = Ok(sessions
-                    .values()
-                    .map(|session| snapshot(&session.state))
-                    .collect());
+                let result = Ok(sessions.values().map(|session| snapshot(session)).collect());
                 let _ = reply.send(result);
             }
             KernelCommand::Attach {
@@ -322,7 +338,7 @@ async fn run_actor(
                 let result = mutate_session(&mut sessions, &session_id, |session| {
                     session.state.attach(ClientId::parse(client_id)?);
                     emit(&events, &mut store, session, "client.attached", json!({}))?;
-                    Ok(snapshot(&session.state))
+                    Ok(snapshot(session))
                 });
                 let _ = reply.send(result);
             }
@@ -334,14 +350,14 @@ async fn run_actor(
                 let result = mutate_session(&mut sessions, &session_id, |session| {
                     session.state.detach(&ClientId::parse(client_id)?);
                     emit(&events, &mut store, session, "client.detached", json!({}))?;
-                    Ok(snapshot(&session.state))
+                    Ok(snapshot(session))
                 });
                 let _ = reply.send(result);
             }
             KernelCommand::Snapshot { session_id, reply } => {
                 let result = sessions
                     .get(&session_id)
-                    .map(|session| snapshot(&session.state))
+                    .map(|session| snapshot(session))
                     .ok_or(HostKernelError::UnknownSession(session_id));
                 let _ = reply.send(result);
             }
@@ -415,7 +431,7 @@ async fn recover_sessions(
             pi_session: PiSessionBinding::new(
                 binding.session_id,
                 binding.session_file.clone(),
-                binding.cwd,
+                binding.cwd.clone(),
             )?,
             interrupted_foreground: interrupted,
             last_stop_reason,
@@ -425,7 +441,47 @@ async fn recover_sessions(
                 .transpose()?,
             control_epoch: persisted.control_epoch,
         })?;
+        let canonical_policy = policy_from_events(store, &persisted.session_id)?;
+        let mut backfill_warnings = Vec::new();
+        let (resolved_policy, needs_backfill) = match (canonical_policy, persisted.resolved_policy)
+        {
+            (Some(canonical), Some(projected)) => {
+                if canonical != projected {
+                    return Err(HostKernelError::InvalidProjection(persisted.session_id));
+                }
+                (canonical, false)
+            }
+            (Some(canonical), None) => (canonical, false),
+            (None, Some(_)) => {
+                return Err(HostKernelError::InvalidProjection(persisted.session_id));
+            }
+            (None, None) => {
+                let resolution = backfill_legacy_session_policy(
+                    &config.agent_dir,
+                    std::path::Path::new(&binding.cwd),
+                )?;
+                backfill_warnings = resolution.warnings.clone();
+                (resolved_session_policy(&resolution, false), true)
+            }
+        };
         let generation = state.begin_runtime_start()?;
+        let mut managed = ManagedSession {
+            state,
+            resolved_policy,
+            worker: None,
+            sequence: store.last_sequence(&persisted.session_id)?,
+            cancelled_operations: Vec::new(),
+        };
+        if needs_backfill {
+            let payload = session_policy_event_payload(&managed.resolved_policy);
+            emit(
+                events,
+                store,
+                &mut managed,
+                "session.policy_resolved",
+                payload,
+            )?;
+        }
         let started = RuntimeSupervisor::spawn(
             config.runtime.clone(),
             format!("runtime-{}", persisted.session_id),
@@ -437,8 +493,11 @@ async fn recover_sessions(
             persisted.session_id.clone(),
             started.handle.subscribe(),
         );
-        let response = started
-            .handle
+        managed.worker = Some(started.handle);
+        let response = managed
+            .worker
+            .as_ref()
+            .expect("recovered session worker is present")
             .request(
                 "session.open",
                 json!({
@@ -447,22 +506,27 @@ async fn recover_sessions(
                     "runtimeGeneration": generation,
                     "agentDir": config.agent_dir,
                     "sessionDir": config.session_dir,
+                    "sessionPolicy": managed.resolved_policy.session_policy,
+                    "policyProvenance": managed.resolved_policy.policy_provenance,
                     "faux": config.faux,
                 }),
             )
             .await?;
         let info = decode_runtime_result::<SessionInfo>(response)?;
-        state.mark_runtime_ready(
+        managed.state.mark_runtime_ready(
             generation,
             PiSessionBinding::new(info.session_id, info.session_file, info.cwd)?,
         )?;
-        let mut managed = ManagedSession {
-            state,
-            worker: Some(started.handle),
-            sequence: store.last_sequence(&persisted.session_id)?,
-            cancelled_operations: Vec::new(),
-        };
         emit(events, store, &mut managed, "runtime.recovered", json!({}))?;
+        if !backfill_warnings.is_empty() {
+            emit(
+                events,
+                store,
+                &mut managed,
+                "session.configuration_warning",
+                json!({ "warnings": backfill_warnings }),
+            )?;
+        }
         sessions.insert(persisted.session_id, managed);
     }
     Ok(sessions)
@@ -496,6 +560,81 @@ fn forward_notices(
     });
 }
 
+fn policy_from_events(
+    store: &EventStore,
+    session_id: &str,
+) -> Result<Option<ResolvedSessionPolicy>, HostKernelError> {
+    let mut resolved = None;
+    for event in store.events_after(session_id, 0, 10_000)? {
+        if event.event_type != "session.policy_resolved" {
+            continue;
+        }
+        let policy: ResolvedSessionPolicy = serde_json::from_value(event.payload)?;
+        if resolved.replace(policy).is_some() {
+            return Err(HostKernelError::InvalidProjection(session_id.into()));
+        }
+    }
+    Ok(resolved)
+}
+
+fn resolved_session_policy(resolution: &Resolution, trusted: bool) -> ResolvedSessionPolicy {
+    ResolvedSessionPolicy {
+        session_policy: resolution.config.session_policy.clone(),
+        policy_provenance: resolution.provenance.clone(),
+        client_asserted_project_trust: trusted,
+    }
+}
+
+fn session_policy_transport(policy: &ResolvedSessionPolicy) -> Value {
+    json!({
+        "sessionPolicy": policy.session_policy,
+        "policyProvenance": policy.policy_provenance,
+    })
+}
+
+fn session_policy_event_payload(policy: &ResolvedSessionPolicy) -> Value {
+    serde_json::to_value(policy).expect("resolved session policy serializes")
+}
+
+fn resolve_session_config(
+    agent_dir: &std::path::Path,
+    cwd: &std::path::Path,
+    trusted: bool,
+) -> Result<Resolution, HostKernelError> {
+    read_and_resolve_session_config(agent_dir, cwd, trusted)
+}
+
+fn backfill_legacy_session_policy(
+    agent_dir: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<Resolution, HostKernelError> {
+    read_and_resolve_session_config(agent_dir, cwd, false)
+}
+
+fn read_and_resolve_session_config(
+    agent_dir: &std::path::Path,
+    cwd: &std::path::Path,
+    trusted: bool,
+) -> Result<Resolution, HostKernelError> {
+    let paths = [
+        (ConfigLayer::User, agent_dir.join("pi-tai.json")),
+        (ConfigLayer::Project, cwd.join(".pi").join("pi-tai.json")),
+    ];
+    let mut layers = Vec::new();
+    for (layer, path) in paths {
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => layers.push(ConfigDocument::new(
+                layer,
+                path.to_string_lossy().into_owned(),
+                raw,
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(resolve(&layers, &ProjectTrust { trusted }))
+}
+
 async fn create_session(
     config: &HostKernelConfig,
     actor: &mpsc::Sender<KernelCommand>,
@@ -509,6 +648,11 @@ async fn create_session(
     }
     std::fs::create_dir_all(&config.agent_dir)?;
     std::fs::create_dir_all(&config.session_dir)?;
+    let resolution = resolve_session_config(
+        &config.agent_dir,
+        std::path::Path::new(&request.cwd),
+        request.client_asserted_project_trust,
+    )?;
     let session_id = BrokerSessionId::new();
     let session_key = session_id.as_str().to_owned();
     let mut state = BrokerSession::new(session_id);
@@ -521,32 +665,52 @@ async fn create_session(
     )
     .await?;
     forward_notices(actor, session_key.clone(), started.handle.subscribe());
-    let response = started
-        .handle
-        .request(
-            "session.create",
-            json!({
-                "cwd": request.cwd,
-                "rootSessionId": session_key,
-                "runtimeGeneration": generation,
-                "agentDir": config.agent_dir,
-                "sessionDir": config.session_dir,
-                "faux": config.faux,
-            }),
-        )
-        .await?;
-    let info = decode_runtime_result::<SessionInfo>(response)?;
-    state.mark_runtime_ready(
-        generation,
-        PiSessionBinding::new(info.session_id, info.session_file, info.cwd)?,
-    )?;
+    let resolved_policy =
+        resolved_session_policy(&resolution, request.client_asserted_project_trust);
     let mut managed = ManagedSession {
         state,
+        resolved_policy,
         worker: Some(started.handle),
         sequence: 0,
         cancelled_operations: Vec::new(),
     };
-    let created_payload = serde_json::to_value(snapshot(&managed.state))?;
+    let policy_payload = session_policy_event_payload(&managed.resolved_policy);
+    emit(
+        events,
+        store,
+        &mut managed,
+        "session.policy_resolved",
+        policy_payload,
+    )?;
+    let mut create_params = json!({
+        "cwd": request.cwd,
+        "rootSessionId": session_key,
+        "runtimeGeneration": generation,
+        "agentDir": config.agent_dir,
+        "sessionDir": config.session_dir,
+        "faux": config.faux,
+    });
+    create_params
+        .as_object_mut()
+        .expect("session create params are an object")
+        .extend(
+            session_policy_transport(&managed.resolved_policy)
+                .as_object()
+                .expect("policy transport is an object")
+                .clone(),
+        );
+    let response = managed
+        .worker
+        .as_ref()
+        .expect("new session worker is present")
+        .request("session.create", create_params)
+        .await?;
+    let info = decode_runtime_result::<SessionInfo>(response)?;
+    managed.state.mark_runtime_ready(
+        generation,
+        PiSessionBinding::new(info.session_id, info.session_file, info.cwd)?,
+    )?;
+    let created_payload = serde_json::to_value(snapshot(&managed))?;
     emit(
         events,
         store,
@@ -554,7 +718,16 @@ async fn create_session(
         "session.created",
         created_payload,
     )?;
-    let result = snapshot(&managed.state);
+    if !resolution.warnings.is_empty() {
+        emit(
+            events,
+            store,
+            &mut managed,
+            "session.configuration_warning",
+            json!({ "warnings": resolution.warnings }),
+        )?;
+    }
+    let result = snapshot(&managed);
     sessions.insert(session_key, managed);
     Ok(result)
 }
@@ -589,7 +762,7 @@ async fn prompt_session(
     session
         .state
         .accept_prompt(&client_id, expected_revision, operation_id.clone())?;
-    let accepted = snapshot(&session.state);
+    let accepted = snapshot(session);
     emit_operation(
         events,
         store,
@@ -641,7 +814,7 @@ async fn prompt_session(
                 .unwrap_or_else(|| "prompt rejected".into()),
         ));
     }
-    Ok(snapshot(&session.state))
+    Ok(snapshot(session))
 }
 
 async fn cancel_session(
@@ -686,7 +859,7 @@ async fn cancel_session(
                 .unwrap_or_else(|| "cancellation rejected".into()),
         ));
     }
-    Ok(snapshot(&session.state))
+    Ok(snapshot(session))
 }
 
 async fn handle_runtime_notice(
@@ -775,13 +948,25 @@ async fn handle_runtime_event(
     emit(events, store, session, &event.event, payload)?;
     if usage_changed {
         let usage = store.usage_breakdown(session.state.id().as_str())?;
-        emit(events, store, session, "usage.replaced", serde_json::to_value(usage)?)?;
+        emit(
+            events,
+            store,
+            session,
+            "usage.replaced",
+            serde_json::to_value(usage)?,
+        )?;
     }
     Ok(())
 }
 
-fn record_runtime_usage(store: &EventStore, session: &ManagedSession, event: &RuntimeEvent) -> Result<bool, HostKernelError> {
-    if event.event != "message.end" || event.data["role"] != "assistant" { return Ok(false); }
+fn record_runtime_usage(
+    store: &EventStore,
+    session: &ManagedSession,
+    event: &RuntimeEvent,
+) -> Result<bool, HostKernelError> {
+    if event.event != "message.end" || event.data["role"] != "assistant" {
+        return Ok(false);
+    }
     let session_id = session.state.id().as_str();
     let cycle_id = event.turn_id.as_deref().unwrap_or("root-idle");
     let message_id = event.data["messageId"].as_str();
@@ -789,22 +974,55 @@ fn record_runtime_usage(store: &EventStore, session: &ManagedSession, event: &Ru
     let model = event.data["model"].as_str();
     let usage = event.data.get("usage").and_then(Value::as_object);
     if message_id.is_none() || provider.is_none() || model.is_none() || usage.is_none() {
-        return store.record_usage_gap(
-            &format!("usage-gap-{session_id}-{}", event.worker_sequence), session_id, session_id, cycle_id,
-            if usage.is_none() { "missing_message_usage" } else { "missing_model_identity" },
-            &OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
-        ).map_err(HostKernelError::from);
+        return store
+            .record_usage_gap(
+                &format!("usage-gap-{session_id}-{}", event.worker_sequence),
+                session_id,
+                session_id,
+                cycle_id,
+                if usage.is_none() {
+                    "missing_message_usage"
+                } else {
+                    "missing_model_identity"
+                },
+                &OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+            )
+            .map_err(HostKernelError::from);
     }
     let usage = usage.expect("checked");
     let amount = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
     let cost = usage.get("cost").and_then(Value::as_object);
-    let cost_amount = |key: &str| cost.and_then(|value| value.get(key)).and_then(Value::as_f64).unwrap_or(0.0);
+    let cost_amount = |key: &str| {
+        cost.and_then(|value| value.get(key))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+    };
     let entry = UsageEntry {
-        usage_event_id: format!("usage-{session_id}-{cycle_id}-{}", message_id.expect("checked")), session_id: session_id.into(), context_id: session_id.into(), cycle_id: cycle_id.into(), message_id: message_id.expect("checked").into(),
-        provider: provider.expect("checked").into(), model: model.expect("checked").into(), role: "thinker".into(),
-        input: amount("input"), output: amount("output"), cache_read: amount("cacheRead"), cache_write: amount("cacheWrite"),
-        cost_input: cost_amount("input"), cost_output: cost_amount("output"), cost_cache_read: cost_amount("cacheRead"), cost_cache_write: cost_amount("cacheWrite"), cost_total: cost_amount("total"),
-        recorded_at: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+        usage_event_id: format!(
+            "usage-{session_id}-{cycle_id}-{}",
+            message_id.expect("checked")
+        ),
+        session_id: session_id.into(),
+        context_id: session_id.into(),
+        cycle_id: cycle_id.into(),
+        message_id: message_id.expect("checked").into(),
+        provider: provider.expect("checked").into(),
+        model: model.expect("checked").into(),
+        role: "thinker".into(),
+        input: amount("input"),
+        output: amount("output"),
+        cache_read: amount("cacheRead"),
+        cache_write: amount("cacheWrite"),
+        cost_input: cost_amount("input"),
+        cost_output: cost_amount("output"),
+        cost_cache_read: cost_amount("cacheRead"),
+        cost_cache_write: cost_amount("cacheWrite"),
+        cost_total: cost_amount("total"),
+        recorded_at: OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
     };
     store.record_usage(&entry).map_err(HostKernelError::from)
 }
@@ -829,7 +1047,9 @@ struct CoreTransactionRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EnrollmentLoadRequest { key: String }
+struct EnrollmentLoadRequest {
+    key: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -854,7 +1074,9 @@ struct RepositoryLeaseRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionWorkspaceLoadRequest { workspace_id: String }
+struct SessionWorkspaceLoadRequest {
+    workspace_id: String,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -874,101 +1096,214 @@ async fn handle_host_service_request(
     let request = serde_json::from_value::<HostServiceRequestData>(event.data)
         .map_err(|_| HostKernelError::InvalidRequest("Host service request is invalid"))?;
     let aggregate_id = format!("session:{}:concurrency", session.state.id().as_str());
-    let outcome: Result<Value, HostKernelError> = (|| {
-        match request.method.as_str() {
-            "core.load" => Ok(serde_json::to_value(store.load_core_aggregate(&aggregate_id)?)?),
-            "core.transact" => {
-                let input = serde_json::from_value::<CoreTransactionRequest>(request.params.clone())
-                    .map_err(|_| HostKernelError::InvalidRequest("core.transact parameters are invalid"))?;
-                let timestamp = OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
-                let transaction = CoreTransaction {
-                    transaction_id: input.transaction_id,
-                    aggregate_id: aggregate_id.clone(),
-                    expected_revision: input.expected_revision,
-                    runtime_generation: event.runtime_generation,
-                    timestamp,
-                    events: input.events,
-                    state: input.state,
-                    projection: input.projection,
-                };
-                let appended = store.append_core_transaction(&transaction)?;
-                let aggregate = match appended {
-                    CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate,
-                };
-                emit(events, store, session, "concurrency.replaced", json!({ "aggregateId": aggregate.aggregate_id, "revision": aggregate.revision, "runtimeGeneration": aggregate.runtime_generation, "projection": aggregate.projection, "updatedAt": aggregate.updated_at }))?;
-                Ok(serde_json::to_value(aggregate)?)
-            }
-            "repository.enrollment.load" => {
-                let input = serde_json::from_value::<EnrollmentLoadRequest>(request.params.clone())
-                    .map_err(|_| HostKernelError::InvalidRequest("repository enrollment load parameters are invalid"))?;
-                validate_repository_key(&input.key)?;
-                Ok(serde_json::to_value(store.load_core_aggregate(&format!("repository:{}:enrollment", input.key))?)?)
-            }
-            "repository.enrollment.put" => {
-                let input = serde_json::from_value::<EnrollmentPutRequest>(request.params.clone())
-                    .map_err(|_| HostKernelError::InvalidRequest("repository enrollment put parameters are invalid"))?;
-                validate_repository_key(&input.key)?;
-                let enrollment_aggregate_id = format!("repository:{}:enrollment", input.key);
-                let transaction = CoreTransaction {
-                    transaction_id: input.transaction_id,
-                    aggregate_id: enrollment_aggregate_id,
-                    expected_revision: input.expected_revision,
-                    runtime_generation: event.runtime_generation,
-                    timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
-                    events: vec![CoreEvent { event_id: format!("enrollment-event-{}", request.request_id), event_type: "repository.enrollment_replaced".into(), payload: json!({ "phase": input.value.get("phase") }) }],
-                    state: input.value.clone(),
-                    projection: input.value,
-                };
-                let appended = store.append_core_transaction(&transaction)?;
-                let aggregate = match appended { CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate };
-                Ok(serde_json::to_value(aggregate)?)
-            }
-            "repository.lease.acquire" => {
-                let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("repository lease acquire parameters are invalid"))?;
-                let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
-                let current = store.load_core_aggregate(&aggregate_id)?;
-                if current.as_ref().is_some_and(|aggregate| aggregate.projection["phase"] != "available") { return Err(HostKernelError::RepositoryBusy(input.repository_id)); }
-                let generation = current.as_ref().and_then(|aggregate| aggregate.projection["generation"].as_u64()).unwrap_or(0).checked_add(1).ok_or(HostKernelError::CounterOverflow("repository lease generation"))?;
-                let lease = json!({
-                    "phase": "leased", "repositoryId": input.repository_id, "generation": generation,
-                    "leaseId": format!("repo-lease-{}", input.transaction_id),
-                    "rootSessionId": input.root_session_id.ok_or(HostKernelError::InvalidRequest("rootSessionId is required"))?,
-                    "runtimeGeneration": input.runtime_generation.ok_or(HostKernelError::InvalidRequest("runtimeGeneration is required"))?,
-                    "operationId": input.operation_id, "acquiredAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
-                });
-                let aggregate = replace_core_aggregate(store, aggregate_id, input.transaction_id, current.as_ref().map_or(0, |value| value.revision), event.runtime_generation, "repository.lease_acquired", lease.clone())?;
-                let _ = aggregate;
-                Ok(lease)
-            }
-            "repository.lease.release" | "repository.lease.interrupt" => {
-                let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("repository lease completion parameters are invalid"))?;
-                let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
-                let current = store.load_core_aggregate(&aggregate_id)?.ok_or_else(|| HostKernelError::RepositoryBusy(input.repository_id.clone()))?;
-                if current.projection["phase"] != "leased" || current.projection["leaseId"].as_str() != input.lease_id.as_deref() || current.projection["operationId"].as_str() != Some(input.operation_id.as_str()) { return Err(HostKernelError::RepositoryLeaseMismatch); }
-                let generation = current.projection["generation"].as_u64().ok_or(HostKernelError::RepositoryLeaseMismatch)?;
-                let next = if request.method == "repository.lease.release" {
-                    json!({ "phase": "available", "repositoryId": input.repository_id, "generation": generation })
-                } else {
-                    json!({ "phase": "interrupted", "repositoryId": input.repository_id, "generation": generation, "priorLeaseId": input.lease_id, "priorRootSessionId": current.projection["rootSessionId"], "priorRuntimeGeneration": current.projection["runtimeGeneration"], "operationId": input.operation_id, "reason": input.reason.unwrap_or_else(|| "runtime mutation interrupted".into()), "interruptedAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()) })
-                };
-                let event_type = if request.method == "repository.lease.release" { "repository.lease_released" } else { "repository.lease_interrupted" };
-                replace_core_aggregate(store, aggregate_id, input.transaction_id, current.revision, event.runtime_generation, event_type, next.clone())?;
-                Ok(next)
-            }
-            "session.workspace.load" => {
-                let input = serde_json::from_value::<SessionWorkspaceLoadRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("session workspace load parameters are invalid"))?;
-                validate_semantic_id(&input.workspace_id)?;
-                Ok(serde_json::to_value(store.load_core_aggregate(&format!("session:{}:workspace:{}", session.state.id().as_str(), input.workspace_id))?)?)
-            }
-            "session.workspace.put" => {
-                let input = serde_json::from_value::<SessionWorkspacePutRequest>(request.params.clone()).map_err(|_| HostKernelError::InvalidRequest("session workspace put parameters are invalid"))?;
-                validate_semantic_id(&input.workspace_id)?;
-                let aggregate_id = format!("session:{}:workspace:{}", session.state.id().as_str(), input.workspace_id);
-                let aggregate = replace_core_aggregate(store, aggregate_id, input.transaction_id, input.expected_revision, event.runtime_generation, "session.workspace_replaced", input.value)?;
-                Ok(serde_json::to_value(aggregate)?)
-            }
-            _ => Err(HostKernelError::UnsupportedHostService(request.method.clone())),
+    let outcome: Result<Value, HostKernelError> = (|| match request.method.as_str() {
+        "core.load" => Ok(serde_json::to_value(
+            store.load_core_aggregate(&aggregate_id)?,
+        )?),
+        "core.transact" => {
+            let input = serde_json::from_value::<CoreTransactionRequest>(request.params.clone())
+                .map_err(|_| {
+                    HostKernelError::InvalidRequest("core.transact parameters are invalid")
+                })?;
+            let timestamp = OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
+            let transaction = CoreTransaction {
+                transaction_id: input.transaction_id,
+                aggregate_id: aggregate_id.clone(),
+                expected_revision: input.expected_revision,
+                runtime_generation: event.runtime_generation,
+                timestamp,
+                events: input.events,
+                state: input.state,
+                projection: input.projection,
+            };
+            let appended = store.append_core_transaction(&transaction)?;
+            let aggregate = match appended {
+                CoreAppendOutcome::Committed { aggregate }
+                | CoreAppendOutcome::Duplicate { aggregate } => aggregate,
+            };
+            emit(
+                events,
+                store,
+                session,
+                "concurrency.replaced",
+                json!({ "aggregateId": aggregate.aggregate_id, "revision": aggregate.revision, "runtimeGeneration": aggregate.runtime_generation, "projection": aggregate.projection, "updatedAt": aggregate.updated_at }),
+            )?;
+            Ok(serde_json::to_value(aggregate)?)
         }
+        "repository.enrollment.load" => {
+            let input = serde_json::from_value::<EnrollmentLoadRequest>(request.params.clone())
+                .map_err(|_| {
+                    HostKernelError::InvalidRequest(
+                        "repository enrollment load parameters are invalid",
+                    )
+                })?;
+            validate_repository_key(&input.key)?;
+            Ok(serde_json::to_value(store.load_core_aggregate(
+                &format!("repository:{}:enrollment", input.key),
+            )?)?)
+        }
+        "repository.enrollment.put" => {
+            let input = serde_json::from_value::<EnrollmentPutRequest>(request.params.clone())
+                .map_err(|_| {
+                    HostKernelError::InvalidRequest(
+                        "repository enrollment put parameters are invalid",
+                    )
+                })?;
+            validate_repository_key(&input.key)?;
+            let enrollment_aggregate_id = format!("repository:{}:enrollment", input.key);
+            let transaction = CoreTransaction {
+                transaction_id: input.transaction_id,
+                aggregate_id: enrollment_aggregate_id,
+                expected_revision: input.expected_revision,
+                runtime_generation: event.runtime_generation,
+                timestamp: OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+                events: vec![CoreEvent {
+                    event_id: format!("enrollment-event-{}", request.request_id),
+                    event_type: "repository.enrollment_replaced".into(),
+                    payload: json!({ "phase": input.value.get("phase") }),
+                }],
+                state: input.value.clone(),
+                projection: input.value,
+            };
+            let appended = store.append_core_transaction(&transaction)?;
+            let aggregate = match appended {
+                CoreAppendOutcome::Committed { aggregate }
+                | CoreAppendOutcome::Duplicate { aggregate } => aggregate,
+            };
+            Ok(serde_json::to_value(aggregate)?)
+        }
+        "repository.lease.acquire" => {
+            let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone())
+                .map_err(|_| {
+                    HostKernelError::InvalidRequest(
+                        "repository lease acquire parameters are invalid",
+                    )
+                })?;
+            let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
+            let current = store.load_core_aggregate(&aggregate_id)?;
+            if current
+                .as_ref()
+                .is_some_and(|aggregate| aggregate.projection["phase"] != "available")
+            {
+                return Err(HostKernelError::RepositoryBusy(input.repository_id));
+            }
+            let generation = current
+                .as_ref()
+                .and_then(|aggregate| aggregate.projection["generation"].as_u64())
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(HostKernelError::CounterOverflow(
+                    "repository lease generation",
+                ))?;
+            let lease = json!({
+                "phase": "leased", "repositoryId": input.repository_id, "generation": generation,
+                "leaseId": format!("repo-lease-{}", input.transaction_id),
+                "rootSessionId": input.root_session_id.ok_or(HostKernelError::InvalidRequest("rootSessionId is required"))?,
+                "runtimeGeneration": input.runtime_generation.ok_or(HostKernelError::InvalidRequest("runtimeGeneration is required"))?,
+                "operationId": input.operation_id, "acquiredAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+            });
+            let aggregate = replace_core_aggregate(
+                store,
+                aggregate_id,
+                input.transaction_id,
+                current.as_ref().map_or(0, |value| value.revision),
+                event.runtime_generation,
+                "repository.lease_acquired",
+                lease.clone(),
+            )?;
+            let _ = aggregate;
+            Ok(lease)
+        }
+        "repository.lease.release" | "repository.lease.interrupt" => {
+            let input = serde_json::from_value::<RepositoryLeaseRequest>(request.params.clone())
+                .map_err(|_| {
+                    HostKernelError::InvalidRequest(
+                        "repository lease completion parameters are invalid",
+                    )
+                })?;
+            let aggregate_id = repository_lease_aggregate(&input.repository_id)?;
+            let current = store
+                .load_core_aggregate(&aggregate_id)?
+                .ok_or_else(|| HostKernelError::RepositoryBusy(input.repository_id.clone()))?;
+            if current.projection["phase"] != "leased"
+                || current.projection["leaseId"].as_str() != input.lease_id.as_deref()
+                || current.projection["operationId"].as_str() != Some(input.operation_id.as_str())
+            {
+                return Err(HostKernelError::RepositoryLeaseMismatch);
+            }
+            let generation = current.projection["generation"]
+                .as_u64()
+                .ok_or(HostKernelError::RepositoryLeaseMismatch)?;
+            let next = if request.method == "repository.lease.release" {
+                json!({ "phase": "available", "repositoryId": input.repository_id, "generation": generation })
+            } else {
+                json!({ "phase": "interrupted", "repositoryId": input.repository_id, "generation": generation, "priorLeaseId": input.lease_id, "priorRootSessionId": current.projection["rootSessionId"], "priorRuntimeGeneration": current.projection["runtimeGeneration"], "operationId": input.operation_id, "reason": input.reason.unwrap_or_else(|| "runtime mutation interrupted".into()), "interruptedAt": OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()) })
+            };
+            let event_type = if request.method == "repository.lease.release" {
+                "repository.lease_released"
+            } else {
+                "repository.lease_interrupted"
+            };
+            replace_core_aggregate(
+                store,
+                aggregate_id,
+                input.transaction_id,
+                current.revision,
+                event.runtime_generation,
+                event_type,
+                next.clone(),
+            )?;
+            Ok(next)
+        }
+        "session.workspace.load" => {
+            let input =
+                serde_json::from_value::<SessionWorkspaceLoadRequest>(request.params.clone())
+                    .map_err(|_| {
+                        HostKernelError::InvalidRequest(
+                            "session workspace load parameters are invalid",
+                        )
+                    })?;
+            validate_semantic_id(&input.workspace_id)?;
+            Ok(serde_json::to_value(store.load_core_aggregate(
+                &format!(
+                    "session:{}:workspace:{}",
+                    session.state.id().as_str(),
+                    input.workspace_id
+                ),
+            )?)?)
+        }
+        "session.workspace.put" => {
+            let input =
+                serde_json::from_value::<SessionWorkspacePutRequest>(request.params.clone())
+                    .map_err(|_| {
+                        HostKernelError::InvalidRequest(
+                            "session workspace put parameters are invalid",
+                        )
+                    })?;
+            validate_semantic_id(&input.workspace_id)?;
+            let aggregate_id = format!(
+                "session:{}:workspace:{}",
+                session.state.id().as_str(),
+                input.workspace_id
+            );
+            let aggregate = replace_core_aggregate(
+                store,
+                aggregate_id,
+                input.transaction_id,
+                input.expected_revision,
+                event.runtime_generation,
+                "session.workspace_replaced",
+                input.value,
+            )?;
+            Ok(serde_json::to_value(aggregate)?)
+        }
+        _ => Err(HostKernelError::UnsupportedHostService(
+            request.method.clone(),
+        )),
     })();
     let response_params = match outcome {
         Ok(result) => json!({ "requestId": request.request_id, "ok": true, "result": result }),
@@ -978,29 +1313,81 @@ async fn handle_host_service_request(
             "error": { "code": "host_service_error", "message": error.to_string(), "retryable": false }
         }),
     };
-    let worker = session.worker.as_ref().ok_or(HostKernelError::RuntimeUnavailable)?;
-    let response = worker.request("host.service_response", response_params).await?;
+    let worker = session
+        .worker
+        .as_ref()
+        .ok_or(HostKernelError::RuntimeUnavailable)?;
+    let response = worker
+        .request("host.service_response", response_params)
+        .await?;
     if !response.ok {
-        return Err(HostKernelError::RuntimeRejected(response.error.map(|error| error.message).unwrap_or_else(|| "Host service response was rejected".into())));
+        return Err(HostKernelError::RuntimeRejected(
+            response
+                .error
+                .map(|error| error.message)
+                .unwrap_or_else(|| "Host service response was rejected".into()),
+        ));
     }
     Ok(())
 }
 
-fn replace_core_aggregate(store: &mut EventStore, aggregate_id: String, transaction_id: String, expected_revision: u64, runtime_generation: u64, event_type: &str, projection: Value) -> Result<pi_tai_event_store::CoreAggregate, HostKernelError> {
+fn replace_core_aggregate(
+    store: &mut EventStore,
+    aggregate_id: String,
+    transaction_id: String,
+    expected_revision: u64,
+    runtime_generation: u64,
+    event_type: &str,
+    projection: Value,
+) -> Result<pi_tai_event_store::CoreAggregate, HostKernelError> {
     let transaction = CoreTransaction {
-        transaction_id: transaction_id.clone(), aggregate_id, expected_revision, runtime_generation,
-        timestamp: OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
-        events: vec![CoreEvent { event_id: format!("event-{transaction_id}"), event_type: event_type.into(), payload: json!({ "phase": projection.get("phase") }) }], state: projection.clone(), projection,
+        transaction_id: transaction_id.clone(),
+        aggregate_id,
+        expected_revision,
+        runtime_generation,
+        timestamp: OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
+        events: vec![CoreEvent {
+            event_id: format!("event-{transaction_id}"),
+            event_type: event_type.into(),
+            payload: json!({ "phase": projection.get("phase") }),
+        }],
+        state: projection.clone(),
+        projection,
     };
-    Ok(match store.append_core_transaction(&transaction)? { CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => aggregate })
+    Ok(match store.append_core_transaction(&transaction)? {
+        CoreAppendOutcome::Committed { aggregate } | CoreAppendOutcome::Duplicate { aggregate } => {
+            aggregate
+        }
+    })
 }
 
-fn repository_lease_aggregate(repository_id: &str) -> Result<String, HostKernelError> { validate_repository_key(repository_id)?; Ok(format!("repository:{repository_id}:mutation-lease")) }
-fn validate_semantic_id(value: &str) -> Result<(), HostKernelError> { if value.is_empty() || value.len() > 128 || !value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)) { return Err(HostKernelError::InvalidRequest("semantic ID is invalid")); } Ok(()) }
+fn repository_lease_aggregate(repository_id: &str) -> Result<String, HostKernelError> {
+    validate_repository_key(repository_id)?;
+    Ok(format!("repository:{repository_id}:mutation-lease"))
+}
+fn validate_semantic_id(value: &str) -> Result<(), HostKernelError> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+    {
+        return Err(HostKernelError::InvalidRequest("semantic ID is invalid"));
+    }
+    Ok(())
+}
 
 fn validate_repository_key(value: &str) -> Result<(), HostKernelError> {
-    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
-        return Err(HostKernelError::InvalidRequest("repository enrollment key must be lowercase SHA-256"));
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(HostKernelError::InvalidRequest(
+            "repository enrollment key must be lowercase SHA-256",
+        ));
     }
     Ok(())
 }
@@ -1050,7 +1437,7 @@ fn persist_and_emit(
         event_type: event_type.into(),
         payload,
     };
-    let current = snapshot(&session.state);
+    let current = snapshot(session);
     store.append(
         &SessionProjection {
             session_id: current.session_id.clone(),
@@ -1066,7 +1453,8 @@ fn persist_and_emit(
     Ok(())
 }
 
-fn snapshot(state: &BrokerSession) -> SessionSnapshot {
+fn snapshot(session: &ManagedSession) -> SessionSnapshot {
+    let state = &session.state;
     SessionSnapshot {
         session_id: state.id().as_str().into(),
         revision: state.revision(),
@@ -1103,6 +1491,7 @@ fn snapshot(state: &BrokerSession) -> SessionSnapshot {
         attachment_count: state.attachment_count(),
         active_client_id: state.active_client().map(|client| client.as_str().into()),
         control_epoch: state.control_epoch(),
+        resolved_policy: Some(session.resolved_policy.clone()),
     }
 }
 
@@ -1229,4 +1618,58 @@ pub enum HostKernelError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn host_resolves_fixture_layers_into_runtime_transport() {
+        let temporary = tempfile::tempdir().unwrap();
+        let agent_dir = temporary.path().join("agent");
+        let cwd = temporary.path().join("project");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::create_dir_all(cwd.join(".pi")).unwrap();
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/config/project-unprivileged");
+        std::fs::copy(fixture.join("global.json"), agent_dir.join("pi-tai.json")).unwrap();
+        std::fs::copy(fixture.join("project.json"), cwd.join(".pi/pi-tai.json")).unwrap();
+
+        let resolution = resolve_session_config(&agent_dir, &cwd, true).unwrap();
+        let transport = session_policy_transport(&resolved_session_policy(&resolution, true));
+        assert_eq!(
+            transport["sessionPolicy"]["compaction"]["thresholdPercent"].as_f64(),
+            Some(75.0)
+        );
+        assert_eq!(
+            transport["policyProvenance"]["sessionPolicy.compaction.thresholdPercent"]["layer"],
+            "project"
+        );
+        assert!(transport.get("clientPreferences").is_none());
+    }
+
+    #[test]
+    fn client_asserted_trust_is_load_bearing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let agent_dir = temporary.path().join("agent");
+        let cwd = temporary.path().join("project");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::create_dir_all(cwd.join(".pi")).unwrap();
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/config/project-unprivileged");
+        std::fs::copy(fixture.join("global.json"), agent_dir.join("pi-tai.json")).unwrap();
+        std::fs::copy(fixture.join("project.json"), cwd.join(".pi/pi-tai.json")).unwrap();
+
+        let trusted = resolve_session_config(&agent_dir, &cwd, true).unwrap();
+        let untrusted = resolve_session_config(&agent_dir, &cwd, false).unwrap();
+        assert_eq!(
+            trusted.config.session_policy.compaction.threshold_percent,
+            75.0
+        );
+        assert_eq!(
+            untrusted.config.session_policy.compaction.threshold_percent,
+            80.0
+        );
+    }
 }
