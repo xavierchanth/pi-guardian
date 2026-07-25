@@ -1470,6 +1470,32 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "reconcile_workspace",
+    label: "Reconcile Workspace",
+    description: "Execute one snapshot-bound recovery action after revalidating current JJ and custody evidence.",
+    parameters: Type.Object({ workspaceId: Type.String(), planId: Type.String(), actionId: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      requireWorkspaceThinker(currentAgent);
+      const id = jjWorkspaceId(params.workspaceId); const snapshot = await isolatedJj.recoveryInspector.inspect(id); const plan = isolatedJj.recoveryPlanner.plan(snapshot);
+      if (plan.planId !== params.planId) throw new Error("Recovery plan is stale; inspect and plan the workspace again.");
+      const action = plan.actions.find((candidate) => candidate.actionId === params.actionId); if (!action) throw new Error("Recovery action is not part of the current plan.");
+      let outcome: unknown;
+      if (action.kind === "continue" || action.kind === "refresh_evidence") outcome = { kind: action.kind, evidenceDigest: snapshot.evidenceDigest };
+      else if (action.kind === "replay_operation" || action.kind === "synthesize_receipt" || action.kind === "resume_operation") {
+        const custody = await isolatedJj.workspaces.get(id);
+        if (custody?.phase === "integrating") outcome = await isolatedJj.integration.resume(id);
+        else outcome = { kind: action.kind, disposition: await isolatedJj.operations.reconcileInterrupted(id) };
+      } else if (action.kind === "reconstruct_attachment") outcome = { kind: action.kind, disposition: await isolatedJj.operations.reconcileAllocation(id) };
+      else if (action.kind === "retry_cleanup") {
+        const authorization = { authorizationId: `recovery-${randomUUID()}`, workspaceId: params.workspaceId, action: "retry_cleanup" as const, userEvidence: latestUserEvidence(ctx), createdAt: new Date().toISOString() };
+        await isolatedJj.closure.retryCleanup(id, authorization); outcome = { kind: action.kind, completed: true };
+      } else outcome = { kind: action.kind, preserved: true, reason: action.summary };
+      const after = await isolatedJj.recoveryInspector.inspect(id);
+      return result(`Executed recovery action ${action.kind} for ${params.workspaceId}.`, { planId: plan.planId, actionId: action.actionId, beforeDigest: snapshot.evidenceDigest, outcome, after });
+    },
+  });
+
+  pi.registerTool({
     name: "resume_workspace_operation",
     label: "Resume Workspace Operation",
     description: "Resume only the next proved integration boundary using the latest sourced user direction.",

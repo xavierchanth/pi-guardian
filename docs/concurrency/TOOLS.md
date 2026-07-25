@@ -90,9 +90,13 @@ Creates a named empty assigned feature change before source WIP. Model supplies 
 
 Consumes the caller's active claim and assigned target. Moves only locked paths, preserves unrelated WIP content/identity, checks conflicts, records receipt, and releases claim.
 
-### `workspace_checkpoint`
+### `assign_workspace_change` / `acquire_workspace_file_set`
 
-Model input is only a semantic description. Injected writer lease supplies workspace and expected head. Describes current head, creates one fresh empty child, records exact head transition, then releases token.
+The orchestrator assigns one target Change ID to a writable task inside its isolated workspace. The child requests one complete semantic path set; disjoint sets in the same workspace may grant concurrently while overlaps queue atomically.
+
+### `checkpoint_workspace_file_set`
+
+Injected workspace, claim, owner, target, and stable-WIP evidence constrain the operation. It moves only claimed paths into the assigned target, proves unrelated WIP content unchanged, persists the receipt, and releases the claim. `workspace_checkpoint` remains a legacy compatibility operation only.
 
 ### `rebase_workspace`
 
@@ -131,6 +135,9 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 - `rebind_tracked_change`: explicit user-authorized adoption of unique verified replacement.
 - `resume_workspace_operation`: continue next proved idempotent phase.
 - `retry_workspace_cleanup`: repeat exact cleanup only.
+- `workspace_custody_status`: inspect expected and observed JJ custody facts in every phase.
+- `workspace_recovery_plan`: classify one snapshot into a complete fact-driven disposition and bounded actions.
+- `reconcile_workspace`: revalidate a snapshot-bound plan and execute one exact recovery action.
 - `task_create`: thinker-owned immutable root goal from sourced user intent.
 - `task_assign`: immutable child assignment bound to one execution context.
 - `task_plan`: thinker/planner replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.

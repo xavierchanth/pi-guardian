@@ -79,6 +79,26 @@ Restart does not blindly replay tool calls.
 
 Live locks never persist across process restart. Durable state retains intent and receipts, then resumed writers reacquire.
 
+## Fact-driven workspace recovery
+
+Recovery first builds one bounded expected/observed snapshot covering attachment, graph, tracked Change IDs, stable WIP, assigned targets, file claims, operations, review, integration, conflicts, and patches. A pure reducer returns exactly one disposition:
+
+- consistent;
+- refreshable;
+- not-started;
+- completed-unrecorded;
+- resumable;
+- reconstructable;
+- review-stale;
+- owned-conflict;
+- breached;
+- attention-required;
+- cleanup-pending.
+
+Exact no-choice transitions affecting only managed state may run automatically after snapshot revalidation. Foreign, unowned, destructive, divergent, and ambiguous states preserve evidence and require user direction. No classified state may fail only because the selected tool has an incompatible hidden phase precondition.
+
+`workspace_custody_status` inspects every phase, `workspace_recovery_plan` returns snapshot-bound actions, and `reconcile_workspace` executes one still-valid action with a complete receipt.
+
 ## Explicit user-directed recovery
 
 ### Rebind tracked change

@@ -49,6 +49,7 @@ tools:
   - retry_workspace_cleanup
   - workspace_custody_status
   - workspace_recovery_plan
+  - reconcile_workspace
   - squash_resolution
 allowed-children:
   - planner

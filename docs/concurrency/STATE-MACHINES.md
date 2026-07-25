@@ -89,18 +89,19 @@ active|checkpointing → breached on ownership bypass
 
 Overlapping requests queue; no partial grant exists.
 
-## Isolated writer lifecycle
+## Isolated workspace file-claim lifecycle
 
 ```ts
-type WorkspaceWriterToken =
-  | { phase: "available"; workspaceId: string; headChangeId: ChangeId }
-  | { phase: "active"; workspaceId: string; owner: string; headChangeId: ChangeId }
-  | { phase: "checkpointing"; workspaceId: string; owner: string; expectedHeadChangeId: ChangeId; operationId: string }
-  | { phase: "rebasing"; workspaceId: string; owner: string; rootChangeId: ChangeId; expectedHeadChangeId: ChangeId; operationId: string }
-  | { phase: "interrupted"; workspaceId: string; priorOwner: string; expectedHeadChangeId: ChangeId };
+type WorkspaceFileClaim =
+  | { phase: "queued"; workspaceId: string; claimId: string; owner: string; paths: CanonicalPath[] }
+  | { phase: "active"; workspaceId: string; claimId: string; owner: string; paths: CanonicalPath[]; targetChangeId: ChangeId }
+  | { phase: "checkpointing"; workspaceId: string; claimId: string; owner: string; paths: CanonicalPath[]; targetChangeId: ChangeId; operationId: string }
+  | { phase: "released"; workspaceId: string; claimId: string; receipt?: CheckpointReceipt }
+  | { phase: "interrupted"; workspaceId: string; claimId: string; priorPhase: "queued" | "active" | "checkpointing"; reason: string }
+  | { phase: "breached"; workspaceId: string; claimId: string; reason: string };
 ```
 
-Only one writer is active. Acquisition verifies actual `@`. Checkpoint/rebase persists the resulting exact identities before returning to available. Restart interrupts ownership; it never restores a live token.
+Each workspace coordinates claims independently. A file/path region has at most one active owner within one workspace, while disjoint claims may write concurrently. Complete sets grant atomically. Checkpoint moves only claimed paths into the assigned target and releases after receipt persistence. Restart interrupts ownership; it never restores a live claim.
 
 ## Workspace custody lifecycle
 

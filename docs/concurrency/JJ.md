@@ -97,21 +97,28 @@ recorded source @-
 
 Custody records source workspace/WIP, diagnostic base, managed name/path, root, and expected head. No Git fallback or shared fallback occurs after allocation begins.
 
-### Writer token and checkpoint
+### Workspace file claims and checkpoint
 
-One writable context holds the workspace-wide writer token. Read-only children may run concurrently.
+Each isolated workspace owns an independent file-set coordinator. Multiple writable contexts may proceed concurrently when their complete canonical path sets are disjoint. Equal and ancestor/descendant paths conflict within one workspace; the same path in another workspace has independent ownership.
 
-`workspace_checkpoint({ description })`:
+New workspaces use the shared-file checkpoint shape:
 
-1. verifies current `@` equals expected head exactly;
-2. requires a semantic description;
-3. describes current change without changing its Change ID;
-4. creates one fresh empty working-copy child;
-5. verifies exact parent relation and no divergence;
-6. persists previous/checkpointed/new head IDs and operation receipt;
-7. releases the token.
+```text
+assigned target A
+└── assigned target B
+    └── stable workspace WIP @
+```
 
-An isolated worker cannot mutate through arbitrary shell JJ commands.
+A writable task receives one assigned target Change ID. `acquire_workspace_file_set` grants its complete path set atomically. `checkpoint_workspace_file_set`:
+
+1. validates the context, workspace, assigned target, active claim, and path fingerprints;
+2. verifies current `@` is the stable workspace WIP;
+3. moves only claimed paths from WIP into the assigned target;
+4. verifies unrelated WIP content and other targets are unchanged;
+5. persists exact path, patch, target, WIP, and JJ operation evidence;
+6. releases the claim only after the receipt is durable.
+
+Legacy whole-head `workspace_checkpoint` receipts remain readable during migration but cannot be mixed with file-claim mutation in one workspace. An isolated worker cannot mutate through arbitrary shell JJ commands.
 
 ### Freeze and normalization
 

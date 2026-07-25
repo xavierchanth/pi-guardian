@@ -48,6 +48,7 @@ export const PARENT_TOOL_NAMES = [
   "retry_workspace_cleanup",
   "workspace_custody_status",
   "workspace_recovery_plan",
+  "reconcile_workspace",
   "squash_resolution",
 ] as const;
 const BASE_CHILD_PROTOCOL_TOOL_NAMES = ["message_parent", "report_to_parent", "report_status"] as const;

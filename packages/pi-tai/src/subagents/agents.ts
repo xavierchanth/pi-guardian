@@ -100,6 +100,7 @@ const ORCHESTRATION_TOOLS = new Set([
   "retry_workspace_cleanup",
   "workspace_custody_status",
   "workspace_recovery_plan",
+  "reconcile_workspace",
   "squash_resolution",
 ]);
 const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "report_status", "ask_parent"]);
