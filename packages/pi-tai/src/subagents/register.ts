@@ -1448,11 +1448,20 @@ export function registerSubagents(
       await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
       if (!protocol) throw new Error("Typed child event protocol is unavailable.");
       const event = await protocol.acknowledge(params.contextId, params.eventId);
+      let attributedUsage: ReturnType<typeof usageFromTotals> | undefined;
       if (event.kind === "terminal") {
-        const legacy = await store.update(params.contextId, (record) => ({
-          ...record,
-          parentCollectedAt: record.parentCollectedAt ?? new Date().toISOString(),
-        }));
+        const totals = await usageLedger.totals(authoritativeRootSessionId(ctx), params.contextId);
+        const attributedAt = new Date().toISOString();
+        let shouldAttributeUsage = false;
+        const legacy = await store.update(params.contextId, (record) => {
+          shouldAttributeUsage = !record.usageAttributedAt;
+          return {
+            ...record,
+            parentCollectedAt: record.parentCollectedAt ?? attributedAt,
+            usageAttributedAt: record.usageAttributedAt ?? attributedAt,
+          };
+        });
+        if (shouldAttributeUsage) attributedUsage = usageFromTotals(totals.total);
         const terminalContext = await contextStore.get(params.contextId);
         if (terminalContext?.workspaceId) {
           const tracked = await isolatedJj.workspaces.get(terminalContext.workspaceId);
@@ -1465,7 +1474,10 @@ export function registerSubagents(
         }
         if (!legacy.workspace && !coordinator?.getRuntime(params.contextId)) await retention.closeClean(params.contextId, true);
       }
-      return result(`Acknowledged ${event.kind} event ${event.eventId}.`, event);
+      return {
+        ...result(`Acknowledged ${event.kind} event ${event.eventId}.`, event),
+        ...(attributedUsage ? { usage: attributedUsage } : {}),
+      };
     },
   });
 
@@ -1928,6 +1940,17 @@ function formatRecords(records: readonly DelegationRecord[]): string {
 
 function result(text: string, details: unknown) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function usageFromTotals(totals: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }) {
+  return {
+    input: totals.input,
+    output: totals.output,
+    cacheRead: totals.cacheRead,
+    cacheWrite: totals.cacheWrite,
+    totalTokens: totals.input + totals.output + totals.cacheRead + totals.cacheWrite,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totals.cost },
+  };
 }
 
 function projectContextDelegation(context: PersistedChildContextV4, parentSessionId: string): DelegationRecord {

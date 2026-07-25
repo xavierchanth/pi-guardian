@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
 import { reconstructSubagentState } from "../subagents/domain.ts";
 import type { WorkContextStore } from "../work-context/persistence.ts";
@@ -42,13 +42,13 @@ function createSnapshot(
 
   const entries = ctx.sessionManager.getEntries();
   for (const entry of entries) {
-    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-    const message = entry.message as AssistantMessage;
-    usage.input += message.usage.input;
-    usage.output += message.usage.output;
-    usage.cacheRead += message.usage.cacheRead;
-    usage.cacheWrite += message.usage.cacheWrite;
-    usage.cost += message.usage.cost.total;
+    const entryUsage = billedUsage(entry);
+    if (!entryUsage) continue;
+    usage.input += entryUsage.input;
+    usage.output += entryUsage.output;
+    usage.cacheRead += entryUsage.cacheRead;
+    usage.cacheWrite += entryUsage.cacheWrite;
+    usage.cost += entryUsage.cost.total;
   }
 
   const work = workContext.current();
@@ -88,4 +88,15 @@ function createSnapshot(
     reasoning: model?.reasoning ?? false,
     thinkingLevel: pi.getThinkingLevel(),
   };
+}
+
+function billedUsage(entry: SessionEntry): Usage | undefined {
+  if (entry.type === "message") {
+    const message = entry.message as typeof entry.message & { usage?: Usage };
+    return message.role === "assistant" || message.role === "toolResult" ? message.usage : undefined;
+  }
+  if (entry.type === "compaction" || entry.type === "branch_summary") {
+    return (entry as typeof entry & { usage?: Usage }).usage;
+  }
+  return undefined;
 }

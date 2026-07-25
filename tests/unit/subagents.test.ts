@@ -653,6 +653,55 @@ test("abandon_child reports pending cancellation instead of hanging the public t
   await handlers.get("session_shutdown")?.[0]({ reason: "quit" }, ctx);
 });
 
+test("acknowledging a terminal child attributes its full tree usage exactly once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-ack-usage-"));
+  const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
+  const tools = new Map<string, any>();
+  const store = new MemoryDelegationStore();
+  const child = record("child-usage", "completed");
+  await store.create(child);
+  const pi = {
+    on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    registerTool(tool: { name: string }) { tools.set(tool.name, tool); },
+    registerCommand() {}, getActiveTools: () => ["read"], getAllTools: () => TOOL_NAMES.map((name) => ({ name })),
+    setActiveTools() {}, appendEntry() {}, sendMessage() {}, getThinkingLevel: () => "low", setThinkingLevel() {}, setModel: async () => true,
+  } as unknown as ExtensionAPI;
+  registerSubagents(pi, {
+    store,
+    orchestrator: {
+      children: async () => [child],
+      child: async () => child,
+      all: async () => [child],
+    } as unknown as SubagentOrchestrator,
+    contextStore: new FileChildContextStore(join(root, "contexts")),
+    coordinator: { getRuntime: () => ({}) } as unknown as ChildContextCoordinator,
+    protocol: { acknowledge: async () => ({ kind: "terminal", eventId: "terminal-1" }) } as any,
+    usageLedger: {
+      totals: async () => ({ total: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cost: 1.25 } }),
+    } as any,
+    agentDir: root,
+    discoverAgents: () => agentCatalog(),
+    loadInstructions: () => ({ system: "" }),
+  });
+  const ctx = {
+    cwd: "/repo", mode: "print", model: undefined, modelRegistry: { find: () => ({ provider: "openai-codex", id: "model" }) }, isProjectTrusted: () => true,
+    sessionManager: {
+      getSessionId: () => "parent", getSessionFile: () => "/session.jsonl",
+      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "thinker" } }],
+    },
+    ui: { notify() {}, setWidget() {} },
+  };
+  await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
+
+  const first = await tools.get("ack_child_event").execute("tool-1", { contextId: child.id, eventId: "terminal-1" }, undefined, undefined, ctx);
+  assert.deepEqual(first.usage, {
+    input: 10, output: 20, cacheRead: 30, cacheWrite: 40, totalTokens: 100,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 },
+  });
+  const second = await tools.get("ack_child_event").execute("tool-2", { contextId: child.id, eventId: "terminal-1" }, undefined, undefined, ctx);
+  assert.equal(second.usage, undefined);
+});
+
 test("subagents toggles the thinker definition without pausing concurrent parent work", async () => {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();

@@ -112,6 +112,18 @@ test("renders enabled capability labels beside the directory with base foregroun
         type: "custom",
         customType: "pi-tai-subagent-role",
         data: { mode: "root", agentName: "thinker" },
+      }, {
+        type: "message",
+        message: {
+          role: "assistant",
+          usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cost: { total: 0.1 } },
+        },
+      }, {
+        type: "message",
+        message: {
+          role: "toolResult",
+          usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.2 } },
+        },
       }],
     },
     getContextUsage: () => undefined,
@@ -138,6 +150,7 @@ test("renders enabled capability labels beside the directory with base foregroun
   const lines = footer.render(80);
   assert.equal(lines.length, 3);
   assert.match(lines[2] ?? "", /^tmp\/project · thinker/);
+  assert.match(lines[2] ?? "", /↑11 ↓22 R33 W44 \$0\.300$/);
   assert.deepEqual(colors, ["text", "text", "text", "text", "text", "text"]);
 
   factory = undefined;
