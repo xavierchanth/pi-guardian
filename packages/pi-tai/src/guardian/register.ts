@@ -17,7 +17,12 @@ import {
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
 import { GUARDIAN_REVIEW_FAILED_EVENT } from "../notifications/events.ts";
-import { preflightManagedSubagentCleanup } from "./policy.ts";
+import {
+  isDestructiveCandidate,
+  preflightManagedSubagentCleanup,
+  type ProposedAction,
+  type ReviewDecision,
+} from "./policy.ts";
 import {
   createGuardianReviewRecorder,
   type GuardianReviewRecorder,
@@ -25,11 +30,19 @@ import {
 
 export type ActionReviewer = (request: ReviewRequest) => Promise<ReviewResult>;
 
+export interface HumanExecutionRequiredNotice {
+  action: ProposedAction;
+  reason: string;
+  decision?: ReviewDecision;
+  reviewUnavailable: boolean;
+}
+
 export interface GuardianOptions {
   reviewer?: ActionReviewer;
   recorder?: GuardianReviewRecorder;
   workContext?: () => WorkContextSnapshot | undefined;
   delegationStoreRoot?: string;
+  onHumanExecutionRequired?: (notice: HumanExecutionRequiredNotice) => void | Promise<void>;
 }
 
 export function registerApprovalGuardian(
@@ -48,9 +61,7 @@ export function registerApprovalGuardian(
         options.delegationStoreRoot,
       );
       if (cleanupDecision.kind === "allow") return undefined;
-      if (cleanupDecision.kind === "deny") {
-        return { block: true, reason: autonomousBlockReason(cleanupDecision.reason) };
-      }
+      // Non-runtime deletion forms still receive the task-aware model review below.
     }
     if (event.toolName === WEB_FETCH_TOOL_NAME) {
       const networkDecision = preflightWebFetch(event.input as Record<string, unknown>);
@@ -135,7 +146,25 @@ export function registerApprovalGuardian(
         mode: ctx.mode,
       });
     }
-    return { block: true, reason: blockReason(result) };
+    if (result.kind !== "decision") {
+      if (!isDestructiveCandidate(action)) return undefined;
+      await notifyHumanExecutionRequired(options, {
+        action,
+        reason: result.reason,
+        reviewUnavailable: true,
+      });
+      return { block: true, reason: humanExecutionReason(action, result.reason, true) };
+    }
+    if (result.decision.outcome === "human_execution_required") {
+      await notifyHumanExecutionRequired(options, {
+        action,
+        reason: result.decision.reason,
+        decision: result.decision,
+        reviewUnavailable: false,
+      });
+      return { block: true, reason: humanExecutionReason(action, result.decision.reason, false) };
+    }
+    return { block: true, reason: denialReason(result.decision.reason) };
   });
 }
 
@@ -147,11 +176,29 @@ function collectConversation(ctx: ExtensionContext): unknown[] {
   return ctx.sessionManager.buildContextEntries().flatMap(sessionEntryToContextMessages);
 }
 
-function blockReason(result: ReviewResult): string {
-  if (result.kind === "decision") {
-    return autonomousBlockReason(`Action denied by automatic review: ${result.decision.reason}`);
+async function notifyHumanExecutionRequired(
+  options: GuardianOptions,
+  notice: HumanExecutionRequiredNotice,
+): Promise<void> {
+  try {
+    await options.onHumanExecutionRequired?.(notice);
+  } catch {
+    // The dangerous action remains blocked even if escalation delivery fails.
   }
-  return autonomousBlockReason(`Action blocked because ${result.reason}`);
+}
+
+function humanExecutionReason(action: ProposedAction, reason: string, reviewUnavailable: boolean): string {
+  const exactAction = action.toolName === "bash" && typeof action.arguments.command === "string"
+    ? `Command for the human to review and run directly if they choose:\n${action.arguments.command}`
+    : `Tool action for the human to review and perform directly if they choose:\n${JSON.stringify({ tool: action.toolName, arguments: action.arguments })}`;
+  const basis = reviewUnavailable
+    ? `Guardian could not complete review of a potentially destructive action: ${reason}`
+    : `Guardian classified this as high-risk and will not execute it: ${reason}`;
+  return `${basis.replace(/[.\s]+$/g, "")}. The action was not executed. Do not retry it, delegate it, or ask another agent to execute it. Surface this notice unchanged to the top-level user. ${exactAction}`;
+}
+
+function denialReason(reason: string): string {
+  return `Guardian denied an unrelated or unclear high-risk action: ${reason.replace(/[.\s]+$/g, "")}. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.`;
 }
 
 function autonomousBlockReason(reason: string): string {

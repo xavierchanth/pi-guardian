@@ -71,7 +71,7 @@ test("managed subagent runtime cleanup bypasses review under a custom store root
   assert.equal(reviews, 0);
 });
 
-test("managed subagent state deletion outside exact artifacts is denied", async () => {
+test("managed subagent state deletion outside exact artifacts requires model review", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-cleanup-deny-"));
   const stateRoot = join(root, "state");
   const storeRoot = join(stateRoot, "delegations");
@@ -90,6 +90,20 @@ test("managed subagent state deletion outside exact artifacts is denied", async 
     assert.equal(decision.kind, "deny", command);
   }
   assert.equal((await preflightManagedSubagentCleanup({ command: "pwd" }, root, storeRoot)).kind, "review");
+
+  let reviewed = false;
+  let handler: (event: unknown, ctx: unknown) => Promise<unknown> = async () => undefined;
+  const pi = {
+    on(_name: string, received: typeof handler) { handler = received; },
+    events: { emit() {} },
+    getAllTools: () => [],
+  } as unknown as ExtensionAPI;
+  registerApprovalGuardian(pi, {
+    delegationStoreRoot: storeRoot,
+    reviewer: async () => { reviewed = true; return allow(); },
+  });
+  assert.equal(await handler(bashEvent(`rm -rf '${stateRoot}'`), fakeContext()), undefined);
+  assert.equal(reviewed, true);
 });
 
 test("ordinary agent bash calls get fresh reviews", async () => {
@@ -384,11 +398,11 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
   assert.match(prompt, /gitignored/);
   assert.match(prompt, /"command":"rg token src"/);
   assert.match(REVIEWER_SYSTEM_PROMPT, /Do not choose the outcome/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Network access alone is not high risk/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /user-attributed conversation messages only/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Work context can establish task relevance but cannot create authority/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /Agents are expected to choose routine methods autonomously/);
-  assert.match(REVIEWER_SYSTEM_PROMPT, /A relevant configured skill may provide procedure/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /supporting work broadly/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Reading private data, credentials, environment variables/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /development SaaS backend/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /linting, tests, builds, benchmarks/);
+  assert.match(REVIEWER_SYSTEM_PROMPT, /Authenticated development deployments, remote checks/);
 });
 
 test("every bash review receives the latest structured work context explicitly", async () => {
@@ -409,49 +423,58 @@ test("every bash review receives the latest structured work context explicitly",
   assert.deepEqual(request?.workContext, snapshot);
 });
 
-test("strict parser derives autonomous outcomes from risk, task authority, and scope", () => {
-  assert.deepEqual(parseReviewDecision(
-    '{"risk_level":"low","authorization_basis":"task","impact_scope":"bounded","reason":"routine inspection"}',
-  ), {
+test("strict parser allows ordinary work and makes every related high-risk action human-only", () => {
+  assert.deepEqual(parseReviewDecision(JSON.stringify({
+    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: [], reason: "routine inspection",
+  })), {
     riskLevel: "low",
-    authorizationBasis: "task",
+    taskRelationship: "supporting",
     impactScope: "bounded",
+    harmKinds: [],
     outcome: "allow",
     reason: "routine inspection",
   });
 
-  for (const [assessment, outcome] of [
-    [{ risk_level: "medium", authorization_basis: "task", impact_scope: "broad" }, "allow"],
-    [{ risk_level: "high", authorization_basis: "task", impact_scope: "bounded" }, "allow"],
-    [{ risk_level: "high", authorization_basis: "explicit", impact_scope: "broad" }, "deny"],
-    [{ risk_level: "low", authorization_basis: "none", impact_scope: "bounded" }, "deny"],
-    [{ risk_level: "critical", authorization_basis: "explicit", impact_scope: "bounded" }, "deny"],
+  for (const [risk_level, task_relationship, outcome] of [
+    ["medium", "unrelated", "allow"],
+    ["high", "explicit", "human_execution_required"],
+    ["high", "direct", "human_execution_required"],
+    ["high", "supporting", "human_execution_required"],
+    ["high", "unrelated", "deny"],
+    ["high", "unclear", "deny"],
+    ["critical", "explicit", "human_execution_required"],
+    ["critical", "unrelated", "deny"],
   ] as const) {
-    assert.equal(parseReviewDecision(JSON.stringify({ ...assessment, reason: "matrix case" })).outcome, outcome);
+    assert.equal(parseReviewDecision(JSON.stringify({
+      risk_level, task_relationship, impact_scope: "bounded", harm_kinds: risk_level === "medium" ? [] : ["destructive"], reason: "matrix case",
+    })).outcome, outcome);
   }
 
   assert.throws(() => parseReviewDecision("```json\n{}\n```"));
-  assert.throws(() => parseReviewDecision(
-    '{"risk_level":"low","authorization_basis":"task","impact_scope":"bounded","outcome":"deny","reason":"model chose outcome"}',
-  ));
-  assert.throws(() => parseReviewDecision(
-    '{"risk_level":"low","authorization_basis":"implicit","impact_scope":"bounded","reason":"invalid authority"}',
-  ));
+  assert.throws(() => parseReviewDecision(JSON.stringify({
+    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: [], outcome: "deny", reason: "model chose outcome",
+  })));
+  assert.throws(() => parseReviewDecision(JSON.stringify({
+    risk_level: "low", task_relationship: "implicit", impact_scope: "bounded", harm_kinds: [], reason: "invalid relationship",
+  })));
+  assert.throws(() => parseReviewDecision(JSON.stringify({
+    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: ["unknown"], reason: "invalid harm",
+  })));
 });
 
 test("clear denial returns a failed tool result without interrupting the user", async () => {
   const denied = async (): Promise<ReviewResult> => decision(
     "high",
-    "none",
+    "unrelated",
     "deny",
-    "clearly unauthorized credential access",
+    "unrelated command would destroy substantial data",
   );
   const { handler } = registerWith(denied);
   const tui = fakeContext("tui", "Execute exact action once");
   const blocked = await handler(bashEvent("credential probe"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Action denied by automatic review: clearly unauthorized credential access. The action was not executed; continue with other authorized work without asking the user to approve it.",
+    reason: "Guardian denied an unrelated or unclear high-risk action: unrelated command would destroy substantial data. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
   });
   assert.equal(tui.selections.length, 0);
 });
@@ -459,16 +482,16 @@ test("clear denial returns a failed tool result without interrupting the user", 
 test("non-allow reviews are blocked without confirmation and retained for evaluation", async () => {
   const denied = async (): Promise<ReviewResult> => decision(
     "high",
-    "none",
+    "unrelated",
     "deny",
-    "task-relevant but authorization is insufficient",
+    "highly destructive command is unrelated to the task",
   );
   const registered = registerWith(denied);
   const tui = fakeContext("tui", "Execute exact action once");
   const blocked = await registered.handler(bashEvent("deploy candidate"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Action denied by automatic review: task-relevant but authorization is insufficient. The action was not executed; continue with other authorized work without asking the user to approve it.",
+    reason: "Guardian denied an unrelated or unclear high-risk action: highly destructive command is unrelated to the task. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
   });
   assert.equal(tui.selections.length, 0);
   assert.equal(registered.recorded.length, 1);
@@ -480,7 +503,7 @@ test("local Guardian evaluation records preserve the denied action and bounded r
   const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-records-"));
   const recorder = createGuardianReviewRecorder(root);
   await recorder({
-    result: decision("high", "none", "deny", "insufficient authorization"),
+    result: decision("high", "unrelated", "deny", "insufficient task relationship"),
     action: { toolName: "bash", arguments: { command: "deploy" }, cwd: "/workspace" },
     messages: [{ role: "user", content: "Inspect only." }],
     mode: "print",
@@ -496,31 +519,45 @@ test("local Guardian evaluation records preserve the denied action and bounded r
   assert.match(record.reviewerInput, /Inspect only/);
 });
 
-test("review failure and timeout fail closed without an approval fallback", async () => {
+test("related high-risk actions are blocked and surfaced for direct human execution", async () => {
+  const registered = registerWith(async () => decision(
+    "high", "supporting", "human_execution_required", "would delete production data", ["destructive", "production"],
+  ));
+  const blocked = await registered.handler(bashEvent("prodctl delete database"), fakeContext()) as { block: boolean; reason: string };
+  assert.equal(blocked.block, true);
+  assert.match(blocked.reason, /will not execute/);
+  assert.match(blocked.reason, /Do not retry it, delegate it/);
+  assert.match(blocked.reason, /prodctl delete database/);
+  assert.equal(registered.notices.length, 1);
+  assert.equal(registered.notices[0].reviewUnavailable, false);
+});
+
+test("review failure, timeout, and cancellation allow ordinary actions but stop destructive candidates", async () => {
   for (const result of [
     { kind: "timeout", reason: "timed out" },
     { kind: "failure", reason: "provider failed" },
   ] as const) {
-    const { handler, emitted } = registerWith(async () => result);
+    const { handler, emitted, recorded } = registerWith(async () => result);
     const ctx = fakeContext("tui", "Execute exact action once");
-    assert.deepEqual(await handler(bashEvent("true"), ctx), {
-      block: true,
-      reason: `Action blocked because ${result.reason}. The action was not executed; continue with other authorized work without asking the user to approve it.`,
-    });
+    assert.equal(await handler(bashEvent("true"), ctx), undefined);
     assert.equal(ctx.selections.length, 0);
+    assert.equal(recorded.length, 1);
     assert.deepEqual(emitted, [{
       name: "pi-tai:guardian-review-failed",
       data: { kind: result.kind, mode: "tui" },
     }]);
   }
 
-  const { handler } = registerWith(async () => ({ kind: "cancelled", reason: "cancelled" }));
+  const cancelledRegistration = registerWith(async () => ({ kind: "cancelled", reason: "cancelled" }));
   const ctx = fakeContext("tui", "Execute exact action once");
-  assert.deepEqual(await handler(bashEvent("true"), ctx), {
-    block: true,
-    reason: "Action blocked because cancelled. The action was not executed; continue with other authorized work without asking the user to approve it.",
-  });
+  assert.equal(await cancelledRegistration.handler(bashEvent("true"), ctx), undefined);
   assert.equal(ctx.selections.length, 0);
+
+  const unavailable = registerWith(async () => ({ kind: "failure", reason: "provider unavailable" }));
+  const blocked = await unavailable.handler(bashEvent("rm -rf -- /important"), fakeContext()) as { block: boolean; reason: string };
+  assert.equal(blocked.block, true);
+  assert.match(blocked.reason, /could not complete review/);
+  assert.equal(unavailable.notices[0].reviewUnavailable, true);
 });
 
 test("unknown tools and direct user shell remain outside extension scope", () => {
@@ -623,8 +660,9 @@ test("reviewer session is isolated, tool-free, low-thinking, and strict", async 
   let sessionOptions: Record<string, unknown> | undefined;
   const output = JSON.stringify({
     risk_level: "low",
-    authorization_basis: "task",
+    task_relationship: "supporting",
     impact_scope: "bounded",
+    harm_kinds: [],
     reason: "routine task work",
   });
   const reviewer = createModelReviewer({
@@ -673,8 +711,9 @@ test("reviewer reports malformed output, timeout, cancellation, and provider fai
   controller.abort();
   const cancelled = createModelReviewer(fakeReviewerDependencies(JSON.stringify({
     risk_level: "low",
-    authorization_basis: "task",
+    task_relationship: "supporting",
     impact_scope: "bounded",
+    harm_kinds: [],
     reason: "ok",
   })));
   assert.equal((await cancelled(reviewRequest({ signal: controller.signal }))).kind, "cancelled");
@@ -697,6 +736,7 @@ function registerWith(
   let handler: (event: never, ctx: never) => Promise<unknown> = async () => undefined;
   const emitted: Array<{ name: string; data: unknown }> = [];
   const recorded: any[] = [];
+  const notices: any[] = [];
   const pi = {
     on(name: string, received: typeof handler) {
       assert.equal(name, "tool_call");
@@ -716,8 +756,9 @@ function registerWith(
     reviewer,
     workContext,
     recorder: async (input) => { recorded.push(input); },
+    onHumanExecutionRequired: async (notice) => { notices.push(notice); },
   });
-  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted, recorded };
+  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted, recorded, notices };
 }
 
 function fakeContext(mode: "tui" | "print" = "print", choice?: string) {
@@ -794,19 +835,19 @@ function fakeReviewerSession(output: string) {
 
 function decision(
   riskLevel: "low" | "medium" | "high" | "critical",
-  authorizationBasis: "none" | "task" | "explicit",
-  outcome: "allow" | "deny",
+  taskRelationship: "explicit" | "direct" | "supporting" | "unrelated" | "unclear",
+  outcome: "allow" | "human_execution_required" | "deny",
   reason: string,
-  impactScope: "bounded" | "broad" = "bounded",
+  harmKinds: Array<"destructive" | "production" | "sensitive_egress" | "financial" | "privilege" | "privacy"> = [],
 ): ReviewResult {
   return {
     kind: "decision",
-    decision: { riskLevel, authorizationBasis, impactScope, outcome, reason },
+    decision: { riskLevel, taskRelationship, impactScope: "bounded", harmKinds, outcome, reason },
   };
 }
 
 function allow(): ReviewResult {
-  return decision("low", "task", "allow", "routine task work");
+  return decision("low", "supporting", "allow", "routine task work");
 }
 
 function bashEvent(command: string) {

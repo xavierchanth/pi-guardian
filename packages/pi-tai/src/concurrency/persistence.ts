@@ -21,7 +21,7 @@ export type PersistedChildEventV4 = {
   eventId: string;
   contextId: string;
   cycleId?: string;
-  kind: "question" | "status" | "terminal" | "incident";
+  kind: "question" | "status" | "terminal" | "incident" | "human_execution_required";
   payload: unknown;
   delivery:
     | { phase: "persisted"; createdAt: string }

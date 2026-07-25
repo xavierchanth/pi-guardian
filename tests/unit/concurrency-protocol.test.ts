@@ -59,6 +59,33 @@ test("protocol enforces one unresolved question and routes nested events to pare
   assert.equal((await store.get("child-1"))?.execution.phase, "running");
 });
 
+test("human execution requirements bypass intermediate agents and surface at the root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-protocol-human-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  await store.create(context("parent-1"));
+  const nested: unknown[] = [];
+  const rootMessages: unknown[] = [];
+  const protocol = new ChildEventProtocol({
+    store,
+    coordinator: { message: async (...args) => { nested.push(args); } },
+    rootBridge: { sendMessage: (...args: unknown[]) => { rootMessages.push(args); } } as unknown as ExtensionAPI,
+    id: () => "human-1",
+    now: () => "time",
+  });
+  const event = await protocol.emit("child-1", "cycle-1", {
+    kind: "human_execution_required",
+    reason: "would delete production data",
+    action: { toolName: "bash", arguments: { command: "prodctl delete database" }, cwd: "/repo" },
+    reviewUnavailable: false,
+  });
+  assert.equal(event.delivery.phase, "delivered");
+  assert.equal(nested.length, 0);
+  assert.equal(rootMessages.length, 1);
+  assert.equal((rootMessages[0] as any[])[0].customType, "pi-tai-human-execution-required-v1");
+  assert.match((rootMessages[0] as any[])[0].content, /Do not execute it through another agent/);
+  assert.match((rootMessages[0] as any[])[0].content, /prodctl delete database/);
+});
+
 test("protocol refuses a terminal report after cancellation is requested", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-protocol-cancelling-"));
   const store = new FileChildContextStore(join(root, "records"));

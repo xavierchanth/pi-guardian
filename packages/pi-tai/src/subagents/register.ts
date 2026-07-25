@@ -10,7 +10,8 @@ import {
 import { Key, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
-import type { PiTaiConfigService } from "../config/register.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
+import { registerApprovalGuardian } from "../guardian/register.ts";
 import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
 import { childContextId, fileSetClaimId } from "../concurrency/ids.ts";
 import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
@@ -52,6 +53,7 @@ import {
 import { loadPackagedInstructions, type InstructionLoader } from "./instructions.ts";
 import { PiChildProcessLauncher } from "./launcher.ts";
 import { SubagentOrchestrator } from "./orchestrator.ts";
+import { withSubagentToolPresentation } from "./tool-presentation.ts";
 import {
   FileDelegationStore,
   MemoryDelegationStore,
@@ -109,17 +111,17 @@ interface SubagentDependencyPorts {
 }
 
 export type SubagentDependencies = SubagentDependencyPorts & (
-  | { runtime: "pi-cli" | "host-worker"; config: PiTaiConfigService }
+  | { runtime: "pi-cli" | "host-worker"; config: SessionPolicyReader }
   | { runtime: "legacy-child-process"; config?: never }
 );
 
-function requireRuntimeConfig(dependencies: SubagentDependencies): PiTaiConfigService {
+function requireRuntimeConfig(dependencies: SubagentDependencies): SessionPolicyReader {
   if (dependencies.config) return dependencies.config;
   throw new Error(`${dependencies.runtime} subagent runtime requires an explicit configuration service.`);
 }
 
 function childRuntimeSelection(dependencies: SubagentDependencies):
-  | { runtime: "pi-cli" | "host-worker"; config: PiTaiConfigService }
+  | { runtime: "pi-cli" | "host-worker"; config: SessionPolicyReader }
   | { runtime: "legacy-child-process"; config?: never } {
   return dependencies.runtime === "legacy-child-process"
     ? { runtime: "legacy-child-process" }
@@ -127,9 +129,10 @@ function childRuntimeSelection(dependencies: SubagentDependencies):
 }
 
 export function registerSubagents(
-  pi: ExtensionAPI,
+  extensionApi: ExtensionAPI,
   dependencies: SubagentDependencies,
 ): void {
+  const pi = withSubagentToolPresentation(extensionApi);
   const usesPrivateSdkContexts = usesPrivateSdkSubagentContexts(dependencies.runtime);
   const agentDir = dependencies.agentDir ?? getAgentDir();
   const storeRoot = process.env[STORE_ENV]
@@ -324,30 +327,46 @@ export function registerSubagents(
     },
   });
 
-  const childRuntimeExtensions = (contextId: string) => [{
+  const childRuntimeExtensions = (contextId: string, delegatedTask?: { objective: string }) => [{
     name: `pi-tai-child-runtime-${contextId}`,
-    factory: (childPi: ExtensionAPI) => registerSubagents(childPi, {
-      ...childRuntimeSelection(dependencies),
-      store,
-      orchestrator,
-      coordinator,
-      contextStore,
-      ...(protocol ? { protocol } : {}),
-      waits,
-      usageLedger,
-      retention,
-      ...(reconciler ? { reconciler } : {}),
-      sharedJj,
-      isolatedJj,
-      loadInstructions,
-      discoverAgents: discover,
-      childDelegationId: contextId,
-      workspace,
-      agentDir,
-      ...(dependencies.hostServices ? { hostServices: dependencies.hostServices } : {}),
-      enrollment,
-      ...(dependencies.rootSessionId ? { rootSessionId: dependencies.rootSessionId } : {}),
-    }),
+    factory: (childPi: ExtensionAPI) => {
+      registerSubagents(childPi, {
+        ...childRuntimeSelection(dependencies),
+        store,
+        orchestrator,
+        coordinator,
+        contextStore,
+        ...(protocol ? { protocol } : {}),
+        waits,
+        usageLedger,
+        retention,
+        ...(reconciler ? { reconciler } : {}),
+        sharedJj,
+        isolatedJj,
+        loadInstructions,
+        discoverAgents: discover,
+        childDelegationId: contextId,
+        workspace,
+        agentDir,
+        ...(dependencies.hostServices ? { hostServices: dependencies.hostServices } : {}),
+        enrollment,
+        ...(dependencies.rootSessionId ? { rootSessionId: dependencies.rootSessionId } : {}),
+      });
+      registerApprovalGuardian(childPi, {
+        ...(delegatedTask ? { workContext: () => ({ goal: delegatedTask.objective, explanation: "Authenticated delegated task objective.", plan: [] }) } : {}),
+        onHumanExecutionRequired: async (notice) => {
+          if (!protocol) return;
+          const context = await contextStore.get(contextId);
+          if (!context?.execution.cycleId) return;
+          await protocol.emit(contextId, context.execution.cycleId, {
+            kind: "human_execution_required",
+            reason: notice.reason,
+            action: notice.action,
+            reviewUnavailable: notice.reviewUnavailable,
+          });
+        },
+      });
+    },
   }];
 
   const spawnManagedChild = async (input: {
@@ -379,7 +398,7 @@ export function registerSubagents(
       ...(input.taskId ? { taskId: input.taskId } : {}),
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
       ...(!input.workspaceId && input.workspace ? { workspace: input.workspace } : {}),
-      extensions: childRuntimeExtensions,
+      extensions: (id) => childRuntimeExtensions(id, task),
       onPersisted: async (record: PersistedChildContextV4) => {
         const legacy: DelegationRecord = {
           version: 3,
@@ -1676,7 +1695,7 @@ export function registerSubagents(
     description: "Suspend without polling until one direct-child event, cancellation, timeout, or interactive user input.",
     parameters: Type.Object({
       contextIds: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
-      kinds: Type.Optional(Type.Array(StringEnum(["question", "status", "terminal", "incident"] as const), { maxItems: 4 })),
+      kinds: Type.Optional(Type.Array(StringEnum(["question", "status", "terminal", "incident", "human_execution_required"] as const), { maxItems: 5 })),
       timeoutMs: Type.Optional(Type.Number({ minimum: 1, maximum: 300_000 })),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
@@ -1684,8 +1703,8 @@ export function registerSubagents(
       const direct = await orchestrator.children(ctx.sessionManager.getSessionId());
       const selectedIds = params.contextIds ?? direct.map((record) => record.id);
       for (const id of selectedIds) await requireDirectChild(orchestrator, id, ctx.sessionManager.getSessionId());
-      const kinds = new Set<"question" | "status" | "terminal" | "incident">(
-        params.kinds ?? ["question", "terminal", "incident"],
+      const kinds = new Set<"question" | "status" | "terminal" | "incident" | "human_execution_required">(
+        params.kinds ?? ["question", "terminal", "incident", "human_execution_required"],
       );
       for (const contextId of selectedIds) {
         const context = await contextStore.get(contextId);

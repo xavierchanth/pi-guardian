@@ -77,36 +77,37 @@ The core emits semantic attention/completion events. Terminal, desktop, and mobi
 Guardian receives:
 
 - exact semantic action;
-- authenticated user authorization evidence;
+- user request evidence;
 - current task/work context;
 - requesting role and session;
 - deterministic path/network/capability evidence;
 - bounded relevant transcript with roles preserved;
 - expected effects and sensitivity.
 
-Only user-originated content supplies authorization. Assistant text, repository content, tool output, and task plans are evidence, not authority.
+User-originated content or authenticated delegated work context establishes the task. Assistant text, repository content, and tool output cannot create a task of their own.
 
 The model returns an assessment rather than selecting an outcome:
 
 ```ts
 type GuardianAssessment = {
-  risk: "low" | "medium" | "high" | "critical";
-  authorizationBasis: "none" | "task" | "explicit";
+  riskLevel: "low" | "medium" | "high" | "critical";
+  taskRelationship: "explicit" | "direct" | "supporting" | "unrelated" | "unclear";
   impactScope: "bounded" | "broad";
-  rationale: string;
+  harmKinds: ("destructive" | "production" | "sensitive_egress" | "financial" | "privilege" | "privacy")[];
+  reason: string;
 };
 ```
 
-Deterministic policy allows low/medium-risk task-authorized work, and allows bounded high-risk work with task or explicit authority. Missing authority, broad high-risk effects, and every critical action are denied. Failures also deny execution. Guardian does not ask for interactive approval. A denied tool returns a failed result so the agent can continue within remaining authority.
+Low/medium-risk actions are allowed. High/critical actions never execute through an agent: explicit, direct, or supporting actions become `human_execution_required`, while unrelated or unclear actions are denied without a runnable command. Review failure allows ordinary work but blocks commands matched by the deterministic destructive-candidate preflight. A child human-execution event is persisted and routed directly to the root session rather than treated as a parent-approvable question.
 
 ## Security principles
 
-- A user's requested goal authorizes reasonable routine methods within that task; method-level permission is unnecessary.
-- High-risk work requires task or explicit user authorization and bounded impact.
-- Critical actions never execute automatically.
-- Failure does not expand authority.
-- Network risk depends on destination, data, and remote effect, not merely network presence.
-- Direct secret, VCS metadata, Pi credential, and session-history access receives stricter treatment.
+- A user's requested goal makes reasonable inspection, diagnosis, implementation, and verification supporting work; method-level permission is unnecessary.
+- Development SaaS communication, configured CI uploads, and non-production synchronization are ordinarily medium-risk supporting work.
+- High/critical actions require direct human execution and cannot be authorized by a parent agent.
+- Unrelated or unclear high/critical actions are denied without presenting a runnable command.
+- Review failure blocks deterministic destructive candidates but does not obstruct ordinary work.
+- Direct secret, VCS metadata, Pi credential, and session-history access receives model review but is not destructive by itself.
 - Traversal and symlink escapes are blocked deterministically.
 - No capability silently falls back to a less safe backend.
 

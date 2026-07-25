@@ -49,6 +49,7 @@ type ChildEvent =
   | { kind: "status"; eventId: string; requestId: string; report: BoundedStatusReport }
   | { kind: "terminal"; eventId: string; outcome: "completed" | "blocked" | "failed"; report: BoundedChildReport }
   | { kind: "incident"; eventId: string; reason: string; recovery: string }
+  | { kind: "human_execution_required"; eventId: string; action: ProposedAction; reason: string }
   | { kind: "lifecycle"; eventId: string; phase: "stalled" | "resumed" | "cancelled"; summary: string };
 ```
 
@@ -56,6 +57,7 @@ Policy:
 
 - persist before delivery;
 - question/terminal/incident events steer an active parent or trigger an idle one;
+- human-execution requirements bypass intermediate agents and route directly to the root session; no parent response can authorize execution;
 - routine progress stays outside parent model context;
 - status is correlated to a request;
 - status events may coalesce under explicit supersession;

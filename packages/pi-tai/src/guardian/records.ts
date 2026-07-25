@@ -23,7 +23,7 @@ export interface GuardianReviewRecord {
   version: 1;
   id: string;
   timestamp: string;
-  category: "denied" | "failed" | "timeout" | "cancelled";
+  category: "denied" | "human_execution_required" | "failed" | "timeout" | "cancelled";
   mode: GuardianReviewRecordInput["mode"];
   sessionId?: string;
   sessionFile?: string;
@@ -63,7 +63,7 @@ function toRecord(
 ): GuardianReviewRecord {
   const decision = input.result.kind === "decision" ? input.result.decision : undefined;
   const category = input.result.kind === "decision"
-    ? "denied"
+    ? input.result.decision.outcome === "human_execution_required" ? "human_execution_required" : "denied"
     : input.result.kind === "failure"
       ? "failed"
       : input.result.kind;

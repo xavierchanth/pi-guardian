@@ -15,7 +15,8 @@ export type ChildEventInput =
   | { kind: "question"; question: string; options?: readonly string[]; recommendation?: string }
   | { kind: "status"; requestId: string; summary: string; completed?: readonly string[]; current?: string; remaining?: readonly string[]; blockers?: readonly string[] }
   | { kind: "terminal"; outcome: ChildTerminalOutcome; summary: string; validation?: readonly string[]; changedFiles?: readonly string[]; concerns?: readonly string[] }
-  | { kind: "incident"; reason: string; recoveryDisposition: "retryable" | "mutation_stopped" | "terminal" };
+  | { kind: "incident"; reason: string; recoveryDisposition: "retryable" | "mutation_stopped" | "terminal" }
+  | { kind: "human_execution_required"; reason: string; action: { toolName: string; arguments: Record<string, unknown>; cwd: string }; reviewUnavailable: boolean };
 
 export interface ChildEventProtocolOptions {
   store: ChildContextStore;
@@ -157,7 +158,15 @@ export class ChildEventProtocol {
 
   private async deliver(context: PersistedChildContextV4, event: PersistedChildEventV4): Promise<void> {
     const envelope = renderEnvelope(context, event);
-    if (context.parentContextId) {
+    if (event.kind === "human_execution_required") {
+      const action = (event.payload as { action?: unknown }).action;
+      this.rootBridge.sendMessage({
+        customType: "pi-tai-human-execution-required-v1",
+        content: `${envelope}\nExact blocked action: ${JSON.stringify(action)}\nThis action was blocked. Do not execute it through another agent. Present the exact action to the human for direct execution.`,
+        display: false,
+        details: event,
+      }, { deliverAs: "steer", triggerTurn: true });
+    } else if (context.parentContextId) {
       await this.coordinator.message(context.parentContextId, {
         customType: "pi-tai-child-event-v1",
         content: envelope,
@@ -225,7 +234,18 @@ function normalizeInput(input: ChildEventInput): unknown {
       reason: boundedText(input.reason, 8_000, "incident reason"),
       recoveryDisposition: input.recoveryDisposition,
     };
+    case "human_execution_required": return {
+      reason: boundedText(input.reason, 8_000, "human execution reason"),
+      action: normalizeAction(input.action),
+      reviewUnavailable: input.reviewUnavailable,
+    };
   }
+}
+
+function normalizeAction(action: { toolName: string; arguments: Record<string, unknown>; cwd: string }): unknown {
+  const serialized = JSON.stringify(action);
+  if (Buffer.byteLength(serialized, "utf8") > 16_000) throw new Error("human execution action exceeds 16000 bytes.");
+  return JSON.parse(serialized);
 }
 
 function renderEnvelope(context: PersistedChildContextV4, event: PersistedChildEventV4): string {
