@@ -58,3 +58,22 @@ test("protocol enforces one unresolved question and routes nested events to pare
   await protocol.answerQuestion("child-1", question.eventId, "Proceed");
   assert.equal((await store.get("child-1"))?.execution.phase, "running");
 });
+
+test("protocol refuses a terminal report after cancellation is requested", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-protocol-cancelling-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  await store.create({
+    ...context(),
+    execution: { phase: "cancelling", cycleId: "cycle-1", requestedAt: "now", reason: "parent request" },
+  });
+  const protocol = new ChildEventProtocol({
+    store,
+    coordinator: { message: async () => undefined },
+    rootBridge: { sendMessage: () => {} } as unknown as ExtensionAPI,
+  });
+  await assert.rejects(
+    protocol.emit("child-1", "cycle-1", { kind: "terminal", outcome: "completed", summary: "late completion" }),
+    /after cancellation was requested/,
+  );
+  assert.equal((await store.get("child-1"))?.execution.phase, "cancelling");
+});

@@ -49,6 +49,12 @@ export class ChildEventProtocol {
       const unresolved = context.events.find((event) => event.kind === "question" && !isQuestionAnswered(event));
       if (unresolved) throw new Error(`Child cycle already has unresolved question ${unresolved.eventId}.`);
     }
+    if (input.kind === "terminal") {
+      if (context.execution.phase === "cancelling") throw new Error("A child cannot report terminal completion after cancellation was requested.");
+      if (["completed", "blocked", "failed", "cancelled"].includes(context.execution.phase)) {
+        throw new Error(`Child cycle is already terminal: ${context.execution.phase}.`);
+      }
+    }
     const timestamp = this.now();
     const event: PersistedChildEventV4 = {
       eventId: this.id(),

@@ -20,6 +20,7 @@ export type ReconciliationDisposition =
   | "resumed"
   | "terminal"
   | "cancelled"
+  | "cancellation_pending"
   | "question_pending"
   | "incident"
   | "mutation_stopped";
@@ -45,6 +46,7 @@ export function classifyContext(
   switch (record.execution.phase) {
     case "completed": case "blocked": case "failed": return "terminal";
     case "cancelled": return "cancelled";
+    case "cancelling": return runtimePresent ? "cancellation_pending" : "mutation_stopped";
     case "incident": return /mutation|identity|writer|quiesc/i.test(record.execution.reason) ? "mutation_stopped" : "incident";
     case "awaiting_parent": return "question_pending";
     case "interrupted": return /mutation|identity|writer|quiesc/i.test(record.execution.reason) ? "mutation_stopped" : "resumed";
@@ -164,6 +166,7 @@ function dispositionReason(disposition: ReconciliationDisposition): string {
     case "resumed": return "A linked replacement cycle was created after quiescence.";
     case "terminal": return "Terminal work is not recreated.";
     case "cancelled": return "Explicitly cancelled cycles do not auto-resume.";
+    case "cancellation_pending": return "Cancellation was requested and runtime quiescence is still pending.";
     case "question_pending": return "One unanswered parent question remains pending.";
     case "incident": return "Incident custody is preserved for inspection.";
     case "mutation_stopped": return "Mutation or writer quiescence cannot be proved automatically.";

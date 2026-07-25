@@ -52,5 +52,8 @@ test("reconciler resumes descendants before parents and clears active waits", as
 test("classifier excludes terminal/cancelled and stops ambiguous mutation incidents", () => {
   assert.equal(classifyContext({ ...record("done"), execution: { phase: "completed", cycleId: "c", terminalEventId: "e", finishedAt: "now" } }, false), "terminal");
   assert.equal(classifyContext({ ...record("cancel"), execution: { phase: "cancelled", cycleId: "c", terminalEventId: "e", finishedAt: "now" } }, false), "cancelled");
+  const cancelling = { ...record("cancelling"), execution: { phase: "cancelling" as const, cycleId: "c", requestedAt: "now", reason: "parent request" } };
+  assert.equal(classifyContext(cancelling, true), "cancellation_pending");
+  assert.equal(classifyContext(cancelling, false), "mutation_stopped");
   assert.equal(classifyContext({ ...record("incident"), execution: { phase: "incident", cycleId: "c", reason: "writer quiescence unknown", stoppedAt: "now" } }, false), "mutation_stopped");
 });

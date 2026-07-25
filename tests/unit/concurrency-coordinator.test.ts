@@ -24,9 +24,13 @@ function snapshot(name: string, allowedChildren: string[] = []): AgentDefinition
 class FakeFactory implements PrivateChildSessionFactoryPort {
   readonly requests: PrivateChildSessionRequest[] = [];
   readonly handles = new Map<string, FakeHandle>();
+  private readonly handleFactory: (contextId: string) => FakeHandle;
+  constructor(handleFactory: (contextId: string) => FakeHandle = (contextId) => new FakeHandle(contextId)) {
+    this.handleFactory = handleFactory;
+  }
   async create(request: PrivateChildSessionRequest): Promise<PrivateChildSessionHandle> {
     this.requests.push(request);
-    const handle = new FakeHandle(request.contextId);
+    const handle = this.handleFactory(request.contextId);
     this.handles.set(request.contextId, handle);
     return handle as unknown as PrivateChildSessionHandle;
   }
@@ -52,6 +56,16 @@ class FakeHandle {
   async abort(): Promise<void> { this.aborted = true; }
   async waitForIdle(): Promise<void> {}
   dispose(): void { this.disposed = true; }
+}
+
+class DeferredAbortHandle extends FakeHandle {
+  private resolveAbort!: () => void;
+  private readonly abortedPromise = new Promise<void>((resolve) => { this.resolveAbort = resolve; });
+  override async abort(): Promise<void> {
+    this.aborted = true;
+    await this.abortedPromise;
+  }
+  settle(): void { this.resolveAbort(); }
 }
 
 test("root-scoped coordinator persists intent before starting private contexts", async () => {
@@ -98,9 +112,120 @@ test("explicit cancellation terminates one cycle and preserves sibling runtime",
   };
   await coordinator.spawn({ ...request, task: { objective: "one", uncertaintyHandling: "best-effort" } });
   await coordinator.spawn({ ...request, task: { objective: "two", uncertaintyHandling: "best-effort" } });
-  const cancelled = await coordinator.cancel("child-1");
-  assert.equal(cancelled.execution.phase, "cancelled");
-  assert.equal(cancelled.events[0]?.delivery.phase, "persisted");
+  const cancellation = await coordinator.cancel("child-1");
+  assert.equal(cancellation.disposition, "cancelled");
+  const cancelled = cancellation.contexts.find((context) => context.contextId === "child-1");
+  assert.equal(cancelled?.execution.phase, "cancelled");
+  assert.equal(cancelled?.events[0]?.delivery.phase, "persisted");
   assert.equal(factory.handles.get("child-1")?.disposed, true);
   assert.ok(coordinator.getRuntime("child-2"));
+});
+
+test("cancellation returns pending instead of hanging on a non-cooperative child, then finalizes after quiescence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-pending-cancel-"));
+  const factory = new FakeFactory((contextId) => new DeferredAbortHandle(contextId));
+  const ids = ["child-1", "cycle-1", "event-1"];
+  const coordinator = new ChildContextCoordinator({
+    store: new FileChildContextStore(join(root, "records")), sessionFactory: factory,
+    stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
+    cancellationGraceMs: 1,
+  });
+  await coordinator.spawn({
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
+  });
+
+  const cancellation = await coordinator.cancel("child-1");
+  assert.equal(cancellation.disposition, "pending");
+  assert.deepEqual(cancellation.pendingContextIds, ["child-1"]);
+  assert.equal((await coordinator.get("child-1"))?.execution.phase, "cancelling");
+  assert.equal(factory.handles.get("child-1")?.disposed, false);
+
+  (factory.handles.get("child-1") as DeferredAbortHandle).settle();
+  let cancelled = await coordinator.get("child-1");
+  for (let attempt = 0; attempt < 20 && cancelled?.execution.phase !== "cancelled"; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    cancelled = await coordinator.get("child-1");
+  }
+  assert.equal(cancelled?.execution.phase, "cancelled");
+  assert.equal(cancelled?.events.filter((event) => event.kind === "terminal").length, 1);
+  assert.equal(factory.handles.get("child-1")?.disposed, true);
+  assert.equal(coordinator.getRuntime("child-1"), undefined);
+});
+
+test("root disposal is bounded when a child ignores abort", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-pending-dispose-"));
+  const factory = new FakeFactory((contextId) => new DeferredAbortHandle(contextId));
+  const ids = ["child-1", "cycle-1"];
+  const coordinator = new ChildContextCoordinator({
+    store: new FileChildContextStore(join(root, "records")), sessionFactory: factory,
+    stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
+    cancellationGraceMs: 1,
+  });
+  await coordinator.spawn({
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
+  });
+
+  await coordinator.disposeRoot("root");
+  assert.equal((await coordinator.get("child-1"))?.execution.phase, "interrupted");
+  assert.ok(coordinator.getRuntime("child-1"));
+  (factory.handles.get("child-1") as DeferredAbortHandle).settle();
+  for (let attempt = 0; attempt < 20 && coordinator.getRuntime("child-1"); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(coordinator.getRuntime("child-1"), undefined);
+});
+
+test("cancellation settles descendants before their parent and leaves siblings live", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-cancel-tree-"));
+  const factory = new FakeFactory();
+  const ids = ["cycle-parent", "cycle-child", "cycle-sibling", "event-child", "event-parent"];
+  const coordinator = new ChildContextCoordinator({
+    store: new FileChildContextStore(join(root, "records")), sessionFactory: factory,
+    stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
+  });
+  const request = {
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"],
+  };
+  await coordinator.spawn({ ...request, contextId: "parent", task: { objective: "parent", uncertaintyHandling: "best-effort" } });
+  await coordinator.spawn({ ...request, contextId: "child", parentContextId: "parent", task: { objective: "child", uncertaintyHandling: "best-effort" } });
+  await coordinator.spawn({ ...request, contextId: "sibling", task: { objective: "sibling", uncertaintyHandling: "best-effort" } });
+
+  const cancellation = await coordinator.cancel("parent");
+  assert.equal(cancellation.disposition, "cancelled");
+  assert.deepEqual(cancellation.contexts.map((context) => [context.contextId, context.execution.phase]), [
+    ["child", "cancelled"],
+    ["parent", "cancelled"],
+  ]);
+  assert.equal(factory.handles.get("sibling")?.aborted, false);
+  assert.ok(coordinator.getRuntime("sibling"));
+});
+
+test("cancellation never rewrites an already terminal context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-cancel-terminal-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  const factory = new FakeFactory();
+  const ids = ["cycle-1"];
+  const coordinator = new ChildContextCoordinator({
+    store, sessionFactory: factory, stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
+  });
+  await coordinator.spawn({
+    rootSessionId: "root", contextId: "child-1", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
+  });
+  await store.update("child-1", (current) => ({
+    ...current,
+    execution: { phase: "completed", cycleId: "cycle-1", terminalEventId: "terminal-1", finishedAt: "done" },
+    events: [{
+      eventId: "terminal-1", contextId: "child-1", cycleId: "cycle-1", kind: "terminal",
+      payload: { outcome: "completed", summary: "done" }, delivery: { phase: "persisted", createdAt: "done" },
+    }],
+  }));
+
+  const cancellation = await coordinator.cancel("child-1");
+  assert.equal(cancellation.disposition, "already_terminal");
+  assert.equal((await coordinator.get("child-1"))?.execution.phase, "completed");
+  assert.equal(factory.handles.get("child-1")?.aborted, false);
 });

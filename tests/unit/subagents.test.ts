@@ -8,6 +8,8 @@ import test from "node:test";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
+import type { ChildContextCoordinator } from "../../packages/pi-tai/src/concurrency/coordinator.ts";
+import { FileChildContextStore, type PersistedChildContextV4 } from "../../packages/pi-tai/src/concurrency/persistence.ts";
 import type { AgentCatalog, AgentDefinition } from "../../packages/pi-tai/src/subagents/agents.ts";
 import {
   PARENT_TOOL_NAMES,
@@ -24,6 +26,7 @@ import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orches
 import { registerSubagents } from "../../packages/pi-tai/src/subagents/register.ts";
 import {
   FileDelegationStore,
+  MemoryDelegationStore,
   waitForChildren,
   type DelegationRecord,
   type DelegationStore,
@@ -592,6 +595,62 @@ test("persistent child control channel writes RPC follow-up commands", async () 
   } finally {
     await reader.close();
   }
+});
+
+test("abandon_child reports pending cancellation instead of hanging the public tool", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-abandon-tool-pending-"));
+  const tools = new Map<string, any>();
+  const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
+  const store = new MemoryDelegationStore();
+  const child = record("visible", "running");
+  await store.create(child);
+  const context: PersistedChildContextV4 = {
+    version: 4, contextId: child.id, rootSessionId: "parent", cwd: child.cwd, task: child.task, agent: child.agent,
+    execution: { phase: "cancelling", cycleId: "cycle-1", requestedAt: "now", reason: "parent request" },
+    events: [], usage: [], telemetryGaps: [], createdAt: "now", updatedAt: "now",
+  };
+  const coordinator = {
+    getRuntime: (id: string) => id === child.id ? {} : undefined,
+    cancel: async () => ({ disposition: "pending", contexts: [context], pendingContextIds: [child.id] }),
+    get: async () => context,
+    list: async () => [context],
+    resume: async () => context,
+    message: async () => undefined,
+    releaseRuntime: () => undefined,
+    disposeRoot: async () => undefined,
+  } as unknown as ChildContextCoordinator;
+  const pi = {
+    on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    registerTool(tool: { name: string }) { tools.set(tool.name, tool); },
+    registerCommand() {},
+    getActiveTools: () => ["read"],
+    getAllTools: () => TOOL_NAMES.map((name) => ({ name })),
+    setActiveTools() {}, appendEntry() {}, sendMessage() {},
+    getThinkingLevel: () => "low", setThinkingLevel() {}, setModel: async () => true,
+  } as unknown as ExtensionAPI;
+  const orchestrator = {
+    child: async () => child,
+    children: async () => [child],
+    all: async () => [child],
+  } as unknown as SubagentOrchestrator;
+  registerSubagents(pi, {
+    store, orchestrator, coordinator, contextStore: new FileChildContextStore(join(root, "contexts")), agentDir: root,
+    discoverAgents: () => agentCatalog(), loadInstructions: () => ({ system: "" }),
+  });
+  const ctx = {
+    cwd: "/repo", mode: "print", model: { provider: "openai-codex", id: "model" },
+    modelRegistry: { find: () => ({ provider: "openai-codex", id: "model" }) }, isProjectTrusted: () => true,
+    sessionManager: {
+      getSessionId: () => "parent", getSessionFile: () => "/session.jsonl",
+      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "thinker" } }],
+    },
+    ui: { notify() {}, setWidget() {} },
+  };
+  await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
+  const output = await tools.get("abandon_child").execute("tool", { delegationId: child.id }, undefined, undefined, ctx);
+  assert.match(output.content[0]?.text ?? "", /Cancellation requested.*still settling/);
+  assert.equal((await store.get(child.id))?.execution.phase, "running");
+  await handlers.get("session_shutdown")?.[0]({ reason: "quit" }, ctx);
 });
 
 test("subagents toggles the thinker definition without pausing concurrent parent work", async () => {

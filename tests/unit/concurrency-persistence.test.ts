@@ -50,6 +50,12 @@ test("v4 validation quarantines invalid lifecycle combinations", () => {
   assert.throws(() => validateContextRecord({
     ...fixture(), execution: { phase: "completed", cycleId: "cycle-1", finishedAt: "now" },
   }), /requires terminalEventId/);
+  assert.throws(() => validateContextRecord({
+    ...fixture(), execution: { phase: "cancelling", cycleId: "cycle-1", requestedAt: "now" },
+  }), /execution.reason/);
+  assert.throws(() => validateContextRecord({
+    ...fixture(), execution: { phase: "cancelling", cycleId: "cycle-1", requestedAt: "now", reason: "parent", sessionId: "session-1" },
+  }), /both session identity fields/);
 });
 
 test("private context paths are exact and traversal-safe", () => {

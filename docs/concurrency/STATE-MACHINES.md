@@ -29,6 +29,7 @@ type ChildExecution =
   | { phase: "running"; cycleId: string; resume: ResumePoint }
   | { phase: "suspended"; cycleId: string; reason: "await_children" | "await_parent"; resume: ResumePoint }
   | { phase: "stalled"; cycleId: string; lastHeartbeatAt: string; resume: ResumePoint }
+  | { phase: "cancelling"; cycleId: string; requestedAt: string; reason: string; resume?: ResumePoint }
   | { phase: "recovering"; priorCycleId: string; cycleId: string; reason: string }
   | {
       phase: "terminal";
@@ -47,12 +48,14 @@ starting → terminal(failed) | recovering
 running ↔ suspended
 running|suspended → stalled
 stalled → running | recovering | terminal
+running|suspended|stalled → cancelling
+cancelling → terminal(cancelled) only after runtime and mutation quiescence are proved
 running|suspended → terminal
 terminal(pending) → terminal(acknowledged)
 terminal → new linked recovering cycle only for explicit retry/repair
 ```
 
-A status turn does not change semantic phase.
+A status turn does not change semantic phase. `cancelling` is nonterminal: cancellation has been requested, but the child may still be settling an abort-aware wait or a durable mutation boundary. Restart never auto-resumes a `cancelling` cycle; missing quiescence proof becomes an explicit mutation-stopped disposition.
 
 ## Event lifecycle
 

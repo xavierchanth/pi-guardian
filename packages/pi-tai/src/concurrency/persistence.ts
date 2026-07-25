@@ -12,6 +12,7 @@ export type PersistedExecutionCycleV4 =
   | { phase: "starting"; cycleId: string; startedAt: string }
   | { phase: "running"; cycleId: string; startedAt: string; sessionId: string; sessionFile: string }
   | { phase: "awaiting_parent"; cycleId: string; questionEventId: string; startedAt: string; sessionId: string; sessionFile: string }
+  | { phase: "cancelling"; cycleId: string; requestedAt: string; reason: string; sessionId?: string; sessionFile?: string }
   | { phase: "interrupted"; cycleId: string; reason: string; interruptedAt: string; sessionFile?: string }
   | { phase: "completed" | "blocked" | "failed" | "cancelled"; cycleId: string; terminalEventId: string; finishedAt: string }
   | { phase: "incident"; cycleId?: string; reason: string; stoppedAt: string };
@@ -262,11 +263,16 @@ export function validateContextRecord(input: unknown): PersistedChildContextV4 {
 
 function validateExecution(value: Record<string, unknown>): void {
   const phase = nonempty(value.phase, "execution.phase");
-  const phases = ["created", "starting", "running", "awaiting_parent", "interrupted", "completed", "blocked", "failed", "cancelled", "incident"];
+  const phases = ["created", "starting", "running", "awaiting_parent", "cancelling", "interrupted", "completed", "blocked", "failed", "cancelled", "incident"];
   if (!phases.includes(phase)) throw new Error(`Invalid execution phase: ${phase}`);
   if (phase !== "incident" || value.cycleId !== undefined) validateId(nonempty(value.cycleId, "execution.cycleId"));
   if ((phase === "running" || phase === "awaiting_parent") && (!value.sessionId || !value.sessionFile)) {
     throw new Error(`${phase} execution requires session identity.`);
+  }
+  if (phase === "cancelling") {
+    nonempty(value.requestedAt, "execution.requestedAt");
+    nonempty(value.reason, "execution.reason");
+    if (Boolean(value.sessionId) !== Boolean(value.sessionFile)) throw new Error("cancelling execution requires both session identity fields or neither.");
   }
   if (["completed", "blocked", "failed", "cancelled"].includes(phase) && !value.terminalEventId) {
     throw new Error(`${phase} execution requires terminalEventId.`);

@@ -54,9 +54,9 @@ Token-free wait-any barrier. Interactive input resolves only the wait.
 
 Idempotently acknowledges one event and imports usage once.
 
-### `cancel_child`
+### `cancel_child` (`abandon_child` compatibility name)
 
-Cancels selected cycle/subtree after active mutation settles; preserves workspace custody.
+Durably requests cancellation for the selected cycle/subtree, signals descendants before parents, and preserves workspace custody. The call is bounded: it returns either `cancelled` after runtime and mutation quiescence are proved, or `pending` with the exact contexts still settling. Pending cancellation never auto-resumes after restart and is never presented as terminal cancellation.
 
 ### `reconcile_children`
 
@@ -138,6 +138,13 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 - `task_status`: role-scoped projection—full history for thinker, effective owned subtree for planner, and effective authority lineage for worker.
 - deterministic review snapshot: full task-tree history with current and superseded revisions clearly distinguished in immutable content-addressed Markdown evidence.
 - `concurrency_usage`: exact bounded totals by model, role, context, and cycle.
+
+## Cancellation boundaries
+
+- Event waits, lock waits, subprocesses, and network operations propagate the active `AbortSignal` and settle promptly.
+- Durable repository mutations finish or stop only at a proved operation boundary; cancellation remains `pending` while that boundary settles.
+- In-process SDK disposal is not a hard-kill mechanism and is never treated as proof of quiescence.
+- Root disposal uses the same bounded drain rule and records interrupted execution when quiescence is not yet proved.
 
 ## Constrained built-ins
 

@@ -140,6 +140,21 @@ export function registerSubagents(
         usageLedger,
         stateRoot,
         agentDir,
+        onCancelled: async (context) => {
+          if (!await store.get(context.contextId) || context.execution.phase !== "cancelled") return;
+          const finishedAt = context.execution.finishedAt;
+          await store.update(context.contextId, (current) => ({
+            ...current,
+            execution: {
+              phase: "cancelled",
+              report: {
+                outcome: "cancelled",
+                summary: "Cancelled by parent.",
+                reportedAt: finishedAt,
+              },
+            },
+          }));
+        },
       })
     : undefined);
   const waits = dependencies.waits ?? new ChildEventWaitRegistry();
@@ -1682,13 +1697,23 @@ export function registerSubagents(
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
       if (coordinator?.getRuntime(params.delegationId)) {
-        await coordinator.cancel(params.delegationId);
-        const record = await store.update(params.delegationId, (current) => ({
-          ...current,
-          execution: { phase: "cancelled", report: { outcome: "cancelled", summary: "Cancelled by parent.", reportedAt: new Date().toISOString() } },
-        }));
+        const cancellation = await coordinator.cancel(params.delegationId);
+        const context = cancellation.contexts.find((candidate) => candidate.contextId === params.delegationId);
+        if (!context) throw new Error(`Cancellation lost child context ${params.delegationId}.`);
+        const record = await store.update(params.delegationId, (current) => context.execution.phase === "cancelled"
+          ? {
+              ...current,
+              execution: { phase: "cancelled", report: { outcome: "cancelled", summary: "Cancelled by parent.", reportedAt: context.execution.finishedAt } },
+            }
+          : context.execution.phase === "cancelling"
+            ? { ...current, execution: { phase: "running", activity: "Cancellation requested; waiting for runtime quiescence." } }
+            : current);
         await refreshChildWidget(ctx);
-        return result(`Cancelled child ${record.id}; workspace custody was preserved.`, record);
+        return cancellation.disposition === "pending"
+          ? result(`Cancellation requested for child ${record.id}; still settling: ${cancellation.pendingContextIds.join(", ")}. Workspace custody was preserved.`, cancellation)
+          : cancellation.disposition === "already_terminal"
+            ? result(`Child ${record.id} was already terminal (${context.execution.phase}); no cancellation was applied.`, cancellation)
+            : result(`Cancelled child ${record.id}; workspace custody was preserved.`, cancellation);
       }
       const record = await orchestrator.abandon(params.delegationId);
       await refreshChildWidget(ctx);
@@ -1912,8 +1937,8 @@ function projectContextDelegation(context: PersistedChildContextV4, parentSessio
   const terminalPayload = terminal?.payload as Record<string, any> | undefined;
   const execution: DelegationRecord["execution"] = context.execution.phase === "created" || context.execution.phase === "starting"
     ? { phase: "created" }
-    : context.execution.phase === "running"
-      ? { phase: "running" }
+    : context.execution.phase === "running" || context.execution.phase === "cancelling"
+      ? { phase: "running", ...(context.execution.phase === "cancelling" ? { activity: "Cancellation requested; waiting for runtime quiescence." } : {}) }
       : context.execution.phase === "awaiting_parent"
         ? { phase: "awaiting_parent", question: { id: questionEventId!, question: String((context.events.find((event) => event.eventId === questionEventId)?.payload as any)?.question ?? "Awaiting parent"), askedAt: context.updatedAt } }
         : context.execution.phase === "incident" || context.execution.phase === "interrupted"
@@ -1921,7 +1946,9 @@ function projectContextDelegation(context: PersistedChildContextV4, parentSessio
           : { phase: context.execution.phase, report: { outcome: context.execution.phase, summary: String(terminalPayload?.summary ?? `Child ${context.execution.phase}.`), ...(Array.isArray(terminalPayload?.validation) ? { validation: terminalPayload.validation } : {}), ...(Array.isArray(terminalPayload?.changedFiles) ? { changedFiles: terminalPayload.changedFiles } : {}), ...(Array.isArray(terminalPayload?.concerns) ? { concerns: terminalPayload.concerns } : {}), reportedAt: context.execution.finishedAt } };
   return {
     version: 3, id: context.contextId, parentSessionId, ...(context.parentContextId ? { parentDelegationId: context.parentContextId } : {}), cwd: context.cwd, task: context.task, agent: context.agent, execution,
-    ...(context.execution.phase === "running" || context.execution.phase === "awaiting_parent" ? { childSessionId: context.execution.sessionId, childSessionFile: context.execution.sessionFile } : {}),
+    ...(context.execution.phase === "running" || context.execution.phase === "awaiting_parent" || context.execution.phase === "cancelling"
+      ? { ...(context.execution.sessionId ? { childSessionId: context.execution.sessionId } : {}), ...(context.execution.sessionFile ? { childSessionFile: context.execution.sessionFile } : {}) }
+      : {}),
     ...(terminal?.delivery.phase === "acknowledged" ? { parentCollectedAt: terminal.delivery.acknowledgedAt } : {}), createdAt: context.createdAt, updatedAt: context.updatedAt,
   };
 }
