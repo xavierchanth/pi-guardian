@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { absolutePath, changeDescription, changeId, isolatedWorkspaceWriteLease, jjOperationId, workspaceId, workspaceName, workspaceWriteLeaseId, type ChangeDescription, type IsolatedWorkspaceWriteLease, type SourceWorkspaceHandle, type WorkspaceId, type WorkspaceRebaseLease } from "./domain.ts";
 import { type JjExecutor, renderJjExecutionFailure } from "./executor.ts";
@@ -85,6 +85,24 @@ export class IsolatedJjOperations {
       const receipt: WorkspaceRebaseReceipt = conflicts.length ? { ...common, disposition: "conflicted", conflictPaths: [...new Set(conflicts)].sort() } : beforeHash === afterHash ? { ...common, disposition: "range_equivalent", normalizedPatchHash: afterHash } : { ...common, disposition: "range_changed", beforePatchHash: beforeHash, afterPatchHash: afterHash };
       await this.options.workspaces.update(lease.workspaceId, (current) => { if (current.phase !== "active") throw new Error(); return { ...current, identity: { ...current.identity, baseChangeId: base }, writer: { phase: "available", headChangeId: current.identity.expectedHeadChangeId, generation: record.writer.generation + 1 }, operations: completeOperation(current.operations, operationId, after, receipt, this.now()), updatedAt: this.now() }; }); return { kind: "completed", receipt };
     }); } catch (error) { await this.markUnknown(lease.workspaceId, operationId, error); return { kind: "blocked", blocker: { kind: "unknown_partial_mutation", operationId: jjOperationId(operationId), phase: "rebase_workspace" } }; }
+  }
+
+  async reconstructWorkspaceAttachment(id: WorkspaceId): Promise<{ workspaceId: WorkspaceId; path: string; headChangeId: string; reconstructed: boolean; operationId: string }> {
+    const record = await this.options.workspaces.get(id); if (!record || !("identity" in record) || !record.identity) throw new Error("Workspace custody has no reconstructable identity."); const identity = record.identity; const source = { kind: "source_workspace", sourceId: identity.sourceId } as SourceWorkspaceHandle;
+    return this.options.sources.withRepositoryMutation(source, async () => {
+      let attachmentExists = true; try { await stat(identity.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") attachmentExists = false; else throw error; }
+      if (attachmentExists) { const observed = await this.readId(identity.path, "@"); if (observed !== identity.expectedHeadChangeId) throw new Error("Existing workspace attachment points at an unexpected head."); return { workspaceId: id, path: identity.path, headChangeId: observed, reconstructed: false, operationId: await this.readOperationId(identity.path) }; }
+      const temporaryName = workspaceName(`${identity.name.slice(0, 32)}-recovery-${randomUUID().slice(0, 6)}`);
+      await mkdir(identity.path, { recursive: true, mode: 0o700 });
+      await this.options.sources.runMutation(source, ["workspace", "add", identity.path, "--name", temporaryName, "--revision", exactChange(changeId(identity.expectedHeadChangeId))]);
+      try { await this.options.sources.runMutation(source, ["workspace", "forget", identity.name]); } catch (error) { if (!String(error).match(/0 workspace|No workspace|not found/i)) throw error; }
+      await this.options.repository.run(identity, ["workspace", "rename", identity.name]);
+      const observed = await this.readId(identity.path, "@");
+      if (observed !== identity.expectedHeadChangeId) { const replacement = await this.options.repository.resolveRevision(id, exactChange(observed)); if (!replacement.empty || replacement.parentChangeIds.length !== 1 || replacement.parentChangeIds[0] !== identity.expectedHeadChangeId) throw new Error("Reconstructed workspace attachment has an unexpected head."); }
+      const operationId = await this.readOperationId(identity.path);
+      await this.options.workspaces.update(id, (current) => { if (!("identity" in current) || !current.identity) return current; const priorHead = current.identity.expectedHeadChangeId; return { ...current, identity: { ...current.identity, expectedHeadChangeId: observed }, ...(current.phase === "active" ? { writer: { phase: "available" as const, headChangeId: observed, generation: current.writer.generation + 1 }, targets: current.targets.map((target) => target.wipChangeId === priorHead ? { ...target, wipChangeId: observed } : target), claims: current.claims.map((claim) => claim.wipChangeId === priorHead ? { ...claim, wipChangeId: observed } : claim) } : {}), ...(current.phase === "incident" ? { evidence: { prior: current.evidence, attachmentReconstruction: { path: identity.path, priorHeadChangeId: priorHead, headChangeId: observed, operationId } } } : {}), updatedAt: this.now() }; });
+      return { workspaceId: id, path: identity.path, headChangeId: observed, reconstructed: true, operationId };
+    });
   }
 
   async reconcileAllocation(id: WorkspaceId): Promise<"nothing" | "completed" | "safe_to_resume" | "attention_required"> {

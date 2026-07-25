@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
+import { workspaceName } from "../../packages/pi-tai/src/jj/domain.ts";
+import { IsolatedJjRuntime } from "../../packages/pi-tai/src/jj/isolated-runtime.ts";
+import { RealJjFixture } from "../support/real-jj-fixture.ts";
 import { classifyWorkspaceRecovery, WorkspaceRecoveryPlanner, type WorkspaceRecoverySnapshot } from "../../packages/pi-tai/src/jj/workspace-recovery.ts";
 
 const base: WorkspaceRecoverySnapshot = {
@@ -57,4 +62,16 @@ test("workspace recovery plans deterministic automatic actions", () => {
   assert.equal(plan.disposition, "reconstructable");
   assert.equal(plan.actions[0]?.automatic, true);
   assert.match(plan.planId, /^recovery-[a-f0-9]{64}$/);
+});
+
+test("workspace recovery reconstructs an exact missing managed attachment", async () => {
+  const fixture = await RealJjFixture.create("pi-tai-reconstruct-attachment-");
+  try {
+    await fixture.seed({ changes: [{ description: "base", files: { "base.txt": "base\n" } }] });
+    const runtime = new IsolatedJjRuntime({ stateRoot: join(fixture.root, "state"), executor: fixture.executor }); const source = await runtime.shared.openSource(fixture.repoPath); await runtime.shared.operations.ensureWip(source);
+    const created = await runtime.operations.createWorkspace(source, { name: workspaceName("reconstruct"), ownerContextId: "worker-1", rootSessionId: "root-1" }); if (created.kind !== "completed") throw new Error(); await runtime.operations.releaseWriter(created.receipt.lease);
+    await rm(created.receipt.path, { recursive: true, force: true }); const before = await runtime.recoveryInspector.inspect(created.receipt.workspaceId); assert.equal(runtime.recoveryPlanner.plan(before).disposition, "reconstructable");
+    const receipt = await runtime.operations.reconstructWorkspaceAttachment(created.receipt.workspaceId); assert.equal(receipt.reconstructed, true); assert.notEqual(receipt.headChangeId, created.receipt.workspaceHeadChangeId);
+    const after = await runtime.recoveryInspector.inspect(created.receipt.workspaceId); assert.equal(after.attachment.directory, "present"); assert.equal(after.graph.expectedHeadChangeId, receipt.headChangeId);
+  } finally { await fixture.dispose(); }
 });

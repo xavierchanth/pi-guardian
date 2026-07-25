@@ -176,7 +176,11 @@ export function classifyWorkspaceRecovery(snapshot: WorkspaceRecoverySnapshot): 
   if (snapshot.custodyPhase === "cleanup_pending") return "cleanup_pending";
   if (snapshot.graph.foreignDescendantIds.length) return "attention_required";
   if (snapshot.discrepancies.some((item) => item.kind === "custody_uninspectable")) return "attention_required";
-  if (snapshot.attachment.directory === "missing" && snapshot.graph.expectedHeadChangeId) return "reconstructable";
+  if (snapshot.attachment.directory === "missing" && snapshot.graph.expectedHeadChangeId) {
+    if (snapshot.custodyPhase === "integrating") return "resumable";
+    if (["integrated", "verifying", "closed", "closed_no_changes"].includes(snapshot.custodyPhase)) return "consistent";
+    return "reconstructable";
+  }
   if (snapshot.graph.conflictPaths.length) return "owned_conflict";
   if (snapshot.latestOperation?.outcome === "unknown") return "attention_required";
   if (snapshot.writerPhase === "interrupted") {

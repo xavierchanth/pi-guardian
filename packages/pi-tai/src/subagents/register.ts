@@ -1485,7 +1485,7 @@ export function registerSubagents(
         const custody = await isolatedJj.workspaces.get(id);
         if (custody?.phase === "integrating") outcome = await isolatedJj.integration.resume(id);
         else outcome = { kind: action.kind, disposition: await isolatedJj.operations.reconcileInterrupted(id) };
-      } else if (action.kind === "reconstruct_attachment") outcome = { kind: action.kind, disposition: await isolatedJj.operations.reconcileAllocation(id) };
+      } else if (action.kind === "reconstruct_attachment") outcome = { kind: action.kind, receipt: await isolatedJj.operations.reconstructWorkspaceAttachment(id) };
       else if (action.kind === "retry_cleanup") {
         const authorization = { authorizationId: `recovery-${randomUUID()}`, workspaceId: params.workspaceId, action: "retry_cleanup" as const, userEvidence: latestUserEvidence(ctx), createdAt: new Date().toISOString() };
         await isolatedJj.closure.retryCleanup(id, authorization); outcome = { kind: action.kind, completed: true };
