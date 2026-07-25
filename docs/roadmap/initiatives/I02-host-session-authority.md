@@ -25,6 +25,18 @@ The long-lived machine Host is the sole authority for durable Pi-Tai sessions, r
 - Persist `session.policy_resolved` and revision-guarded policy-change events so replay reconstructs execution policy.
 - Retain one actor/serialized command queue per session.
 
+## Structural decisions due
+
+### Decouple persistence from the wire contract
+
+`REPOSITORY.md` lists "protocol DTOs becoming persistence entities" as a forbidden dependency direction. `crates/event-store/src/lib.rs:3` imports `pi_tai_host_protocol::HostEvent` and `:356` reconstructs it directly from SQLite rows. The wire contract and the storage schema are the same type and cannot be versioned independently — precisely what the rule exists to prevent.
+
+Either introduce a distinct persisted event type, or amend `REPOSITORY.md` to record the coupling as intentional. Either is acceptable; the current state, where the document forbids what the code does, is not.
+
+### Decide the `broker` crate's fate
+
+`REPOSITORY.md` says to retain it "only if distinct from session service." It is 519 lines, consumed by `host-kernel` and `host-server`, and the event store's tables are named `broker_sessions`. The decision is due.
+
 ## Exit criteria
 
 - Accepted commands survive client disconnect and Host restart.
@@ -35,3 +47,5 @@ The long-lived machine Host is the sole authority for durable Pi-Tai sessions, r
 - Pi journals cannot independently resume a Host-managed session outside Host reconciliation.
 - Session state and the policy it executed under have one documented source of truth.
 - Mid-session file edits cannot silently alter a running session.
+- The persisted event type and the wire event type are either distinct or documented as intentionally shared.
+- The `broker` crate is either justified as distinct from the session service or merged into it.

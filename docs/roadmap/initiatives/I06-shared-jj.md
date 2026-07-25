@@ -93,3 +93,7 @@ inspect or ensure source WIP
 ## Boundary of completion
 
 I06 does not provide isolated workspace writer leases, exact frozen review ranges, reviewer approval, workspace integration, or final legacy subprocess removal. Those remain I07–I09.
+
+## Superseded
+
+The WIP-label invariants delivered here — `ensure_wip_change`, the `wip:`/`private:` description requirement on source `@`, canonical-WIP adoption, and the `decision_required`/`foreign_work` blockers that defend the label — are superseded by **I14**, which makes source `@` the user's and anchors the shared lane on `@-` instead. Every other invariant above (claims, guarded writes, checkpoints, receipts, restart interruption) is preserved unchanged.

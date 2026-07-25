@@ -44,6 +44,10 @@ Browser use, computer control, image generation, and deeper cmux integration are
 
 ### cmux
 
+Scope here is **agent-driven control of cmux surfaces**, which is machine access and needs Guardian
+governance. Reporting session status *into* the cmux sidebar is a client concern and belongs to I15;
+do not fold the two together.
+
 - terminal/browser surface discovery;
 - session-to-surface association;
 - lifecycle and stale-handle handling;
