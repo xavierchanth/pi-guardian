@@ -3,3 +3,4 @@
 - [ ] browser use tool
 - [ ] deeper cmux integrations (browser)
 - [ ] After merging a planner workspace, the thinker should check commit history and remove empty inner commits, plus name any unnamed commits
+- [ ] Improve notification prompt
