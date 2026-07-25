@@ -12,6 +12,7 @@ import { WorkspaceConflictService } from "./workspace-conflicts.ts";
 import { WorkspaceIntegrationService } from "./workspace-integration.ts";
 import { JjWorkspaceRepositoryKernel } from "./workspace-repository.ts";
 import { WorkspaceReviewCoordinator } from "./workspace-review.ts";
+import { WorkspaceRecoveryInspector, WorkspaceRecoveryPlanner } from "./workspace-recovery.ts";
 
 export class IsolatedJjRuntime {
   readonly shared: SharedJjRuntime;
@@ -25,6 +26,8 @@ export class IsolatedJjRuntime {
   readonly closure: WorkspaceClosureService;
   readonly conflicts: WorkspaceConflictService;
   readonly operations: IsolatedJjOperations;
+  readonly recoveryInspector: WorkspaceRecoveryInspector;
+  readonly recoveryPlanner: WorkspaceRecoveryPlanner;
   private initialization?: Promise<void>;
   constructor(options: { stateRoot: string; executor?: JjExecutor; workspaces?: IsolatedWorkspaceStore; taskStore?: TaskStore; reviewStore?: ReviewStore; shared?: SharedJjRuntime; failpoint?: (operation: string, boundary: string) => void }) {
     const executor = options.executor ?? new JjProcessExecutor();
@@ -39,6 +42,8 @@ export class IsolatedJjRuntime {
     this.closure = new WorkspaceClosureService(this.workspaces, this.shared.kernel, this.integration);
     this.conflicts = new WorkspaceConflictService(this.workspaces, this.shared.kernel);
     this.operations = new IsolatedJjOperations({ sources: this.shared.kernel, workspaces: this.workspaces, repository: this.repository, artifacts: this.artifacts, executor, ...(options.failpoint ? { failpoint: options.failpoint } : {}) });
+    this.recoveryInspector = new WorkspaceRecoveryInspector(this.workspaces, this.repository);
+    this.recoveryPlanner = new WorkspaceRecoveryPlanner();
   }
   initialize(): Promise<void> {
     if (!this.initialization) this.initialization = this.workspaces.list().then(async (records) => {

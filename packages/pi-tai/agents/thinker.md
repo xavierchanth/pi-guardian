@@ -45,6 +45,8 @@ tools:
   - resume_workspace_operation
   - rebind_tracked_change
   - retry_workspace_cleanup
+  - workspace_custody_status
+  - workspace_recovery_plan
   - squash_resolution
 allowed-children:
   - planner

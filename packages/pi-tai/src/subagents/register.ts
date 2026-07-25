@@ -1336,6 +1336,31 @@ export function registerSubagents(
   });
 
   pi.registerTool({
+    name: "workspace_custody_status",
+    label: "Workspace Custody Status",
+    description: "Inspect expected and observed JJ custody facts for one tracked workspace in any lifecycle phase.",
+    parameters: Type.Object({ workspaceId: Type.String() }),
+    async execute(_id, params) {
+      requireWorkspaceThinker(currentAgent);
+      const snapshot = await isolatedJj.recoveryInspector.inspect(jjWorkspaceId(params.workspaceId));
+      return result(`Workspace ${params.workspaceId} is ${snapshot.custodyPhase} with ${snapshot.discrepancies.length} discrepancy(s).`, snapshot);
+    },
+  });
+
+  pi.registerTool({
+    name: "workspace_recovery_plan",
+    label: "Workspace Recovery Plan",
+    description: "Classify current workspace custody facts and return every proved next recovery action without mutating JJ.",
+    parameters: Type.Object({ workspaceId: Type.String() }),
+    async execute(_id, params) {
+      requireWorkspaceThinker(currentAgent);
+      const snapshot = await isolatedJj.recoveryInspector.inspect(jjWorkspaceId(params.workspaceId));
+      const plan = isolatedJj.recoveryPlanner.plan(snapshot);
+      return result(`Recovery disposition for ${params.workspaceId}: ${plan.disposition}.`, { snapshot, plan });
+    },
+  });
+
+  pi.registerTool({
     name: "resume_workspace_operation",
     label: "Resume Workspace Operation",
     description: "Resume only the next proved integration boundary using the latest sourced user direction.",
