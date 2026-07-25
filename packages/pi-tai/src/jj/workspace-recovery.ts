@@ -124,8 +124,16 @@ export class WorkspaceRecoveryInspector {
         observedHeadEmpty = inspection.head.empty;
         observedJjOperationId = inspection.operationId;
         if (observedHeadChangeId !== identity.expectedHeadChangeId) discrepancies.push({ kind: "head_mismatch", summary: `Expected head ${identity.expectedHeadChangeId}, observed ${observedHeadChangeId}.` });
-        ordered = await this.repository.range(id, identity.rootChangeId as any, identity.expectedHeadChangeId as any).catch(() => []);
-        foreignDescendantIds = await this.repository.foreignDescendants(id, identity.rootChangeId as any, identity.expectedHeadChangeId as any).catch(() => []);
+        try {
+          ordered = await this.repository.range(id, identity.rootChangeId as any, identity.expectedHeadChangeId as any);
+        } catch (error) {
+          discrepancies.push({ kind: "custody_uninspectable", summary: `Unable to inspect the tracked workspace range: ${error instanceof Error ? error.message : String(error)}` });
+        }
+        try {
+          foreignDescendantIds = await this.repository.foreignDescendants(id, identity.rootChangeId as any, identity.expectedHeadChangeId as any);
+        } catch (error) {
+          discrepancies.push({ kind: "custody_uninspectable", summary: `Unable to inspect foreign descendants: ${error instanceof Error ? error.message : String(error)}` });
+        }
         if (foreignDescendantIds.length) discrepancies.push({ kind: "foreign_descendants", summary: `Observed ${foreignDescendantIds.length} foreign descendant(s).` });
         conflictPaths = [...new Set((await Promise.all(ordered.map((entry) => this.repository.conflicts(id, `exactly(change_id(${entry.changeId}), 1)`)))).flat())].sort();
         if (conflictPaths.length) discrepancies.push({ kind: "conflicted_range", summary: `Observed ${conflictPaths.length} conflicted path(s).` });
@@ -173,9 +181,9 @@ export class WorkspaceRecoveryPlanner {
 }
 
 export function classifyWorkspaceRecovery(snapshot: WorkspaceRecoverySnapshot): WorkspaceRecoveryDisposition {
+  if (snapshot.discrepancies.some((item) => item.kind === "custody_uninspectable")) return "attention_required";
   if (snapshot.custodyPhase === "cleanup_pending") return "cleanup_pending";
   if (snapshot.graph.foreignDescendantIds.length) return "attention_required";
-  if (snapshot.discrepancies.some((item) => item.kind === "custody_uninspectable")) return "attention_required";
   if (snapshot.attachment.directory === "missing" && snapshot.graph.expectedHeadChangeId) {
     if (snapshot.custodyPhase === "integrating") return "resumable";
     if (["integrated", "verifying", "closed", "closed_no_changes"].includes(snapshot.custodyPhase)) return "consistent";
