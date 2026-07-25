@@ -86,21 +86,23 @@ Guardian receives:
 
 Only user-originated content supplies authorization. Assistant text, repository content, tool output, and task plans are evidence, not authority.
 
-Decisions:
+The model returns an assessment rather than selecting an outcome:
 
 ```ts
-type GuardianDecision =
-  | { kind: "allow"; rationale: string; evidenceHash: string }
-  | { kind: "deny"; rationale: string; risk: string }
-  | { kind: "failure"; reason: "invalid" | "timeout" | "cancelled" | "unavailable" };
+type GuardianAssessment = {
+  risk: "low" | "medium" | "high" | "critical";
+  authorizationBasis: "none" | "task" | "explicit";
+  impactScope: "bounded" | "broad";
+  rationale: string;
+};
 ```
 
-Failures deny execution. Guardian does not ask for interactive approval. A denied tool returns a failed result so the agent can continue within remaining authority.
+Deterministic policy allows low/medium-risk task-authorized work, and allows bounded high-risk work with task or explicit authority. Missing authority, broad high-risk effects, and every critical action are denied. Failures also deny execution. Guardian does not ask for interactive approval. A denied tool returns a failed result so the agent can continue within remaining authority.
 
 ## Security principles
 
-- Routine low/medium-risk work may proceed without method-level permission when clearly within the authorized goal.
-- High-risk work requires meaningful user authorization and narrow scope.
+- A user's requested goal authorizes reasonable routine methods within that task; method-level permission is unnecessary.
+- High-risk work requires task or explicit user authorization and bounded impact.
 - Critical actions never execute automatically.
 - Failure does not expand authority.
 - Network risk depends on destination, data, and remote effect, not merely network presence.
