@@ -52,6 +52,8 @@ export class JjWorkspaceRepositoryKernel {
     const identity = await this.identity(workspaceId); const source = await this.options.sources.get(identity.sourceId); if (!source) throw new Error(`Unknown source for workspace ${workspaceId}.`); return withRepositoryMutation(source.repositoryRoot, () => fn(identity));
   }
   async run(identity: PersistedWorkspaceIdentityV1, args: readonly string[]): Promise<string> { return this.execute(identity, args, "write"); }
+  /** Runs an already read-only argv. Most jj commands snapshot the working copy, so callers must pass one that does not. */
+  async readOnly(identity: PersistedWorkspaceIdentityV1, args: readonly string[]): Promise<string> { return this.execute(identity, args, "read"); }
   async currentOperationId(identity: PersistedWorkspaceIdentityV1): Promise<string> { return this.operationId(identity); }
 
   private async identity(workspaceId: WorkspaceId): Promise<PersistedWorkspaceIdentityV1> { const record = await this.options.workspaces.get(workspaceId); if (!record || !("identity" in record) || !record.identity) throw new Error(`Workspace ${workspaceId} has no tracked operational identity.`); return record.identity; }

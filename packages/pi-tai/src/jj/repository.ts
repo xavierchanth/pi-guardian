@@ -149,6 +149,12 @@ export class JjRepositoryKernel {
     return this.execute(record, args, "write", true);
   }
 
+  /** Runs an already read-only argv. Most jj commands snapshot the working copy, so callers must pass one that does not. */
+  async readOnly(source: SourceWorkspaceHandle, args: readonly string[]): Promise<string> {
+    const record = await this.requireSource(source);
+    return this.execute(record, args, "read");
+  }
+
   async withRepositoryMutation<T>(source: SourceWorkspaceHandle, fn: () => Promise<T>): Promise<T> {
     const record = await this.requireSource(source);
     return withRepositoryMutation(record.repositoryRoot, fn);
