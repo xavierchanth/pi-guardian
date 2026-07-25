@@ -9,12 +9,12 @@ A TypeScript Pi runtime helper, runtime protocol in Rust/TypeScript, packaging e
 
 ## Outcome
 
-A Host-supervised runtime worker embeds the same Pi-Tai core used by clients/tests. The Host owns product state; the worker owns live Pi SDK contexts and private journals only.
+A Host-supervised runtime worker embeds the same Pi-Tai core used by tests and Host-managed execution. The Host owns product state and resolved policy; the worker owns live Pi SDK contexts and private journals only.
 
 ## Scope
 
 - Compose `@pi-tai/core` inside `services/pi-runtime`.
-- Define versioned Host↔worker commands/events and generation identity.
+- Define versioned Host↔worker commands/events, generation identity, and pinned-policy transfer.
 - Map root and child SDK context events to canonical Host events.
 - Reconstruct contexts from Host state plus private journals.
 - Implement quiescence proof before replacing a failed/stalled worker.
@@ -30,4 +30,5 @@ A Host-supervised runtime worker embeds the same Pi-Tai core used by clients/tes
 - One runtime generation maps unambiguously to Host state.
 - Root and child compaction/recovery work after process restart.
 - Runtime protocol fixtures and generated bindings agree.
+- The worker never opens user/project configuration files for a Host-managed session.
 - No parallel session policy remains in Host Rust and worker TypeScript.

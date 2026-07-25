@@ -40,36 +40,56 @@ Every mutating command has an operation ID. Revision-sensitive commands carry an
 
 Concurrency projections contain bounded semantic task, child, question, finding, claim, workspace-custody, receipt, incident, and exact-usage summaries. They never contain transcripts, raw message histories, private journal/session paths, PIDs, control channels, or a client action for entering a child context.
 
-## Pi CLI adapter
+## Pi terminal clients
 
-The existing Git-installable Pi extension can become a Host client while preserving Pi's mature TUI.
+Two explicitly separate terminal products coexist during migration.
+
+### Legacy `pi-tai`
+
+The existing Git-installable extension continues to run directly inside Pi's local agent harness.
+It preserves the currently working experience while the Host-backed client is built. Its sessions
+are local Pi sessions and cannot be handed off to Zed, T3 Code, or another Host client. Legacy
+mode never serves as an implicit fallback for a failed Host connection.
+
+### Host-backed `pi-tai-client`
+
+`pi-tai-client` is a separate Pi-derived executable. It reuses Pi's mature terminal presentation
+but replaces the interactive session backend with an ACP client connected through the ACP shim
+to the Host.
+
+```text
+Pi TUI → interactive-session backend → ACP shim → Host → runtime worker
+```
 
 Client-specific responsibilities:
 
-- connect to or start the local Host;
-- create/attach/resume Host sessions;
-- map Host events into Pi's extension/UI lifecycle;
+- connect to or start the local Host and ACP shim;
+- create, attach, resume, and detach Host sessions using stable IDs and replay cursors;
+- project ACP session, message, tool, terminal, plan, mode, and interaction updates;
 - ANSI themes and terminal background polling;
 - footer and bounded task/concurrency rendering;
-- external response editor;
-- keybindings and model-profile shortcuts;
-- terminal notifications;
-- client-local drafts.
+- external response editor and client-local drafts;
+- keybindings and model-profile shortcuts expressed as ACP commands;
+- terminal notifications.
 
-The adapter must not start an independent authoritative Host-managed session from local Pi files. Standalone unmanaged Pi operation may remain an explicit separate mode during migration, never an ambiguous fallback.
+The executable creates no local `AgentSession`, model loop, tool executor, or durable shadow
+transcript. A stock extension that intercepts input while Pi's hidden local session remains active
+does not satisfy this boundary. Prefer a narrow Pi interactive-session backend seam; maintain the
+smallest practical Pi variant or compose from Pi's TUI components if that seam is not available
+upstream.
 
-## Custom CLI
+### Handoff
 
-A custom CLI is optional. It becomes justified if Pi's extension surface cannot express:
+Handoff means detaching one ACP client and attaching another to the same Host session and event
+cursor. No agent runtime or transcript migrates between clients. Closing `pi-tai-client` leaves
+healthy Host work and approved commands running.
 
-- Host/session dashboards;
-- multiple simultaneous attachments;
-- detached background commands;
-- richer reconnect streaming;
-- remote Host selection;
-- machine and workspace administration.
+## Future custom CLI
 
-The client contract allows this without changing the core or persistence model.
+A non-Pi custom CLI remains optional. It becomes justified if the Pi-derived client cannot express
+Host/session dashboards, multiple simultaneous attachments, richer reconnect streaming, remote
+Host selection, or machine/workspace administration. It must use the same ACP boundary rather
+than changing core or persistence semantics.
 
 ## Desktop
 

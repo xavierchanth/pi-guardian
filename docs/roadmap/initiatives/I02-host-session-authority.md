@@ -9,7 +9,7 @@ The repository already contains Host lifecycle/platform/protocol/server/kernel c
 
 ## Outcome
 
-The long-lived machine Host is the sole authority for durable Pi-Tai sessions, command ordering, event cursors, replay, client attachments, foreground state, runtime health, and recovery.
+The long-lived machine Host is the sole authority for durable Pi-Tai sessions, resolved session policy, command ordering, event cursors, replay, client attachments, foreground state, runtime health, and recovery.
 
 ## Scope
 
@@ -21,6 +21,8 @@ The long-lived machine Host is the sole authority for durable Pi-Tai sessions, c
 - Separate foreground state from runtime health.
 - Map Pi journal/runtime identifiers to Host session IDs without dual authority.
 - Define retention for artifacts, usage, and incidents.
+- Resolve policy with field provenance in the Host and pin it into the session aggregate.
+- Persist `session.policy_resolved` and revision-guarded policy-change events so replay reconstructs execution policy.
 - Retain one actor/serialized command queue per session.
 
 ## Exit criteria
@@ -31,4 +33,5 @@ The long-lived machine Host is the sole authority for durable Pi-Tai sessions, c
 - Client detach does not cancel healthy foreground work.
 - Explicit close/cancel is durable and idempotent.
 - Pi journals cannot independently resume a Host-managed session outside Host reconciliation.
-- Session state has one documented source of truth.
+- Session state and the policy it executed under have one documented source of truth.
+- Mid-session file edits cannot silently alter a running session.

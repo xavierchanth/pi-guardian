@@ -6,6 +6,10 @@ The roadmap describes how the current repository converges on the end-state prod
 
 An initiative is a bounded product or architecture outcome. It may contain many implementation checkpoints. Initiative numbers provide a stable reading order, not a promise of strictly serial delivery.
 
+## Active master plan
+
+[Host configuration authority and client cutover](MASTER-PLAN.md) records the decisions and implementation checkpoints that reshape I01, I02, I03, I04, and I10. The Host becomes the sole configuration/session/execution authority; Zed and T3 Code use ACP; a separate Pi-derived `pi-tai-client` uses ACP for Host-backed terminal access; and the existing direct `pi-tai` extension remains available during migration. Read it before planning against those initiatives.
+
 ## Status legend
 
 - **Complete** — accepted outcome exists and dependents may rely on it.
@@ -18,16 +22,16 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 | ID | Initiative | Status | Depends on | End outcome |
 |---|---|---|---|---|
 | I00 | [Documentation and repository alignment](initiatives/I00-documentation-and-repository.md) | Planned | — | New docs become normative; top-level areas have explicit product status |
-| I01 | [Extract the shared core](initiatives/I01-core-extraction.md) | Planned | I00 | Reusable behavior lives in `@pi-tai/core`; Pi CLI is an adapter |
-| I02 | [Canonical Host sessions](initiatives/I02-host-session-authority.md) | In progress | I00 | Host is sole authority for durable sessions/events/replay |
-| I03 | [Host/runtime convergence](initiatives/I03-host-runtime-convergence.md) | In progress | I01, I02 | Host-supervised worker embeds the same core; no competing session truth |
-| I04 | [Local client contract and CLI cutover](initiatives/I04-local-client-contract.md) | Planned | I02, I03 | Pi CLI, desktop, ACP use one local client API |
+| I01 | [Extract the shared core](initiatives/I01-core-extraction.md) | Planned | I00 | Reusable behavior lives in `@pi-tai/core`; Pi-specific presentation is an adapter |
+| I02 | [Canonical Host sessions](initiatives/I02-host-session-authority.md) | In progress | I00 | Host owns durable sessions, resolved policy, events, and replay |
+| I03 | [Host/runtime convergence](initiatives/I03-host-runtime-convergence.md) | In progress | I01, I02 | Host-supervised worker consumes pinned policy and holds no competing authority |
+| I04 | [ACP client contract and CLI cutover](initiatives/I04-local-client-contract.md) | Planned | I02, I03 | `pi-tai-client`, Zed, and T3 Code share one Host-backed ACP session surface |
 | I05 | [Concurrency runtime foundation](initiatives/I05-concurrency-foundation.md) | Complete | — | Strict types, Real-JJ harness, private SDK children, push/recovery foundation |
 | I06 | [Shared-source JJ concurrency](initiatives/I06-shared-jj.md) | Complete | I05 | Atomic file-set queues and deterministic WIP/feature checkpoints |
 | I07 | [Isolated JJ execution](initiatives/I07-isolated-jj.md) | Complete | I05, I06 | Tracked workspace identity, checkpoint, rebase, freeze, and no-change proof |
 | I08 | [Review, integration, and recovery](initiatives/I08-review-integration-recovery.md) | Complete | I06, I07 | Task-plan review gate, deterministic integration, conflict repair, recovery |
 | I09 | [Concurrency productization](initiatives/I09-concurrency-productization.md) | Complete | I08 | Honest closure/UI/accounting and deletion of production compatibility paths |
-| I10 | [Desktop and ACP clients](initiatives/I10-desktop-acp.md) | In progress | I04 | Desktop manager and thin ACP adapter consume Host contract |
+| I10 | [Desktop and ACP clients](initiatives/I10-desktop-acp.md) | In progress | I04 | Desktop manages the Host; Zed, T3 Code, and `pi-tai-client` consume the ACP surface |
 | I11 | [Remote and multi-Host access](initiatives/I11-remote-multihost.md) | Exploratory | I04, I10 | Authenticated remote clients with one home Host per session |
 | I12 | [Stateful machine capabilities](initiatives/I12-machine-capabilities.md) | Exploratory | I02, I03, I04 | Browser/computer/image/cmux capabilities governed and persisted uniformly |
 

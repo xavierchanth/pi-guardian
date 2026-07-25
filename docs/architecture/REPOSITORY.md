@@ -11,7 +11,7 @@ pi-tai/
 ├── package.json                  Git-installable distribution/workspace root
 ├── packages/
 │   ├── core/                     @pi-tai/core
-│   ├── pi-cli/                   Pi extension and terminal presentation
+│   ├── pi-cli/                   legacy direct Pi extension and shared terminal presentation assets
 │   ├── client/                   shared typed Host client when justified
 │   ├── host-protocol/            client ↔ Host semantic wire contract
 │   └── runtime-protocol/         Host ↔ runtime-worker contract
@@ -21,6 +21,7 @@ pi-tai/
 │   └── host/                     Host packaging and desktop/tray client
 ├── bins/
 │   ├── acp/                      thin ACP adapter
+│   ├── pi-tai-client/            Pi-derived ACP terminal client
 │   └── ctl/                      Host diagnostics/administration
 ├── crates/
 │   ├── host-kernel/
@@ -48,18 +49,22 @@ Exact names may change during migration. Dependency direction and authority are 
 
 Contains reusable TypeScript domain and application services. No terminal, React, Tauri, ACP, local-IPC, or concrete database imports.
 
-### Pi CLI distribution
+### Pi terminal distributions
 
-Contains:
+The repository root may continue to expose the legacy direct `pi-tai` extension for Git-based Pi
+installation during migration. It contains the existing Pi harness composition and remains
+explicitly separate from Host-backed sessions.
 
-- Pi extension composition;
-- terminal lifecycle adapters;
-- agents/prompts/skills packaged for Pi where presentation/runtime loading requires them;
-- ANSI themes;
-- footer, response editor, keybindings, and terminal notifications;
-- Host connection and event projection.
+`pi-tai-client` is a separate executable with:
 
-The repository root may continue to expose this package directly for Git-based Pi installation.
+- a Pi-derived interactive TUI;
+- an ACP interactive-session backend and Host connection lifecycle;
+- ACP event projection and replay-cursor handling;
+- ANSI themes, footer, response editor, keybindings, renderers, and terminal notifications;
+- no local agent session, model loop, tool executor, or durable transcript.
+
+Presentation assets may be shared where doing so does not pull Pi or terminal dependencies into
+`@pi-tai/core`.
 
 ### Client and protocols
 
