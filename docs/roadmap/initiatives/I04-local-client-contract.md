@@ -13,7 +13,7 @@ ACP-facing clients use one negotiated ACP session surface backed by the typed Ho
 - Add operation IDs, expected revisions, cursors, capability negotiation, and error taxonomy.
 - Build shared connection/replay client code when two callers justify it.
 - Introduce or maintain a narrow Pi interactive-session backend seam.
-- Build `pi-tai-client` as a separate executable whose backend is ACP rather than Pi's local `AgentSessionRuntime`.
+- Build `pi-tai-client` as a separate executable whose backend is ACP rather than Pi's local `AgentSessionRuntime`, composed from Pi's published presentation exports rather than a fork.
 - Project ACP updates into Pi's TUI while keeping ANSI themes, footer, editor, keybindings, renderers, drafts, and notifications local.
 - Prohibit a hidden local `AgentSession`, local model loop, local tool execution, or shadow durable transcript in `pi-tai-client`.
 - Retain the existing Git-installable `pi-tai` extension as explicit legacy direct mode during migration; it cannot hand off its local sessions to Host clients.
@@ -29,6 +29,6 @@ ACP-facing clients use one negotiated ACP session surface backed by the typed Ho
 - Clients cannot open Host storage or private journals directly.
 - Host-unavailable, auth, stale revision, and version mismatch are actionable.
 - Zed, T3 Code, and `pi-tai-client` can attach sequentially to one Host session using stable identity and replay cursors.
-- `pi-tai-client` process inspection and integration tests prove that no local agent/model/tool runtime is active.
-- Legacy `pi-tai` and Host-backed `pi-tai-client` are visibly distinct commands/packages and stores.
+- A static import check proves `pi-tai-client` never reaches Pi's agent harness; integration tests confirm no local agent/model/tool runtime is active.
+- Legacy `pi-tai` and Host-backed `pi-tai-client` are visibly distinct commands and stores. They ship as one artifact with two entry points; distinct published packages are explicitly not required.
 - ACP terminal updates are display-only: the Host owns execution, commands survive disconnect unless cancelled, and PTY/stdin takeover is out of scope.

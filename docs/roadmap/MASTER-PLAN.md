@@ -332,6 +332,44 @@ for autonomy and is the most distinctive property of the system. But make it exp
 between machines. It must become pinned configuration that fails loudly rather than a silent
 fallback chain.
 
+### D11 — One artifact, two entry points **[Decided]**
+
+The legacy extension and `pi-tai-client` ship from one published artifact declaring both a `pi`
+extension entry and a `bin`. They are not separate published packages.
+
+The word "package" was doing two jobs and creating false pressure to split. `I01` prohibits one
+npm package per subsystem and `REPOSITORY.md` creates `@pi-tai/client` only when two consumers
+justify it, while `I04`'s exit criteria required "visibly distinct commands/**packages** and
+stores." The safety properties I04 actually needs are distinct *commands* and distinct *state
+roots* — so a user always knows which product they are in, and neither product can read the
+other's durable state. Neither property requires a distinct published artifact. I04's wording is
+corrected; `REPOSITORY.md` gains a Distribution section.
+
+**[Verified]** This is close to the status quo rather than a restructure: `packages/pi-tai/` has
+no `package.json` of its own and is already published through the root manifest's `"pi"` key.
+
+Two supporting findings:
+
+- **[Verified against `@earendil-works/pi-coding-agent@0.80.10`]** A fork of Pi is probably
+  unnecessary. Its public entry point exports the interactive components
+  (`AssistantMessageComponent`, `ToolExecutionComponent`, `FooterComponent`, `CustomEditor`,
+  `renderDiff`) and the theme (`Theme`, `initTheme`, `getMarkdownTheme`) as ordinary exports,
+  distinct from the harness exports `AgentSession`, `AgentSessionRuntime`, and
+  `createAgentSession*`. A presentation-only client can therefore be composed from public API.
+  This lowers the cost of O5's outstanding implementation proof; the "smallest maintainable Pi
+  variant" fallback stays available but is not the expected path. Re-confirm on each Pi upgrade —
+  this is an upstream surface Pi-Tai does not control.
+- **[Verified]** The harness boundary is cheap to enforce statically today. `AgentSession` and
+  `createAgentSession` appear in only three places, all core/runtime rather than client:
+  `concurrency/child-session.ts`, `guardian/reviewer.ts`, `services/pi-runtime/src/pi-runtime.ts`.
+  I04's "process inspection proves no local runtime is active" becomes an import allowlist in
+  `tests/repository/package-contract.test.ts`, which already asserts import hygiene this way.
+
+Constraint carried into implementation: Pi packages remain `peerDependencies` for the extension
+path, and the client bundles what it needs at build time. Promoting Pi to a hard dependency of
+the root manifest can resolve a second copy of Pi into the legacy install path — two
+`AgentSession` classes, which is the dual-authority failure mode in a new place.
+
 ---
 
 ## 4. What the cutover deletes or relocates
@@ -528,6 +566,26 @@ up. Symptom observed: the suite fails under a sandbox that blocks writes outside
 (4 failures in `subagents.test.ts` and `session-workspace.test.ts`), and passes fully outside
 it.
 
+### P10 — The runtime worker reaches into the extension's source directory
+
+**[Verified]** `services/pi-runtime/src/pi-runtime.ts:32-37` imports six modules from
+`packages/pi-tai` by relative path (`../../../packages/pi-tai/pi-tai.ts`, plus
+`src/capabilities/controller.ts`, `src/config/register.ts`, `src/work-context/persistence.ts`,
+`src/jj/repository-enrollment.ts`, `src/jj/session-workspace.ts`).
+
+This violates `REPOSITORY.md` — "No top-level application reaches into another application's
+source directory" — and is the concrete mechanism by which the worker acquires the filesystem
+configuration authority that D4 removes. It is also the seam that core extraction has to cut:
+these six imports are approximately the real surface area of `@pi-tai/core` as the worker uses
+it today.
+
+Resolve it as part of the core extraction rather than by adding a package alias, so the import
+list is forced to become an intentional public surface instead of an accident of path depth. The
+extraction is cheaper than it looks: `jj/`, `workspaces/`, and the non-`register` half of
+`concurrency/` — roughly 65 files — already have no Pi imports at all, and several remaining
+couplings are type-only or a single helper (`getAgentDir`, `CONFIG_DIR_NAME`, `truncateToWidth`,
+`AssistantMessage`).
+
 ---
 
 ## 7. Rebased commits — state and follow-ups
@@ -620,7 +678,7 @@ workspaces.
 | **O2** | **Resolved** | The temporary orchestration/recovery workspaces and branches are gone. No preservation work is required. |
 | **O3** | **Resolved** | T3 Code uses ACP. Integration details may be decided later; ACP is the common client boundary. |
 | **O4** | **Resolved** | Use XDG Base Directory locations and keep data classes separate. Settings belong under `$XDG_CONFIG_HOME/pi-tai`; credentials under `$XDG_DATA_HOME/pi-tai/credentials`; other persistent application data under separate paths in `$XDG_DATA_HOME/pi-tai`; durable sessions and logs under distinct paths in `$XDG_STATE_HOME/pi-tai`; disposable caches under `$XDG_CACHE_HOME/pi-tai`; ephemeral sockets/locks under `$XDG_RUNTIME_DIR/pi-tai` when available. Do not place durable sessions or credentials in cache, and do not collapse these roots into one application directory. |
-| **O5** | **Resolved — implementation proof remains** | Build a separate `pi-tai-client` executable using a Pi interactive-session backend seam and ACP. Retain the current `pi-tai` direct extension during migration. Do not use stock-extension input interception if it leaves a hidden local agent session; fall back to the smallest maintainable Pi variant or Pi TUI-based executable if the seam cannot be upstreamed cleanly. |
+| **O5** | **Resolved — implementation proof remains** | Build a separate `pi-tai-client` executable using a Pi interactive-session backend seam and ACP. Retain the current `pi-tai` direct extension during migration. Do not use stock-extension input interception if it leaves a hidden local agent session; fall back to the smallest maintainable Pi variant or Pi TUI-based executable if the seam cannot be upstreamed cleanly. **Narrowed by D11:** Pi's interactive components and theme are public exports independent of its harness, so the expected path is composition from those exports — no fork, and no upstream seam required. The fallback stands if that surface proves insufficient. |
 
 ---
 

@@ -8,7 +8,8 @@ The repository mirrors product and deployment boundaries without splitting every
 
 ```text
 pi-tai/
-├── package.json                  Git-installable distribution/workspace root
+├── package.json                  Git-installable distribution/workspace root;
+│                                 declares both entry points (see Distribution)
 ├── packages/
 │   ├── core/                     @pi-tai/core
 │   ├── pi-cli/                   legacy direct Pi extension and shared terminal presentation assets
@@ -43,6 +44,43 @@ pi-tai/
 
 Exact names may change during migration. Dependency direction and authority are normative.
 
+## Distribution and entry points
+
+The legacy direct extension and `pi-tai-client` ship as **one published artifact with two entry
+points**, not as two packages. The root manifest declares both:
+
+```jsonc
+{
+  "pi":  { "extensions": ["./packages/pi-cli/pi-tai.ts"] },  // loaded into the user's Pi
+  "bin": { "pi-tai-client": "./bins/pi-tai-client/main.ts" } // standalone ACP client
+}
+```
+
+One manifest, one release, one version number. `@pi-tai/core` and the protocol packages are
+shared by construction rather than by synchronised publishing.
+
+The separation that matters is behavioural, and is enforced by three things that are *not*
+package boundaries:
+
+- **Distinct commands.** `pi` with the extension loaded, versus `pi-tai-client`. A user can
+  always tell which product they are in.
+- **Distinct state roots.** Legacy local sessions and Host-backed sessions never share storage.
+  Both sit under the XDG roots, under separate paths, so neither can read the other's durable
+  state.
+- **Distinct import surfaces.** See the client import rule below.
+
+Splitting into two published packages buys none of these and costs a second release pipeline
+plus version-skew management between the client and the core it depends on.
+
+### Dependency resolution
+
+The two entry points want different dependency treatments: the extension is loaded into a Pi the
+user already has, so Pi packages are peers; the client binary is standalone and must resolve its
+own. Keep Pi packages as `peerDependencies` for the extension path and bundle what the client
+needs at build time. Promoting Pi to a hard dependency of the root manifest is prohibited: it can
+resolve a second copy of Pi into the legacy install path, which means two `AgentSession` classes
+and a dual-authority bug of exactly the kind this architecture exists to prevent.
+
 ## Package responsibilities
 
 ### `@pi-tai/core`
@@ -65,6 +103,11 @@ explicitly separate from Host-backed sessions.
 
 Presentation assets may be shared where doing so does not pull Pi or terminal dependencies into
 `@pi-tai/core`.
+
+Pi publishes its interactive components and theme as public exports, separately from its agent
+harness. `pi-tai-client` composes those exports directly; it does not fork Pi, and it does not
+require an upstream interactive-session seam in order to exist. The forked-variant fallback
+applies only if that export surface proves insufficient in practice.
 
 ### Client and protocols
 
@@ -96,6 +139,11 @@ Host ─> persistence/process/native adapters
 - Runtime protocol does not expose filesystem paths or credentials unnecessarily.
 - Shared generated DTOs have an explicit source of truth and check mode.
 - No top-level application reaches into another application's source directory.
+- `pi-tai-client` may import Pi's presentation exports — components, theme, renderers, key
+  handling — and may not import its harness: `AgentSession`, `AgentSessionRuntime`,
+  `createAgentSession*`, `SessionManager`, `ModelRuntime`, or the tool constructors. This is the
+  structural form of "no hidden local agent session"; it is a static import check rather than a
+  runtime assertion about an absent process.
 
 ## Documentation and release shape
 
