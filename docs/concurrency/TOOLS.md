@@ -36,7 +36,7 @@ Creates a private child in caller cwd from a role and task packet. Returns launc
 
 ### `spawn_workspace_child`
 
-Atomic thinker-only operation: validate source/WIP, allocate managed JJ workspace from source `@-`, capture exact identities/custody, then start planner or isolated worker. Startup failure preserves custody. No fallback to shared execution.
+Atomic thinker-only operation: validate the source base and working change, allocate a managed JJ workspace from source `@-`, capture exact identities and custody, then start a planner or isolated worker. Startup failure preserves custody. No fallback to shared execution.
 
 ### `message_child` / `message_parent`
 
@@ -76,19 +76,15 @@ Releases unused or fully checkpointed ownership. Rejects uncheckpointed owned ch
 
 ### `jj_concurrency_status`
 
-Read-only source/workspace identities, WIP state, mutability, conflicts, divergence, stale/recovery evidence, managed workspaces, and lock state. Commit IDs are diagnostic.
-
-### `ensure_wip_change`
-
-Verifies an existing recorded WIP, safely adopts an existing canonical WIP after strict validation, or canonically describes an empty current change. Unknown nonempty source work returns `decision_required` rather than silent rewrite. Reports mutability, conflicts, and private-protection diagnostics without changing configuration.
+Read-only source/workspace identities, source base and working-change state, mutability, conflicts, divergence, stale/recovery evidence, managed workspaces, and lock state. Commit IDs are diagnostic.
 
 ### `insert_change`
 
-Creates a named empty assigned feature change before source WIP. Model supplies description/owner; handler injects source identity and insertion point.
+Creates a named empty assigned feature change as a child of source `@-`, immediately before the user's working change. The model supplies description and owner; the handler injects source identity and insertion point. A merge working change blocks rather than selecting one parent.
 
 ### `checkpoint_change`
 
-Consumes the caller's active claim and assigned target. Moves only locked paths, preserves unrelated WIP content/identity, checks conflicts, records receipt, and releases claim.
+Consumes the caller's active claim and assigned target. Moves only locked paths, preserves unrelated source working-change content, identity, and description, checks conflicts, records the receipt, and releases the claim.
 
 ### `assign_workspace_change` / `acquire_workspace_file_set`
 
@@ -96,7 +92,7 @@ The orchestrator assigns one target Change ID to a writable task inside its isol
 
 ### `checkpoint_workspace_file_set`
 
-Injected workspace, claim, owner, target, and stable-WIP evidence constrain the operation. It moves only claimed paths into the assigned target, proves unrelated WIP content unchanged, persists the receipt, and releases the claim. `workspace_checkpoint` remains a legacy compatibility operation only.
+Injected workspace, claim, owner, target, and stable-WIP evidence constrain the operation. It moves only claimed paths into the assigned target, proves unrelated WIP content unchanged, persists the receipt, and releases the claim.
 
 ### `rebase_workspace`
 
@@ -116,7 +112,7 @@ Removes exact safe interior empties and applies supplied semantic descriptions w
 
 ### `integrate_workspace`
 
-Thinker-only and review-receipt-gated. Revalidates under mutex, performs documented phases, preserves source WIP, and returns durable integration/conflict/cleanup receipt.
+Thinker-only and review-receipt-gated. Revalidates under mutex, performs documented phases, preserves the source working change, and returns a durable integration, conflict, or cleanup receipt.
 
 ### `squash_resolution`
 

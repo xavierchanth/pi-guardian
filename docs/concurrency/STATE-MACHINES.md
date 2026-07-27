@@ -151,11 +151,11 @@ closed|closed_no_changes → cleanup_pending when only cleanup remains
 
 - Managed backend is JJ only.
 - Source workspace creation branches from source `@-` and preserves source `@`.
-- Tracked root/head/content-tip/WIP/feature IDs resolve exactly once.
+- Tracked root, head, content-tip, source base, source working-change, and feature IDs resolve exactly once.
 - Workspace rebase preserves tracked range identity and order.
 - Review covers the complete inclusive root-to-content-tip range.
 - Every nonempty isolated range has reviewer evidence before integration.
-- Integration preserves source WIP Change ID and content.
+- Integration preserves the source working change's Change ID, description, and content; Pi-Tai never describes or rewrites it.
 - No-op work creates no synthetic revision.
 - Models never assemble mutating command sequences.
 - No automatic publish, config mutation, destructive cleanup, or backend fallback.

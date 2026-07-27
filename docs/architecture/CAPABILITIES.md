@@ -72,6 +72,8 @@ A future image service is a Host capability with provider/model policy, artifact
 
 The core emits semantic attention/completion events. Terminal, desktop, and mobile clients choose presentation sinks. Host-native notifications may exist when no client is attached.
 
+A cmux-aware terminal client may project live status, progress, token totals, logs, and alerts into cmux as presentation state. This reporting path has no machine-control authority. Opening panes, moving surfaces, or running commands through cmux remains a separate Guardian-governed Host capability.
+
 ## Guardian decision model
 
 Guardian receives:

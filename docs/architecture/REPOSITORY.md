@@ -12,7 +12,7 @@ pi-tai/
 │                                 declares both entry points (see Distribution)
 ├── packages/
 │   ├── core/                     @pi-tai/core
-│   ├── pi-cli/                   legacy direct Pi extension and shared terminal presentation assets
+│   ├── pi-cli/                   Pi terminal presentation and client adapters
 │   ├── client/                   shared typed Host client when justified
 │   ├── host-protocol/            client ↔ Host semantic wire contract
 │   └── runtime-protocol/         Host ↔ runtime-worker contract
@@ -42,44 +42,26 @@ pi-tai/
 └── evals/                        opt-in agent behavior benchmarks
 ```
 
-Exact names may change during migration. Dependency direction and authority are normative.
+Exact names may change without changing dependency direction or authority.
 
 ## Distribution and entry points
 
-The legacy direct extension and `pi-tai-client` ship as **one published artifact with two entry
-points**, not as two packages. The root manifest declares both:
+Pi terminal presentation, the Host-backed `pi-tai-client`, and any Pi client adapter ship as one
+versioned distribution rather than independently versioned products. `@pi-tai/core` and protocol
+packages are shared by construction rather than synchronized publishing.
 
-```jsonc
-{
-  "pi":  { "extensions": ["./packages/pi-cli/pi-tai.ts"] },  // loaded into the user's Pi
-  "bin": { "pi-tai-client": "./bins/pi-tai-client/main.ts" } // standalone ACP client
-}
-```
+Entry points may differ in presentation or launch environment, but all Host-backed entry points:
 
-One manifest, one release, one version number. `@pi-tai/core` and the protocol packages are
-shared by construction rather than by synchronised publishing.
+- visibly report Host connection failure rather than falling back to local execution;
+- use Host session identity and storage rather than private durable transcripts;
+- obey the client import rule below.
 
-The separation that matters is behavioural, and is enforced by three things that are *not*
-package boundaries:
-
-- **Distinct commands.** `pi` with the extension loaded, versus `pi-tai-client`. A user can
-  always tell which product they are in.
-- **Distinct state roots.** Legacy local sessions and Host-backed sessions never share storage.
-  Both sit under the XDG roots, under separate paths, so neither can read the other's durable
-  state.
-- **Distinct import surfaces.** See the client import rule below.
-
-Splitting into two published packages buys none of these and costs a second release pipeline
-plus version-skew management between the client and the core it depends on.
 
 ### Dependency resolution
 
-The two entry points want different dependency treatments: the extension is loaded into a Pi the
-user already has, so Pi packages are peers; the client binary is standalone and must resolve its
-own. Keep Pi packages as `peerDependencies` for the extension path and bundle what the client
-needs at build time. Promoting Pi to a hard dependency of the root manifest is prohibited: it can
-resolve a second copy of Pi into the legacy install path, which means two `AgentSession` classes
-and a dual-authority bug of exactly the kind this architecture exists to prevent.
+An adapter loaded into a Pi installation treats Pi packages as peers; the standalone client bundles
+what it needs at build time. No loaded adapter may resolve a second Pi runtime or create a hidden
+local `AgentSession`, because that would reintroduce a second execution authority.
 
 ## Package responsibilities
 
@@ -89,11 +71,7 @@ Contains reusable TypeScript domain and application services. No terminal, React
 
 ### Pi terminal distributions
 
-The repository root may continue to expose the legacy direct `pi-tai` extension for Git-based Pi
-installation during migration. It contains the existing Pi harness composition and remains
-explicitly separate from Host-backed sessions.
-
-`pi-tai-client` is a separate executable with:
+`pi-tai-client` is an executable with:
 
 - a Pi-derived interactive TUI;
 - an ACP interactive-session backend and Host connection lifecycle;
@@ -153,6 +131,6 @@ Host ─> persistence/process/native adapters
 - `target/`, temporary source clones, eval output, journals, and machine-local state are ignored.
 - Package tests assert the intended tarball exactly.
 
-## Migration principle
+## Change discipline
 
-Move behavior behind interfaces before moving directories. A directory extraction must not combine unrelated behavioral rewrites. Delete compatibility paths only after all production callers use the new authority boundary and durable migration evidence exists.
+Move behavior behind interfaces before moving directories. A directory extraction does not combine unrelated behavioral rewrites. Compatibility paths are deleted only after all production callers use the new authority boundary and durable migration evidence exists.

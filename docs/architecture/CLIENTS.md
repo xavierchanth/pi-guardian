@@ -40,22 +40,11 @@ Every mutating command has an operation ID. Revision-sensitive commands carry an
 
 Concurrency projections contain bounded semantic task, child, question, finding, claim, workspace-custody, receipt, incident, and exact-usage summaries. They never contain transcripts, raw message histories, private journal/session paths, PIDs, control channels, or a client action for entering a child context.
 
-## Pi terminal clients
+## Pi terminal client
 
-Two explicitly separate terminal products coexist during migration.
-
-### Legacy `pi-tai`
-
-The existing Git-installable extension continues to run directly inside Pi's local agent harness.
-It preserves the currently working experience while the Host-backed client is built. Its sessions
-are local Pi sessions and cannot be handed off to Zed, T3 Code, or another Host client. Legacy
-mode never serves as an implicit fallback for a failed Host connection.
-
-### Host-backed `pi-tai-client`
-
-`pi-tai-client` is a separate Pi-derived executable. It reuses Pi's mature terminal presentation
-but replaces the interactive session backend with an ACP client connected through the ACP shim
-to the Host.
+`pi-tai-client` is a Pi-derived executable that reuses Pi's terminal presentation while replacing
+the local agent harness with an ACP client connected through the ACP shim to the Host. It never
+falls back to local execution when the Host is unavailable.
 
 ```text
 Pi TUI → interactive-session backend → ACP shim → Host → runtime worker
@@ -70,7 +59,7 @@ Client-specific responsibilities:
 - footer and bounded task/concurrency rendering;
 - external response editor and client-local drafts;
 - keybindings and model-profile shortcuts expressed as ACP commands;
-- terminal notifications.
+- terminal notifications and reporting-only cmux status, progress, logs, and alerts.
 
 The executable creates no local `AgentSession`, model loop, tool executor, or durable shadow
 transcript. A stock extension that intercepts input while Pi's hidden local session remains active

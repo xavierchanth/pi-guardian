@@ -106,9 +106,13 @@ Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are 
 
 Pi already provides reserve-token-based automatic compaction. Pi-Tai adds a model-independent percentage threshold: after an agent run fully settles, known context usage at or above 90% is compacted before later settled handlers run. If Pi's native policy already compacted the session, post-compaction usage is unknown and Pi-Tai does not compact again. Configure or disable this policy with `compaction` in `pi-tai.json`.
 
-### Native notifications
+### Native notifications and cmux presence
 
-In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications fire when automatic review fails or times out and when the agent settles ready for input. Failure and completion notifications can be disabled in configuration.
+In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications identify the session; completion notifications summarize the assistant's response, and Guardian failures name the affected tool and reason.
+
+Inside cmux, Pi-Tai composes only `pi-cmux`'s notification and sidebar modules to show live status, progress, token totals, logs, and completion alerts. Activation requires `CMUX_WORKSPACE_ID`, a `cmux` executable on `PATH`, and the default-enabled `cmux.enabled` preference. Native completion notifications then stand down to prevent duplicates. When any requirement is absent, Pi-Tai does not initialize the cmux modules and preserves native notifications.
+
+Pi-Tai passes upstream `PI_CMUX_*` environment controls through unchanged but does not install `pi-cmux`'s pane, continuation, review, directory-jump, or command-running features. See [Pi-Tai settings](SETTINGS.md) for configuration, environment controls, and troubleshooting.
 
 ### ANSI theme synchronization
 
@@ -116,14 +120,14 @@ In interactive TUI sessions only, Pi-Tai queries the terminal background with OS
 
 ## Configuration
 
-Pi-Tai reads these files:
+The direct Pi extension reads these files at session start:
 
 ```text
 ~/.pi/agent/pi-tai.json
 <project>/.pi/pi-tai.json
 ```
 
-Project configuration is loaded only for a trusted project and overrides global values.
+Project configuration is loaded only for a trusted project. It may override unprivileged compaction and client-preference fields, but model-selecting `sessionTitle` and `modelProfiles` values are ignored with a warning. Host-managed sessions instead have the Host resolve and pin session policy at creation; their runtime worker does not reread these files. See [Pi-Tai settings](SETTINGS.md) for ownership, precedence, field constraints, and defaults.
 
 ```json
 {
@@ -142,6 +146,9 @@ Project configuration is loaded only for a trusted project and overrides global 
   "notifications": {
     "reviewFailure": true,
     "agentCompletion": true
+  },
+  "cmux": {
+    "enabled": true
   },
   "compaction": {
     "enabled": true,
@@ -200,7 +207,7 @@ docs/roadmap/                        migration initiatives and sequencing
 tests/                               unit, integration, repository, and smoke tests
 ```
 
-Active subsystem designs and the legacy product/Host archive are indexed under [`docs/`](docs/README.md).
+Start with the [documentation index](docs/README.md), then follow the [product](docs/PRODUCT.md), [system architecture](docs/architecture/README.md), [concurrency specification](docs/concurrency/README.md), or [roadmap](docs/roadmap/README.md) reading path.
 
 ## License
 

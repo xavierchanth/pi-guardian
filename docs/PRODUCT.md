@@ -57,7 +57,7 @@ Pairs a client with a selected Host, observes sessions, and later controls them 
 - Independent review before isolated work integrates.
 - Guardian-governed machine and network operations.
 - Web research and safe public fetching.
-- Future browser, computer, image, and cmux integrations.
+- cmux session-presence integration, with future browser, computer, image, and agent-driven cmux capabilities.
 - Multiple presentation clients over one Host API.
 - Per-session and per-child usage accounting.
 

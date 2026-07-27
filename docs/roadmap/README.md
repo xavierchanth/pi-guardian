@@ -8,7 +8,7 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 
 ## Current focus
 
-[I13](initiatives/I13-host-configuration-authority.md) is the active initiative and the forcing function for I01. Checkpoints 1–5 are complete; **checkpoint 6 (Host policy resolution and runtime transport) is in flight**. I13 also reshapes the scope of I01, I02, I03, I04, and I10 — read it before planning against those. The I13 checkpoint 4 start gates for I14 and I15 are satisfied; coordinate their configuration and composition changes with checkpoint 6 while it remains in flight.
+[I13](initiatives/I13-host-configuration-authority.md) is the active initiative and the forcing function for I01. Checkpoints 1–7 are complete: Host-managed sessions now resolve, persist, replay, and require pinned policy. **Checkpoint 8 (revision-guarded policy mutation) is next.** Host-owned project trust and Guardian machine configuration remain separate security-sensitive checkpoints. I13 also reshapes the scope of I01, I02, I03, I04, and I10 — read it before planning against those. The start gates for I14, I15, and I16 are satisfied.
 
 ## Status legend
 
@@ -21,7 +21,7 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 
 | ID | Initiative | Status | Depends on | End outcome |
 |---|---|---|---|---|
-| I00 | [Documentation, repository, and toolchain alignment](initiatives/I00-documentation-and-repository.md) | Planned | — | New docs become normative; top-level areas have explicit product status; formatter, linter, and CI enforce the gate |
+| I00 | [Documentation, repository, and toolchain alignment](initiatives/I00-documentation-and-repository.md) | In progress | — | Canonical docs and repository/tooling rules are indexed and enforced |
 | I01 | [Extract the shared core](initiatives/I01-core-extraction.md) | Planned | I00 | Reusable behavior lives in `@pi-tai/core`; Pi-specific presentation is an adapter |
 | I02 | [Canonical Host sessions](initiatives/I02-host-session-authority.md) | In progress | I00 | Host owns durable sessions, resolved policy, events, and replay |
 | I03 | [Host/runtime convergence](initiatives/I03-host-runtime-convergence.md) | In progress | I01, I02 | Host-supervised worker consumes pinned policy and holds no competing authority |
@@ -36,7 +36,7 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 | I12 | [Stateful machine capabilities](initiatives/I12-machine-capabilities.md) | Exploratory | I02, I03, I04 | Browser/computer/image/cmux capabilities governed and persisted uniformly |
 | I13 | [Host configuration authority](initiatives/I13-host-configuration-authority.md) | In progress | I02, I03 | Policy is resolved once, pinned into the session aggregate, provenanced, and privilege-enforced |
 | I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Planned | I06, I08 | Source `@` is the user's; the shared lane anchors on `@-`; `ensure_wip_change` is gone |
-| I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | Planned | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
+| I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
 
 ## Dependency graph

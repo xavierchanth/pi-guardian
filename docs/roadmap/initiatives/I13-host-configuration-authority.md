@@ -7,29 +7,28 @@
 
 Configuration terminates at the Host. Policy is resolved once, pinned into the session aggregate as
 an event, and never re-read from the filesystem by a running worker. Every resolved field carries
-provenance; privileged fields cannot be set by a project. Guardian's reviewer model, timeout, and
-non-allow stance become explicit machine configuration instead of hardcoded constants.
+provenance; privileged fields cannot be set by a project. Guardian's reviewer model and timeout
+become explicit machine configuration; high/critical outcomes remain fixed safety invariants.
 
-## Problem
+## Current gap
 
-Configuration is resolved at `session_start` **inside the runtime worker**, off the filesystem
-(`services/pi-runtime/src/pi-runtime.ts:292`, `:245`). The worker therefore holds a
-filesystem-derived configuration authority running in parallel with the Host — the same
-dual-authority pattern as the `File*`/`Host*` store pairs, but less visible because there is no
-second class to notice. Two consequences are live defects:
+Checkpoints 6 and 7 ended the Host/runtime configuration split. A Host-managed session now resolves
+policy before worker startup, emits one durable `session.policy_resolved` event, reconstructs policy
+from replay, and rejects a worker session that lacks pinned policy and provenance. Editing a
+configuration file cannot alter an existing session; it affects only sessions created afterward.
 
-1. Editing `~/.pi/agent/pi-tai.json` mid-session silently changes behavior at the next session
-   start, with nothing recorded.
-2. Replay cannot reconstruct a session, because it replays events but not the policy those events
-   executed under. The `SESSIONS.md` canonical-replay promise currently holds only for message flow.
+I13 remains incomplete in four areas:
 
-This violates `docs/README.md` rule 5 and migration rule 2.
+1. session policy is pinned but cannot yet be changed through a revision-guarded command and event;
+2. project trust is a temporary client assertion rather than a Host-owned, digest-bound decision;
+3. project agent definitions can still widen a packaged or user definition;
+4. Guardian's reviewer model and timeout remain hardcoded rather than explicit privileged Host
+   machine configuration.
 
-Configuration is also the forcing function for I01. Core extraction stalled because nothing forced
-it: while the Pi CLI is a client, `packages/pi-tai/src` can remain both core and adapter.
-Configuration is where Pi's ownership is load-bearing rather than incidental (`getAgentDir()`,
-`ctx.isProjectTrusted()`, `session_start`, `auth.json`, `models.json`, `keybindings.json`).
-Everything else in the extension carries no Pi dependency.
+Configuration remains the forcing function for I01. While the direct Pi extension is both client
+and harness, `packages/pi-tai/src` can remain both core and adapter. Configuration exposes where
+Pi's ownership is load-bearing rather than incidental: `getAgentDir()`, project trust,
+`session_start`, credentials, model catalogs, and keybindings.
 
 ## Decisions
 
@@ -82,6 +81,7 @@ Field-by-field disposition:
 |---|---|---|
 | `ansiTheme` | `ClientPreferences` — retained in the Pi client adapter | Zed and T3 own their own theming |
 | `notifications` | `ClientPreferences` — retained in the Pi client adapter | ACP `session/update` supplies events; each client decides how to notify |
+| `cmux` | `ClientPreferences` — retained in the Pi client adapter | Reporting-only integration; agent-driven cmux control belongs to I12 |
 | `modelProfiles` | **Split**: list → `SessionPolicy`; cycling keybinding → `ClientPreferences` | See D7 |
 | `sessionTitle` | `SessionPolicy`, **privileged** | Selects a model and spends tokens |
 | `compaction` | `SessionPolicy`, unprivileged | Pure agent behavior |
@@ -180,24 +180,19 @@ fatal. Target signature, taking contents rather than paths so it is testable wit
 fn resolve(layers: &[ConfigLayer], trust: &ProjectTrust) -> (SessionPolicy, Vec<Warning>)
 ```
 
-### D10 — Guardian's stance becomes explicit configuration
+### D10 — Guardian reviewer selection becomes explicit configuration
 
-There is **no** interactive approval path in the code. A grep across `packages/pi-tai/src/guardian/`
-for approval, permission, confirmation, and `hasUI` returns only a message string at
-`guardian/register.ts:158` instructing the agent to continue without asking. `README.md` is correct
-("Guardian never asks for approval"); the `SETTINGS.md` paragraph describing interactive approval
-after a denied review **describes behavior that does not exist** and must be corrected regardless
-(see I00).
+There is **no** interactive approval path in the code. `README.md` and `SETTINGS.md` both describe
+the released never-ask behavior: related high/critical actions are returned for direct human
+execution, not approved and resumed through the agent. ACP permission UI may present a separate
+human-owned capability flow, but it cannot authorize an agent to execute the blocked action.
 
-Never-asking is currently as much a constraint as a principle — there is no good way to interrupt a
-TUI turn for approval. ACP supplies `session/request_permission` with real editor UI, so the
-constraint lifts and the principle must stand on its own.
-
-Decision: **keep never-ask as the default**, but make it explicit.
+Decision: configure reviewer selection and timeout, not the safety outcome. High/critical actions
+remain structurally non-executable by agents; unrelated or unclear actions remain denied without a
+runnable command.
 
 | Field | Plane | Default | Note |
 |---|---|---|---|
-| `guardian.onNonAllow` | `HostMachineConfig`, privileged | `"fail"` | `"ask"` permitted only when the client advertises the permission capability |
 | `guardian.reviewerModel` | `HostMachineConfig`, privileged | pinned | Currently hardcoded |
 | `guardian.timeoutMs` | `HostMachineConfig`, privileged | `30_000` | Currently hardcoded |
 
@@ -214,28 +209,27 @@ pinned configuration that fails loudly.
 | 3 | **[Complete]** Split `SessionPolicy`, `HostMachineConfig`, and client-local preference types while preserving the current loader | Low | 1 | Existing behavior unchanged; Pi themes and notifications are client-only |
 | 4 | **[Complete]** Add provenance, digests, scope, and privileged tags; reject privileged project values | Low | 3 | Every resolved policy field is explainable and project privilege tests fail closed |
 | 5 | **[Complete]** Implement the pure Rust resolver and generated TypeScript bindings | Medium | 4 | Fixture/differential tests agree with preserved loader behavior; invalid values warn rather than abort |
-| 6 | **[In flight]** Host resolves policy and the runtime protocol carries it; worker prefers it | Medium | 5, I03 protocol foundation | Host calls the resolver and sends resolved policy plus provenance; the worker prefers pinned policy over its own filesystem read, and the remaining filesystem path is a named, greppable branch deleted in checkpoint 7 |
-| 7 | **Cut configuration authority over to the Host** | High | 6 | Worker opens no config files and the legacy branch is deleted; `session.policy_resolved` is persisted; replay and mid-session-edit tests prove one authority |
+| 6 | **[Complete]** Host resolves policy and the runtime protocol carries it | Medium | 5, I03 protocol foundation | Host calls the resolver and sends resolved policy plus provenance |
+| 7 | **[Complete]** Cut configuration authority over to the Host | High | 6 | Worker opens no config files; `session.policy_resolved`, replay, and mid-session-edit tests prove one authority |
 | 8 | Add revision-guarded `session.set_policy`; make profile and effort changes commands | Medium | 7 | Commands/events replay deterministically and reject stale revisions |
-| 12 | Make Guardian machine configuration explicit (D10) in a separate change | Security-sensitive | 7; separate from 7 | Reviewer model is pinned, timeout is configured, and non-allow behavior remains fail-by-default |
+| 12 | Make Guardian reviewer configuration explicit (D10) in a separate change | Security-sensitive | 7; separate from 7 | Reviewer model is pinned, timeout is configured, and high/critical outcomes remain non-configurable |
+| 13 | Replace asserted project trust with Host-owned trust and agent narrowing (D8) | Security-sensitive | 7 | Trust is digest-bound; project agents cannot widen tools or become root; clients cannot assert trust |
 
 Checkpoints 9–11 (ACP modes/models/commands/permissions, the Pi interactive-session backend seam,
 and `pi-tai-client` productization) belong to I04 and I10 and are tracked there.
 
-**Checkpoint 7 ends dual authority.** Checkpoints 3–6 prepare and prove that cutover without
+**Checkpoint 7 ended dual authority.** Checkpoints 3–6 prepared and proved that cutover without
 changing the authority owner early.
 
-**Scope note on checkpoint 6 [Decided].** Checkpoint 6 makes the Host the resolver rather than only
+**Scope note on checkpoint 6 [Decided].** Checkpoint 6 made the Host the resolver rather than only
 extending the transport. The alternative — transport-only in 6, Host resolution plus worker cutover
-plus replay proof in 7 — was rejected because it loads three independent risks into the single
-high-risk checkpoint. Moving Host resolution earlier means checkpoint 7 is reduced to deleting the
-worker's filesystem branch and proving replay, which is one reviewable change.
+plus replay proof in 7 — was rejected because it loaded three independent risks into one high-risk
+checkpoint. Moving Host resolution earlier reduced checkpoint 7 to deleting the worker's filesystem
+branch and proving replay.
 
-Consequence: the Host needs a project-trust input before D8 gives it a trust store. Checkpoint 6
-carries a client-asserted trust flag on the Host create request, replacing Pi's in-worker
-`ctx.isProjectTrusted()`. This is **trust on assertion** and is explicitly temporary; D8 replaces it
-with the Host-owned, digest-bound store. It must be named as such in code so it is not mistaken for
-the end state.
+The delivered bridge carries a client-asserted trust flag on the Host create request, replacing
+Pi's in-worker `ctx.isProjectTrusted()`. This is **trust on assertion**, not the end state;
+checkpoint 13 replaces it with the Host-owned, digest-bound store.
 
 As shipped, both clients hardcode the assertion to `false` (`bins/acp/src/host-port.ts:62`,
 `bins/ctl/src/main.rs:87`), so a Host-managed session never applies project-layer configuration. The
@@ -243,8 +237,8 @@ flag is exercised true only in tests until D8. This is fail-closed and intended 
 as the starting point, not discover it as a regression.
 
 **Binding constraint:** migration rule 4 forbids combining broad repository moves with
-security-sensitive behavior changes. **Checkpoint 7 must not be combined with checkpoint 12.** Land
-D10 separately, after the authority cutover, unless new evidence requires otherwise.
+security-sensitive behavior changes. Checkpoints 12 and 13 remain separate from broad refactors and
+from one another.
 
 ## Resolved inputs
 
@@ -266,6 +260,6 @@ D10 separately, after the authority cutover, unless new evidence requires otherw
 - A trusted project cannot set any privileged field; each attempt warns once naming the field.
 - A project agent definition can only narrow the same-named user or packaged definition, and cannot
   set `root: true`.
-- Guardian's reviewer model and timeout are pinned configuration that fails loudly; non-allow
-  remains fail-by-default and `"ask"` requires an advertising client.
+- Guardian's reviewer model and timeout are pinned configuration that fails loudly; high/critical
+  outcomes remain fixed and cannot be weakened by machine, project, session, or client settings.
 - The `agentDir` ambient global is gone from every call site.

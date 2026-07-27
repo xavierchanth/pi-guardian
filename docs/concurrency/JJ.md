@@ -36,7 +36,7 @@ For substantial work, the thinker maintains a durable state-owned task tree rend
 - objective and acceptance criteria;
 - decisions and constraints;
 - task slices and ownership;
-- source WIP, workspace root/head/content-tip Change IDs;
+- source base and working-change IDs plus workspace root/head/content-tip Change IDs;
 - review/integration state;
 - deferred findings.
 
@@ -46,12 +46,12 @@ The thinker goal and sourced user directions are immutable; planners replace the
 
 ### Shared target allocation
 
-`insert_change` creates a named empty feature change immediately before the same source WIP and binds it to one owner.
+`insert_change` creates a named empty feature change as a child of source `@-`, immediately before the user's working change, and binds it to one owner. Source `@` is observed as the content source but is never described or rewritten by Pi-Tai.
 
 ```text
-base
+source @- (recorded base)
 └── feature target: feat(...)
-    └── source wip @
+    └── user @ (preserved)
 ```
 
 ### File-set claim
@@ -81,21 +81,21 @@ acquire complete set
 → release complete set
 ```
 
-`checkpoint_change` receives an injected claim containing cwd, paths, source WIP, and assigned target. None are copied from model input. It preserves unrelated WIP content and identity.
+`checkpoint_change` receives an injected claim containing cwd, paths, source base, source working change, and assigned target. None are copied from model input. It preserves unrelated working-change content, identity, and description.
 
 ## Isolated lane
 
 ### Workspace allocation
 
-The thinker allocates from source `@-`, preserving source `@` bytes and Change ID:
+The thinker allocates from source `@-`, preserving source `@` bytes, description, and Change ID:
 
 ```text
 recorded source @-
-├── source wip @
+├── user @ (preserved)
 └── isolated root @
 ```
 
-Custody records source workspace/WIP, diagnostic base, managed name/path, root, and expected head. No Git fallback or shared fallback occurs after allocation begins.
+Custody records source workspace and working change, diagnostic base, managed name/path, root, and expected head. No Git fallback or shared fallback occurs after allocation begins.
 
 ### Workspace file claims and checkpoint
 
@@ -118,7 +118,7 @@ A writable task receives one assigned target Change ID. `acquire_workspace_file_
 5. persists exact path, patch, target, WIP, and JJ operation evidence;
 6. releases the claim only after the receipt is durable.
 
-Legacy whole-head `workspace_checkpoint` receipts remain readable during migration but cannot be mixed with file-claim mutation in one workspace. An isolated worker cannot mutate through arbitrary shell JJ commands.
+An isolated worker checkpoints through file claims and cannot mutate through arbitrary shell JJ commands.
 
 ### Freeze and normalization
 
@@ -179,8 +179,8 @@ Deterministic integration:
 3. capture recovery identities;
 4. forget workspace only at the documented mutation boundary;
 5. remove only approved empty changes/expected empty head;
-6. insert approved nonempty range before the same source WIP;
-7. preserve source WIP ID and content;
+6. insert the approved nonempty range after the recorded source base and before the user's working change;
+7. preserve source working-change ID, description, and content;
 8. verify ancestry, order, names, conflicts, and patches;
 9. remove managed directory only after graph independence;
 10. persist every phase and final receipt.
@@ -216,7 +216,7 @@ model tool handler
 → pinned supported JJ binary
 ```
 
-One repository mutation kernel/mutex exists per process and is shared across root coordinators. Source handles, claims, attempts, and receipts remain attributable to their root/session. Versioned atomic shared-source state persists WIP identity, target ownership, claim transitions, attempts, and completed receipts.
+One repository mutation kernel/mutex exists per process and is shared across root coordinators. Source handles, claims, attempts, and receipts remain attributable to their root/session. Versioned atomic shared-source state persists base and working-change identity, target ownership, claim transitions, attempts, and completed receipts.
 
 The process executor uses argv directly, bounded output, cancellation, timeout, inherited policy configuration, no config edits, built-in commands, and explicit long-form options. It distinguishes missing binary, spawn failure, exit failure, cancellation, timeout, and output overflow.
 

@@ -44,12 +44,13 @@ Normalized equality excludes commit IDs unless rewrite itself is under test.
 
 ## Deterministic scenario groups
 
-### Source WIP and shared changes
+### Source working change and shared changes
 
-- safe empty WIP creation and unknown nonempty refusal;
-- inserted target preserves WIP bytes/identity;
+- arbitrary nonempty, user-described source `@` remains unchanged;
+- a merge source `@` blocks rather than selecting a parent;
+- inserted target anchors on source `@-` and preserves source `@` bytes, identity, and description;
 - checkpoint moves only claimed paths;
-- unrelated WIP remains untouched;
+- unrelated working-change content remains untouched;
 - two overlapping writers serialize edit→checkpoint;
 - pre-lock changes refresh;
 - in-lock changes breach;
@@ -73,7 +74,7 @@ Normalized equality excludes commit IDs unless rewrite itself is under test.
 - all-empty work proves no-change;
 - unnamed/empty normalization is exact;
 - review receipt binds task plan and normalized patches;
-- dirty source integration preserves WIP bytes/identity;
+- dirty source integration preserves working-change bytes, identity, and description;
 - conflict resolution targets owning changes and re-reviews;
 - crash after every persisted boundary resumes only next phase;
 - cleanup failure yields cleanup-pending.
@@ -123,7 +124,7 @@ Fixtures declare expected and forbidden tools, lifecycle assertions, report fiel
 
 Representative opt-in cases:
 
-1. small shared change creates WIP/target and checkpoints one file;
+1. small shared change inserts a target after source `@-` and checkpoints one file without rewriting source `@`;
 2. two shared workers serialize on one file;
 3. planner creates several coherent checkpoints and expected empty head;
 4. manual rebase onto newer local base preserves range identities;

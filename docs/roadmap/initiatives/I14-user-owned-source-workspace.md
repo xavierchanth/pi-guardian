@@ -105,22 +105,12 @@ re-verifies both at `:27`. It does not consult the description.
 - I06's delivered invariants for claims, checkpoints, and receipts are preserved unchanged. Only the
   WIP-label invariants are retired.
 
-## Documentation to realign
+## Canonical documentation
 
-The shared-source lane is the only place that contradicts the rule above. Leave every source in the
-table above alone; they are already correct.
-
-| Location | Current text | Required change |
-|---|---|---|
-| `docs/concurrency/JJ.md:52-58` | "`insert_change` creates a named empty feature change immediately before the same source WIP", graph `base / feature target / source wip @` | Anchor the prose on source `@-`; relabel the graph's leaf `user @ (preserved)` to match the isolated-lane graph at `:93` |
-| `docs/concurrency/JJ.md:80` | "…injected claim containing cwd, paths, source WIP, and assigned target" | "source working change" |
-| `docs/concurrency/TOOLS.md:81-83` | the `ensure_wip_change` entry | Delete |
-| `docs/concurrency/TOOLS.md:87` | "Creates a named empty assigned feature change before source WIP" | "…as a child of source `@-`, before the user's working change" |
-| `docs/concurrency/TOOLS.md:39,79,91,99,119` | incidental "WIP" | "working change" |
-| `docs/concurrency/RECOVERY.md:37-38` | "No WIP and source `@` empty → Ensure WIP deterministically"; "No WIP and source `@` nonempty → Ask/normalize; do not relabel silently" | Delete both rows — with no label to establish, neither recovery state exists |
-| `docs/concurrency/RECOVERY.md:40` | "WIP immutable → Stop WIP mutation" | Retarget at the base: an immutable `@-` still blocks insertion |
-| `docs/concurrency/STATE-MACHINES.md:154,158` | "…/WIP/feature IDs"; "Integration preserves source WIP Change ID and content" | "working change"; state the preservation guarantee more strongly now that nothing describes it |
-| `docs/concurrency/README.md`, `docs/GLOSSARY.md`, `README.md:87`, `I06` | shared-lane "WIP" | "working change"; add `base` and `working change` to the glossary; record in I06 that its WIP-label invariants are superseded here |
+The future-first concurrency specification already defines source `@-` as the stable base and source
+`@` as the preserved user working change. This initiative tracks the implementation and persistence
+migration needed to match that authority. I06 retains its WIP-label history only as delivered-state
+context and explicitly marks those invariants as superseded by I14.
 
 ## Exit criteria
 

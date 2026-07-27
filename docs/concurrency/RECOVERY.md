@@ -34,10 +34,10 @@ Stopping one affected mutation does not automatically terminate unrelated childr
 | File changed before claim acquired | Refresh and re-read |
 | File changed while claim held | Stop affected writes; ownership breach |
 | Shared checkpoint extraction ambiguous | Reroute/ask; never guess |
-| No WIP and source `@` empty | Ensure WIP deterministically |
-| No WIP and source `@` nonempty | Ask/normalize; do not relabel silently |
+| Source `@` has exactly one parent | Continue using that parent as the recorded base |
+| Source `@` is a merge | Ask; do not choose a parent |
 | Missing private selector | Warn; do not edit config |
-| WIP immutable | Stop WIP mutation |
+| Source base immutable | Stop insertion; do not rewrite source `@` |
 | Commit IDs changed | Refresh/continue |
 | Explicit clean workspace rebase | Continue after exact verification |
 | Normalized patch changed | Re-review |

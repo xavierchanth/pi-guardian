@@ -23,6 +23,8 @@
 | **task tree** | Durable state-owned intent hierarchy: immutable thinker goal, sourced user directions, child assignments, and effective plans backed by append-only revisions; execution roles receive effective-only projections while reviewers receive immutable full-history snapshots. |
 | **work context** | Current goal and execution checklist associated with a session or context. |
 | **orchestration change** | Mutable private per-session JJ change, described `pi-tai: session <id>`, preserving that Host session's integrated work without moving or rewriting the invoking user workspace. |
+| **source base** | The invoking workspace's single parent, `@-`, recorded as the stable insertion and rebase anchor for managed work. |
+| **source working change** | The user's live source `@`; Pi-Tai may observe its identity and content for guarded checkpointing but never describes or rewrites it. |
 | **shared lane** | Bounded implementation in the source workspace under an atomic file-set claim and assigned feature Change ID. |
 | **isolated lane** | Substantial or overlap-prone implementation in a separate JJ workspace rooted from source `@-`. |
 | **file-set claim** | Atomic exclusive ownership of a canonical set of source paths through edit, validation, checkpoint, and receipt verification. |
