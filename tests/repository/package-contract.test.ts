@@ -61,6 +61,14 @@ test("design is packaged as a codebase-grounded skill", () => {
   assert.equal(existsSync(join(root, "packages/pi-tai/skills/workspace")), false);
 });
 
+test("checkpoint prompt accepts additional instructions", () => {
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/checkpoint.md"), "utf8");
+  assert.match(prompt, /argument-hint: "\[additional instructions\]"/);
+  assert.match(prompt, /## Additional instructions/);
+  assert.match(prompt, /\$\{ARGUMENTS:-No additional instructions were provided\.\}/);
+  assert.match(prompt, /without weakening the safety requirements above/);
+});
+
 test("implement prompt integrates feedback before approved-plan execution", () => {
   const prompt = readFileSync(join(root, "packages/pi-tai/prompts/implement.md"), "utf8");
   assert.match(prompt, /argument-hint: "\[plan feedback or additional notes\]"/);

@@ -52,6 +52,10 @@ The packaged `jj-guidelines` skill keeps Jujutsu inspection, checkpoints, mutabl
 
 The packaged `invariants` skill guides domain models, APIs, state machines, wire contracts, and persistence schemas toward representations where invalid states are difficult or impossible to express. It emphasizes authoritative facts, discriminated states, validated boundaries, and explicit transitions.
 
+### Checkpoint prompt
+
+`/checkpoint [additional instructions]` organizes all current work into coherent semantic changes. Optional instructions can refine grouping, descriptions, or validation while retaining the prompt's safety requirements.
+
 ### Approved-plan implementation prompt
 
 `/implement [plan feedback or additional notes]` incorporates optional feedback into the current effective approved plan, then immediately implements and validates the result. It does not pause merely to re-present the revised plan unless the feedback introduces material unresolved ambiguity.

@@ -1,5 +1,6 @@
 ---
 description: Checkpoint all current work into coherent semantic changes
+argument-hint: "[additional instructions]"
 ---
 Checkpoint all of my current work now.
 
@@ -20,3 +21,9 @@ Make a best-effort attempt to leave the work as a clean, reviewable semantic sta
 Use Jujutsu when this is a JJ repository; otherwise use the repository's normal VCS workflow. If some changes cannot be safely classified or validated, checkpoint the coherent remainder and clearly report what was left uncheckpointed and why. Do not create empty described revisions. When using JJ, finish on a fresh empty unnamed working-copy revision after the final coherent checkpoint.
 
 Report the checkpoints created or rewritten, validation performed, and any residual risks or uncheckpointed files.
+
+## Additional instructions
+
+Apply the following instructions when organizing and validating the checkpoints, without weakening the safety requirements above.
+
+${ARGUMENTS:-No additional instructions were provided.}
