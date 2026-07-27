@@ -10,6 +10,7 @@ import {
   registerPiTaiConfig,
   type PiTaiConfigService,
 } from "./src/config/register.ts";
+import { registerCmux } from "./src/cmux/register.ts";
 import { registerAutoCompaction } from "./src/compaction/register.ts";
 import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
@@ -60,6 +61,7 @@ export interface PiTaiRegistrars {
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
+  cmux: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
   footer: PiTaiRegistrar;
@@ -94,6 +96,9 @@ const productionRegistrars: PiTaiRegistrars = {
   },
   sessionTitle: (pi, runtime) => {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
+  },
+  cmux: async (pi, runtime) => {
+    await registerCmux(pi, runtime.config);
   },
   notifications: (pi, runtime) => {
     registerNotifications(pi, runtime.config, runtime.notificationSender);
@@ -138,6 +143,7 @@ export function createPiTaiExtension(
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
+    await registrars.cmux(pi, runtime);
     await registrars.notifications(pi, runtime);
     await registrars.guardian(pi, runtime);
     await registrars.footer(pi, runtime);

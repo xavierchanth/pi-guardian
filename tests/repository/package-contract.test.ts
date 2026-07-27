@@ -156,6 +156,21 @@ test("package ships standalone Guardian and required support files", () => {
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
 });
 
+test("package composes only the reporting-only pi-cmux modules", () => {
+  assert.equal(manifest.dependencies?.["pi-cmux"], "^0.1.16");
+  assert.equal(manifest.dependencies?.jiti, "^2.7.0");
+  const source = walkSource(join(root, "packages/pi-tai"))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  const imports = [...source.matchAll(/pi-cmux\/extensions\/([^"']+)/g)]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(imports, ["cmux-notify.ts", "cmux-sidebar.ts", "i18n.ts"]);
+  for (const excluded of ["index", "cmux-review", "cmux-continue", "cmux-split", "cmux-open", "cmux-zoxide"]) {
+    assert.doesNotMatch(source, new RegExp(`pi-cmux/extensions/${excluded}(?:\\.ts)?["']`));
+  }
+});
+
 test("package ships web tools and their child-runtime dependencies", () => {
   assert.ok(manifest.dependencies?.["html-to-text"]);
   assert.ok(manifest.dependencies?.["ipaddr.js"]);

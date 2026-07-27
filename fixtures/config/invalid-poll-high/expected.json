@@ -40,6 +40,9 @@
       "notifications": {
         "reviewFailure": true,
         "agentCompletion": true
+      },
+      "cmux": {
+        "enabled": true
       }
     },
     "hostMachine": {}
@@ -82,6 +85,9 @@
       "layer": "default"
     },
     "clientPreferences.notifications.agentCompletion": {
+      "layer": "default"
+    },
+    "clientPreferences.cmux.enabled": {
       "layer": "default"
     }
   },

@@ -544,7 +544,13 @@ test("review failure, timeout, and cancellation allow ordinary actions but stop 
     assert.equal(recorded.length, 1);
     assert.deepEqual(emitted, [{
       name: "pi-tai:guardian-review-failed",
-      data: { kind: result.kind, mode: "tui" },
+      data: {
+        kind: result.kind,
+        mode: "tui",
+        toolName: "bash",
+        reason: result.reason,
+        cwd: process.cwd(),
+      },
     }]);
   }
 

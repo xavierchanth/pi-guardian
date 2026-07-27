@@ -24,6 +24,7 @@ test("returns immutable defaults when files are absent", () => {
     reviewFailure: true,
     agentCompletion: true,
   });
+  assert.deepEqual(loaded.config.clientPreferences.cmux, { enabled: true });
   assert.deepEqual(loaded.config.sessionPolicy.compaction, {
     enabled: true,
     thresholdPercent: 90,
@@ -38,12 +39,14 @@ test("unprivileged trusted project values override valid global values", () => {
     sessionTitle: { provider: "global-provider", model: "global-model", maxWords: 8 },
     ansiTheme: { darkTheme: "global-dark" },
     notifications: { reviewFailure: false },
+    cmux: { enabled: false },
     compaction: { thresholdPercent: 85 },
   }));
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { model: "project-model" },
     ansiTheme: { lightTheme: "project-light" },
     notifications: { agentCompletion: false },
+    cmux: { enabled: true },
     compaction: { enabled: false, thresholdPercent: 92.5 },
   }));
 
@@ -61,6 +64,7 @@ test("unprivileged trusted project values override valid global values", () => {
     reviewFailure: false,
     agentCompletion: false,
   });
+  assert.deepEqual(loaded.config.clientPreferences.cmux, { enabled: true });
   assert.deepEqual(loaded.config.sessionPolicy.compaction, {
     enabled: false,
     thresholdPercent: 92.5,
@@ -105,6 +109,7 @@ test("invalid overrides are ignored without erasing valid global values", () => 
   writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
     sessionTitle: { provider: "", maxWords: 99, surprise: true },
     notifications: { reviewFailure: "yes", surprise: true },
+    cmux: { enabled: "yes", surprise: true },
     compaction: { enabled: "yes", thresholdPercent: 101, surprise: true },
     unknown: true,
   }));
@@ -118,6 +123,7 @@ test("invalid overrides are ignored without erasing valid global values", () => 
     thresholdPercent: 90,
   });
   assert.ok(loaded.warnings.some((warning) => warning.includes("notifications.reviewFailure")));
+  assert.ok(loaded.warnings.some((warning) => warning.includes("cmux.enabled")));
   assert.ok(loaded.warnings.some((warning) => warning.includes("compaction.enabled")));
   assert.ok(loaded.warnings.some((warning) => warning.includes("compaction.thresholdPercent")));
   assert.ok(loaded.warnings.some((warning) => warning.includes("Unknown top-level key")));
@@ -227,6 +233,6 @@ test("configuration planes partition the documented top-level keys", () => {
   assert.equal(new Set(allKeys).size, allKeys.length);
   assert.deepEqual(
     new Set(allKeys),
-    new Set(["sessionTitle", "ansiTheme", "notifications", "compaction", "modelProfiles"]),
+    new Set(["sessionTitle", "ansiTheme", "notifications", "cmux", "compaction", "modelProfiles"]),
   );
 });

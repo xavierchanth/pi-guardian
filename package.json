@@ -88,6 +88,8 @@
   ],
   "dependencies": {
     "html-to-text": "^10.0.0",
-    "ipaddr.js": "^2.4.0"
+    "ipaddr.js": "^2.4.0",
+    "jiti": "^2.7.0",
+    "pi-cmux": "^0.1.16"
   }
 }

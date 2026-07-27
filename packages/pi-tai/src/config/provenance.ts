@@ -38,4 +38,5 @@ export const FIELD_DESCRIPTORS: Readonly<Record<string, FieldDescriptor>> = Obje
   "clientPreferences.ansiTheme.pollIntervalMs": { scope: "project", privileged: false },
   "clientPreferences.notifications.reviewFailure": { scope: "project", privileged: false },
   "clientPreferences.notifications.agentCompletion": { scope: "project", privileged: false },
+  "clientPreferences.cmux.enabled": { scope: "project", privileged: false },
 });

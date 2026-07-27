@@ -144,6 +144,9 @@ export function registerApprovalGuardian(
       pi.events.emit(GUARDIAN_REVIEW_FAILED_EVENT, {
         kind: result.kind,
         mode: ctx.mode,
+        toolName: action.toolName,
+        reason: result.reason,
+        cwd: ctx.cwd,
       });
     }
     if (result.kind !== "decision") {

@@ -78,9 +78,16 @@ pub struct NotificationsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct CmuxConfig {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientPreferences {
     pub ansi_theme: AnsiThemeConfig,
     pub notifications: NotificationsConfig,
+    pub cmux: CmuxConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Default)]
@@ -133,6 +140,7 @@ pub fn default_config() -> ResolvedPiTaiConfig {
                 review_failure: true,
                 agent_completion: true,
             },
+            cmux: CmuxConfig { enabled: true },
         },
         host_machine: HostMachineConfig {},
     }

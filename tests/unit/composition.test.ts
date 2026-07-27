@@ -40,6 +40,9 @@ test("composition root registers every feature once in order", async () => {
       sessionTitle: () => {
         calls.push("session-title");
       },
+      cmux: () => {
+        calls.push("cmux");
+      },
       notifications: () => {
         calls.push("notifications");
       },
@@ -78,6 +81,7 @@ test("composition root registers every feature once in order", async () => {
     "model-profiles",
     "subagents",
     "session-title",
+    "cmux",
     "notifications",
     "guardian",
     "footer",

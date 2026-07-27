@@ -92,4 +92,11 @@ pub const FIELD_DESCRIPTORS: &[(&str, FieldDescriptor)] = &[
             privileged: false,
         },
     ),
+    (
+        "clientPreferences.cmux.enabled",
+        FieldDescriptor {
+            scope: ConfigScope::Project,
+            privileged: false,
+        },
+    ),
 ];

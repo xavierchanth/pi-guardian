@@ -42,7 +42,7 @@
         "agentCompletion": true
       },
       "cmux": {
-        "enabled": true
+        "enabled": false
       }
     },
     "hostMachine": {}
@@ -88,10 +88,10 @@
       "layer": "default"
     },
     "clientPreferences.cmux.enabled": {
-      "layer": "default"
+      "layer": "user",
+      "path": "global.json",
+      "digest": "9e204b0c68f39755f81a3812a5cdf5a994331b81acebad7e0ced12811b7eb9cf"
     }
   },
-  "warnings": [
-    "Invalid or unreadable global.json: Expected property name or '}' in JSON at position 1 (line 1 column 2)"
-  ]
+  "warnings": []
 }

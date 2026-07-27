@@ -108,6 +108,7 @@ fn parse_layer(
             "sessionTitle",
             "ansiTheme",
             "notifications",
+            "cmux",
             "compaction",
             "modelProfiles",
         ]
@@ -130,6 +131,7 @@ fn parse_layer(
         warnings,
         &mut result,
     );
+    parse_cmux(object.get("cmux"), &layer.path, warnings, &mut result);
     parse_compaction(object.get("compaction"), &layer.path, warnings, &mut result);
     parse_profiles(
         object.get("modelProfiles"),
@@ -333,6 +335,26 @@ fn parse_notifications(
         }
     }
 }
+fn parse_cmux(
+    value: Option<&Value>,
+    path: &str,
+    warnings: &mut Vec<String>,
+    out: &mut BTreeMap<String, Value>,
+) {
+    let Some(v) = object(value, "cmux", path, warnings) else {
+        return;
+    };
+    unknowns(v, &["enabled"], "cmux", path, warnings);
+    if let Some(value) = v.get("enabled") {
+        if value.is_boolean() {
+            put(out, "clientPreferences.cmux.enabled", value.clone())
+        } else {
+            warnings.push(format!(
+                "Invalid cmux.enabled in {path}: expected a boolean."
+            ))
+        }
+    }
+}
 fn parse_compaction(
     value: Option<&Value>,
     path: &str,
@@ -492,6 +514,9 @@ fn apply(
             "clientPreferences.notifications.agentCompletion" => {
                 config.client_preferences.notifications.agent_completion =
                     serde_json::from_value(value).unwrap()
+            }
+            "clientPreferences.cmux.enabled" => {
+                config.client_preferences.cmux.enabled = serde_json::from_value(value).unwrap()
             }
             _ => {}
         }

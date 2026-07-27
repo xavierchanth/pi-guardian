@@ -33,6 +33,10 @@ export interface NotificationsConfig {
   agentCompletion: boolean;
 }
 
+export interface CmuxConfig {
+  enabled: boolean;
+}
+
 export interface CompactionConfig {
   enabled: boolean;
   thresholdPercent: number;
@@ -55,6 +59,7 @@ export interface SessionPolicy {
 export interface ClientPreferences {
   ansiTheme: AnsiThemeConfig;
   notifications: NotificationsConfig;
+  cmux: CmuxConfig;
 }
 
 /**
@@ -92,6 +97,9 @@ export const DEFAULT_CLIENT_PREFERENCES: ClientPreferences = Object.freeze({
   notifications: Object.freeze({
     reviewFailure: true,
     agentCompletion: true,
+  }),
+  cmux: Object.freeze({
+    enabled: true,
   }),
 });
 
