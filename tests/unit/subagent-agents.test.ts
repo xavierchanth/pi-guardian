@@ -19,8 +19,8 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
     agentDir: "/tmp/pi-tai-no-user-agents",
   });
   assert.equal(catalog.root.name, "orchestrator");
-  assert.deepEqual(catalog.root.allowedChildren, ["implementation-lead", "documenter", "reviewer", "scout", "researcher"]);
-  assert.deepEqual(catalog.byName.get("implementation-lead")?.allowedChildren, ["worker", "scout", "researcher"]);
+  assert.deepEqual(catalog.root.allowedChildren, ["worker", "implementation-lead", "documenter", "reviewer", "scout", "researcher"]);
+  assert.deepEqual(catalog.byName.get("implementation-lead")?.allowedChildren, ["worker", "documenter", "scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("worker")?.allowedChildren, ["scout", "researcher"]);
   assert.deepEqual(catalog.byName.get("scout")?.allowedChildren, []);
   assert.deepEqual(catalog.byName.get("researcher")?.allowedChildren, []);
@@ -28,19 +28,18 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   assert.ok(catalog.root.tools.includes("jj_concurrency_status"));
   assert.equal(catalog.root.tools.includes("ensure_wip_change"), false);
   assert.equal(catalog.root.tools.includes("insert_change"), false);
-  for (const tool of ["jj_concurrency_status", "acquire_file_set", "release_file_set", "checkpoint_change"]) {
-    assert.ok(catalog.byName.get("worker")?.tools.includes(tool), tool);
-  }
-  assert.equal(catalog.byName.get("implementation-lead")?.tools.includes("workspace_subagent"), false);
+  assert.ok(catalog.byName.get("worker")?.tools.includes("jj_concurrency_status"));
+  for (const retired of ["acquire_file_set", "release_file_set", "checkpoint_change"]) assert.equal(catalog.byName.get("worker")?.tools.includes(retired), false, retired);
+  assert.equal(catalog.byName.get("implementation-lead")?.tools.includes("workspace_subagent"), true);
   assert.deepEqual(catalog.byName.get("documenter")?.allowedChildren, []);
-  assert.equal(catalog.root.allowedChildren.includes("worker"), false);
+  assert.equal(catalog.root.allowedChildren.includes("worker"), true);
   for (const name of ["orchestrator", "implementation-lead", "worker", "documenter"]) assert.equal(catalog.byName.get(name)?.tools.includes("update_plan"), false, name);
-  assert.ok(catalog.root.tools.includes("task_create"));
-  assert.equal(catalog.root.tools.includes("request_plan_approval"), false);
-  assert.ok(catalog.byName.get("implementation-lead")?.tools.includes("task_plan"));
+  assert.ok(catalog.root.tools.includes("work_order_create"));
+  assert.equal(catalog.root.tools.some((tool) => tool.startsWith("task_")), false);
+  assert.ok(catalog.byName.get("implementation-lead")?.tools.includes("work_order_revise"));
   assert.ok(catalog.byName.get("reviewer")?.tools.includes("inspect_workspace_review"));
   assert.ok(catalog.byName.get("reviewer")?.tools.includes("submit_workspace_review"));
-  assert.equal(catalog.byName.get("reviewer")?.tools.includes("task_status"), false);
+  assert.equal(catalog.byName.get("reviewer")?.tools.includes("work_order_status"), false);
   for (const name of ["orchestrator", "implementation-lead", "worker", "reviewer"]) {
     assert.ok(catalog.byName.get(name)?.tools.includes("request_child_status"), name);
     assert.equal(catalog.byName.get(name)?.tools.includes("request_child_summary"), false, name);
@@ -83,23 +82,23 @@ test("packaged delegating prompts require pushed-event acknowledgement before co
     assert.match(prompt, /`ack_child_event`/, name);
     assert.match(prompt, /no direct child is unresolved/, name);
     assert.match(prompt, /no terminal event remains unacknowledged/, name);
-    assert.match(prompt, /never inspect private child history/, name);
+    assert.match(prompt, /private child history/, name);
   }
 
   assert.match(catalog.root.systemPrompt, /Every nonempty range must pass an independent Reviewer/);
   assert.match(catalog.root.systemPrompt, /work with the user as a design partner/i);
-  assert.match(catalog.root.systemPrompt, /Follow Design–Plan–Implement–Confirm/);
+  assert.match(catalog.root.systemPrompt, /Design–Plan–Implement–Closure/);
   assert.match(catalog.root.systemPrompt, /Move to Plan only when/);
   assert.match(catalog.root.systemPrompt, /without requesting ceremonial approval/);
-  assert.match(catalog.root.systemPrompt, /Never launch a generic Worker directly/);
-  assert.match(catalog.root.systemPrompt, /Every writable delegated task runs in its own managed workspace/);
+  assert.match(catalog.root.systemPrompt, /`small-product` work order for a Worker/);
+  assert.match(catalog.root.systemPrompt, /Own the main workspace/);
   assert.match(catalog.byName.get("documenter")?.systemPrompt ?? "", /Modify only explicitly assigned Markdown documentation paths/);
-  assert.equal(catalog.root.tools.includes("write"), false);
-  assert.equal(catalog.root.tools.includes("edit"), false);
-  assert.equal(catalog.root.tools.includes("bash"), false);
+  assert.equal(catalog.root.tools.includes("write"), true);
+  assert.equal(catalog.root.tools.includes("edit"), true);
+  assert.equal(catalog.root.tools.includes("bash"), true);
   for (const name of ["documenter", "reviewer", "scout", "researcher"]) assert.equal(catalog.byName.get(name)?.tools.includes("bash"), false, name);
-  assert.equal(catalog.root.tools.includes("task_approve_plan"), false);
-  assert.match(catalog.byName.get("worker")?.systemPrompt ?? "", /acquire_file_set.*checkpoint_change/s);
+  assert.equal(catalog.root.tools.some((tool) => tool.startsWith("task_")), false);
+  assert.match(catalog.byName.get("worker")?.systemPrompt ?? "", /acquire_workspace_file_set.*checkpoint_workspace_file_set/s);
   for (const name of ["implementation-lead", "worker"]) {
     assert.match(
       catalog.byName.get(name)?.systemPrompt ?? "",

@@ -57,7 +57,7 @@ const TOOL_NAMES = [
 
 test("canonical child policy cannot be broadened by agent overrides", () => {
   assert.deepEqual([...canonicalNormalChildren("orchestrator")], ["scout", "researcher"]);
-  assert.deepEqual([...canonicalNormalChildren("implementation-lead")], ["worker", "scout", "researcher"]);
+  assert.deepEqual([...canonicalNormalChildren("implementation-lead")], ["worker", "documenter", "scout", "researcher"]);
   assert.deepEqual([...canonicalNormalChildren("worker")], ["scout", "researcher"]);
   assert.deepEqual([...canonicalNormalChildren("custom")], []);
 });
@@ -844,7 +844,7 @@ test("subagents toggles the orchestrator definition without pausing concurrent p
   assert.equal(tools.has("task_approve_plan"), false);
   assert.match(
     tools.get("workspace_subagent")?.promptGuidelines.join("\n") ?? "",
-    /Launching a workspace child is not completion.*Use await_child_event/s,
+    /Launching is not completion.*Track with await_child_event/s,
   );
   assert.match(tools.get("await_child_event")?.description ?? "", /Suspend without polling/);
   assert.match(tools.get("ack_child_event")?.description ?? "", /Acknowledge one delivered/);
@@ -910,9 +910,9 @@ test("subagents toggles the orchestrator definition without pausing concurrent p
   );
   assert.match(notifications.at(-1) ?? "", /orchestrator/);
   const rootGuard = handlers.get("tool_call")?.[0];
-  assert.match((await rootGuard?.({ toolName: "write", toolCallId: "write-1", input: { path: "README.md", content: "mutate" } }, ctx))?.reason ?? "", /Orchestrator is read-only/);
-  assert.match((await rootGuard?.({ toolName: "bash", toolCallId: "bash-1", input: { command: "rm README.md" } }, ctx))?.reason ?? "", /no shell execution authority/);
-  await assert.rejects(tools.get("subagent")?.execute("direct-worker", { agent: "worker", task: { objective: "Bypass Implementation Lead" } }, undefined, undefined, ctx), /cannot launch Workers directly/);
+  assert.equal(await rootGuard?.({ toolName: "write", toolCallId: "write-1", input: { path: "README.md", content: "mutate" } }, ctx), undefined);
+  assert.equal(await rootGuard?.({ toolName: "bash", toolCallId: "bash-1", input: { command: "pwd" } }, ctx), undefined);
+  await assert.rejects(tools.get("subagent")?.execute("direct-worker", { agent: "worker", task: { objective: "Bypass managed workspace" } }, undefined, undefined, ctx), /workspace_subagent.*bound work order/);
   await assert.rejects(tools.get("subagent")?.execute("direct-lead", { agent: "implementation-lead", task: { objective: "Bypass workspace" } }, undefined, undefined, ctx), /workspace_subagent/);
   await assert.rejects(tools.get("subagent")?.execute("direct-review", { agent: "reviewer", task: { objective: "Review without range" } }, undefined, undefined, ctx), /prepare_workspace_review/);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -945,11 +945,11 @@ test("subagents toggles the orchestrator definition without pausing concurrent p
 
   await assert.rejects(tools.get("workspace_subagent")?.execute(
     "tool",
-    { agent: "implementation-lead", taskId: "task-unplanned", name: "planned", task: { objective: "Implement unplanned work" } },
+    { workOrderId: "task-unplanned", name: "planned" },
     undefined,
     undefined,
     ctx,
-  ), /matching durable task assignment/);
+  ), /durable executable work order/);
   assert.equal(workspaceCreate, undefined);
   assert.equal(plannerSpawn, undefined);
 

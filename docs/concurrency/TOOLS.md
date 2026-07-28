@@ -65,27 +65,13 @@ Post-order durable reconciliation. Refuses duplicate writers and requires claims
 
 ## Coordination tools
 
-### `acquire_file_set`
-
-Atomically queues a complete repository-relative semantic path set. Existing paths canonicalize directly and new paths through the nearest existing ancestor. Equal and ancestor/descendant paths collide. A set grants only when no active claim or earlier overlapping waiter conflicts; disjoint sets may run concurrently. Returns a claim only after complete grant and fresh-read requirement. Restart interrupts persisted queued/active/checkpointing claims rather than restoring authority or queue position.
-
-### `release_file_set`
-
-Releases unused or fully checkpointed ownership. Rejects uncheckpointed owned changes.
+The shared-source worker lane (`insert_change`, `acquire_file_set`, `release_file_set`, and `checkpoint_change`) is retired from production. The Orchestrator owns the main workspace, while concurrent writable children coordinate only through isolated-workspace file claims.
 
 ## JJ tools
 
 ### `jj_concurrency_status`
 
 Read-only source/workspace identities, source base and working-change state, mutability, conflicts, divergence, stale/recovery evidence, managed workspaces, and lock state. Commit IDs are diagnostic.
-
-### `insert_change`
-
-Creates a named empty assigned feature change as a child of source `@-`, immediately before the user's working change. The model supplies description and owner; the handler injects source identity and insertion point. A merge working change blocks rather than selecting one parent.
-
-### `checkpoint_change`
-
-Consumes the caller's active claim and assigned target. Moves only locked paths, preserves unrelated source working-change content, identity, and description, checks conflicts, records the receipt, and releases the claim.
 
 ### `assign_workspace_change` / `acquire_workspace_file_set`
 
@@ -115,9 +101,13 @@ Removes exact safe interior empties and applies supplied semantic descriptions w
 
 Orchestrator-only and clean-review-receipt-gated. Revalidates under mutex, inserts the reviewed range immediately before source `@` as resolved by the integration operation, and returns a durable integration, conflict, or cleanup receipt.
 
-### `squash_resolution`
+### `start_review_repair`
 
-Consumes conflict file claim and exact owned target; squashes only resolution paths and verifies conflict removal.
+Persists one explicit repair attempt bound to the current blocking finding IDs, exact affected paths, prior review, original implementation role, and repair work order before launching the repair child. Startup failures remain visible as attention-required repair evidence; every completed attempt returns through freeze and focused review.
+
+### `reconcile_integration_conflicts`
+
+After the Orchestrator resolves recorded integration conflicts with Bash/JJ, places exact resolved paths into uniquely owning integrated changes, verifies conflict removal and range identity, records a reconciliation receipt, and requires focused review.
 
 ### `verify_integrated_range`
 
@@ -135,12 +125,12 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 - `workspace_custody_status`: inspect expected and observed JJ custody facts in every phase.
 - `workspace_recovery_plan`: classify one snapshot into a complete fact-driven disposition and bounded actions.
 - `reconcile_workspace`: revalidate a snapshot-bound plan and execute one exact recovery action.
-- `task_create`: Orchestrator-owned immutable root goal from sourced user intent.
-- `task_assign`: immutable child assignment bound to one execution context; Implementation Lead and Documenter assignments bind the current Orchestrator plan without user approval.
-- `task_plan`: Orchestrator/Implementation Lead replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.
-- `task_record_user_direction`: orchestrator-only sourced user clarification.
-- `task_status`: role-scoped projection—full history for orchestrator, effective owned subtree for implementation-lead, and effective authority lineage for worker.
-- deterministic review snapshot: full task-tree history with current and superseded revisions clearly distinguished in immutable content-addressed Markdown evidence.
+- `work_order_create`: persists execution class, objective, instructions, rationale, acceptance criteria, constraints, resources, validation requirements, documentation requirements, and status updates; `small-product`, `large-product`, and `documentation` select Worker, Implementation Lead, and Documenter respectively.
+- `workspace_subagent`: accepts a work-order ID and derives role and child packet from durable authority rather than accepting duplicate instructions.
+- `work_order_revise`: Orchestrator/Implementation Lead replacement of current effective instructions, backed by append-only revisions and optional sourced direction IDs.
+- `work_order_record_user_direction`: orchestrator-only sourced user clarification.
+- `work_order_status`: role-scoped projection—full history for Orchestrator, effective owned subtree for Implementation Lead, and effective authority lineage for Worker.
+- deterministic review snapshot: full work-order history with current and superseded instructions clearly distinguished in immutable content-addressed Markdown evidence.
 - `concurrency_usage`: exact bounded totals by model, role, context, and cycle.
 
 ## Cancellation boundaries
@@ -152,9 +142,8 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 
 ## Constrained built-ins
 
-- Write/edit require covering claim in shared source or writer token in isolated workspace.
-- Shell cannot perform managed JJ mutation.
-- Shared worker shell uses a conservative read/validation allowlist and cannot mutate source outside wrapped tools.
+- The Orchestrator may use Bash/JJ in the main workspace for investigation, immediate work, and conflict reconciliation.
+- Writable children require a writer token or covering file claim in an isolated workspace.
 - Successful guarded writes refresh owned fingerprints; bypassed mutations breach before checkpoint.
 - Validation may write declared build/cache outputs only.
 - Reviewer/scout/researcher shell remains read-only except isolated temporary artifacts.

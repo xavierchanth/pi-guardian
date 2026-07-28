@@ -1,6 +1,6 @@
 # pi-tai
 
-`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with durable task context, managed isolated workspaces and declarative subagents, a Design–Plan–Implement–Confirm workflow, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
+`pi-tai` is a Git-installable [Pi](https://pi.dev) distribution with durable work orders, managed isolated workspaces and declarative subagents, a Design–Plan–Implement–Closure workflow, independent session naming, Approval Guardian, native notifications, and terminal-aware ANSI themes.
 
 ## Install
 
@@ -40,9 +40,9 @@ pi install git:github.com/xavierchanth/pi-tai@v0.1.1
 
 ## Included plugins
 
-### Design–Plan–Implement–Confirm
+### Design–Plan–Implement–Closure
 
-`/dpic [work description]` enables subagents and starts or continues a complete Design–Plan–Implement–Confirm workflow. Without a description, the Orchestrator first asks what to work on. It grounds Design in the repository and asks the user only for consequential unresolved decisions. It moves to Plan when the intended outcome, boundaries, constraints, key decisions, and acceptance criteria are clear enough that implementation will not invent product or architecture intent. It then queues plan-bound workspace work without a plan-approval ceremony, sends every nonempty result through independent review, returns blocking findings to implementation, and integrates only a clean reviewed range.
+`/dpic [work description]` enables subagents and starts or continues Design–Plan–Implement–Closure for large or consequential work. It creates a `large-product` work order for an Implementation Lead. `/task [work description]` creates a `small-product` work order for a Worker. Closure covers documentation and status updates, independent review, integration conflict reconciliation, verification, and cleanup.
 
 ### Jujutsu version-control guidance
 
@@ -56,9 +56,9 @@ The packaged `invariants` skill guides domain models, APIs, state machines, wire
 
 `/checkpoint [additional instructions]` organizes all current work into coherent semantic changes. Optional instructions can refine grouping, descriptions, or validation while retaining the prompt's safety requirements.
 
-### Durable task trees
+### Durable work orders
 
-Packaged concurrency roles use Host-persisted task trees with immutable Orchestrator goals, sourced user directions, plan-bound child assignments, effective plans backed by append-only revision history, and immutable full-history review snapshots. Scoped `task_*` tools are authoritative. The legacy `update_plan` tool and `/plan-status` command are not exposed by the production package.
+Packaged concurrency roles use Host-persisted work orders with immutable Orchestrator goals, sourced user directions, size-selected execution roles, effective instructions backed by append-only revision history, and immutable full-history review snapshots. `work_order_create` is shared by small and large workflows; scoped `work_order_*` tools are authoritative. The legacy `update_plan` tool and `/plan-status` command are not exposed by the production package.
 
 ### Contextual external editor
 
@@ -82,9 +82,9 @@ Pi-Tai supports Jujutsu workspaces only. Host sessions and isolated implementati
 
 Subagents are disabled by default. Bare `/subagents` toggles them. `/subagents on` applies the scoped root agent definition (packaged as `orchestrator`), including its model, effort, exact tools, prompt, and allowed children. `/subagents off` restores the previous main-session model, effort, and tools after direct children resolve; `/subagents force-off` recursively terminates unresolved descendants first. `/subagents list` opens the active/inactive tree and `/subagents inspect [delegation-id]` opens detail. `/capabilities` now reports subagents rather than workspace backends.
 
-Agent definitions are Markdown files with YAML front matter. Packaged defaults live in `packages/pi-tai/agents`; user definitions in `~/.pi/agent/agents` override them, and trusted nearest-project `.pi/agents` definitions have highest precedence. The Orchestrator collaborates with the user during Design, persists the Plan, then may spawn an Implementation Lead, Documenter, Reviewer, Scout, or Researcher. Implementation Leads may spawn Workers, Scouts, or Researchers; Workers may spawn Scouts or Researchers. Documenters cannot delegate. There is exactly one Orchestrator, and only it owns workspace lifecycle and integration tools. Graph validation rejects missing children, root delegation, and cycles.
+Agent definitions are Markdown files with YAML front matter. Packaged defaults live in `packages/pi-tai/agents`; user definitions in `~/.pi/agent/agents` override them, and trusted nearest-project `.pi/agents` definitions have highest precedence. The Orchestrator creates a durable work order, then may spawn a Worker for small product work, an Implementation Lead for large product work, or a Documenter, Reviewer, Scout, or Researcher. Implementation Leads may create and launch Worker or Documenter work orders and spawn Scouts or Researchers; Workers may spawn Scouts or Researchers. Documenters cannot delegate. There is exactly one Orchestrator, and only it owns workspace lifecycle and integration tools. Graph validation rejects missing children, root delegation, and cycles.
 
-The normal `subagent` tool launches a private in-process Pi SDK context for read-only evidence or an allowed same-workspace child. `workspace_subagent` is Orchestrator-only, requires a durable assignment bound to a persisted Orchestrator plan, and launches either an Implementation Lead for product work or a Documenter for standalone architecture, roadmap, and documentation updates. The Orchestrator has no file-editing authority and cannot launch generic Workers directly. `integrate_workspace` updates stale, validates the full ancestry, forgets and removes the workspace, strips every empty delegated revision, and inserts retained changes before source `@` even when source work is active. It reports undescribed Change IDs for orchestrator inspection and `describe_integrated_changes`. Any graph mismatch, recovery history, conflict, or partial operation enters a non-retryable user-attention state.
+The normal `subagent` tool launches a private in-process Pi SDK context for focused evidence. `workspace_subagent` derives writable child authority from a durable work order: the Orchestrator creates a managed workspace, while an Implementation Lead launches Worker or Documenter work orders in its existing workspace. The Orchestrator owns the main workspace and may use Bash, write, and edit for investigation and immediate one-step work. `integrate_workspace` updates stale, validates the full ancestry, forgets and removes the workspace, strips every empty delegated revision, and inserts retained changes before source `@` even when source work is active. It reports undescribed Change IDs for orchestrator inspection and `describe_integrated_changes`. Any graph mismatch, recovery history, conflict, or partial operation enters a non-retryable user-attention state.
 
 Parents can continue independent work while children run, but remain responsible for avoiding duplicate assignments and conflicting edits. Child questions, status, terminal results, and incidents are pushed as bounded semantic events; parents wait with `await_child_event`, request focused status explicitly, and acknowledge terminal events with `ack_child_event`. No production tool polls child files or reads private child history. Every nonempty delegated workspace is independently reviewed in that same workspace before integration. The footer shows `orchestrator` beside the directory while subagents are enabled; workspace backends do not appear as capabilities.
 
@@ -96,7 +96,7 @@ Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generat
 
 Built-in file tools use deterministic canonical boundaries. Unignored repository files remain frictionless; direct targets ignored by Git, likely credential paths, VCS metadata, Pi `auth.json`, Pi `models.json`, and Pi `sessions/**` receive Guardian review. Repository-wide `grep` and `find` retain their native Git-ignore behavior. Read-only tools may additionally inspect safe Pi state/resources and global `.agents/skills`; Pi-state writes and outside-boundary file operations remain blocked, with reviewed `bash` as the escalation path. Traversal and symlink escapes are always blocked.
 
-Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are intentionally absent. `/dpic` activates the Orchestrator workflow; it is not a permission or tool-access mode.
+Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are intentionally absent. `/dpic` and `/task` activate proportionate Orchestrator workflows; they are not permission or tool-access modes.
 
 ### Percentage-based automatic compaction
 

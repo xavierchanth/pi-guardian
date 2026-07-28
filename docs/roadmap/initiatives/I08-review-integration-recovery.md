@@ -66,7 +66,7 @@ Since `planId` is a digest of the snapshot, this is a compare-and-swap on eviden
 - Unknown partial mutation enters attention-required with last-safe evidence.
 - Conflict resolution is always reported to the user.
 - Task plans refresh Orchestrator context without importing child history.
-- Product implementation always passes through an Implementation Lead; standalone roadmap/documentation work may pass through a Documenter.
+- Product implementation passes directly to a Worker for small work orders or through an Implementation Lead for large work orders; standalone roadmap/documentation work may pass through a Documenter.
 - Every nonempty delegated implementation or documentation range receives independent review before integration.
 - No recovery evidence path converts a query failure into an absence of evidence.
 - Every disposition in the recovery union is either reachable or explicitly marked reserved.

@@ -58,6 +58,15 @@ class FakeHandle {
   dispose(): void { this.disposed = true; }
 }
 
+class ThrowingSendHandle extends FakeHandle {
+  calls = 0;
+  override send(message: unknown): void {
+    this.calls += 1;
+    if (this.calls > 1) throw new Error("identity_mismatch");
+    super.send(message);
+  }
+}
+
 class DeferredAbortHandle extends FakeHandle {
   private resolveAbort!: () => void;
   private readonly abortedPromise = new Promise<void>((resolve) => { this.resolveAbort = resolve; });
@@ -96,6 +105,49 @@ test("root-scoped coordinator persists intent before starting private contexts",
   assert.equal(factory.handles.get("child-1")?.aborted, true);
   assert.equal(factory.handles.get("child-2")?.aborted, false);
   assert.equal((await coordinator.get("child-1"))?.execution.phase, "interrupted");
+});
+
+test("message rejects terminal durable state even while its runtime lingers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-message-terminal-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  const factory = new FakeFactory();
+  const ids = ["child-1", "cycle-1"];
+  const coordinator = new ChildContextCoordinator({ store, sessionFactory: factory, stateRoot: root, agentDir: root, id: () => ids.shift()! });
+  await coordinator.spawn({
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
+  });
+  await store.update("child-1", (current) => ({ ...current, execution: {
+    phase: "completed", cycleId: "cycle-1", terminalEventId: "event-1", finishedAt: "2026-01-01T00:00:00Z",
+  }, events: [...current.events, { eventId: "event-1", contextId: "child-1", cycleId: "cycle-1", kind: "terminal", payload: {}, delivery: { phase: "persisted", createdAt: "2026-01-01T00:00:00Z" } }] }));
+  const before = factory.handles.get("child-1")!.sent.length;
+  await assert.rejects(coordinator.message("child-1", { customType: "test", content: "late", details: {} }), (error: unknown) => {
+    assert.equal((error as { outcome?: { kind?: string } }).outcome?.kind, "terminal_unacknowledged");
+    return true;
+  });
+  assert.equal(factory.handles.get("child-1")!.sent.length, before);
+});
+
+test("message rejects stale runtime cycles and renders transport ambiguity without leaking SDK errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-coordinator-message-cycle-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  const factory = new FakeFactory((id) => new ThrowingSendHandle(id));
+  const ids = ["child-1", "cycle-1"];
+  const coordinator = new ChildContextCoordinator({ store, sessionFactory: factory, stateRoot: root, agentDir: root, id: () => ids.shift()! });
+  await coordinator.spawn({
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
+    modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
+  });
+  await assert.rejects(coordinator.message("child-1", { customType: "test", content: "valid idle follow-up", details: {}, delivery: "followUp" }), (error: unknown) => {
+    assert.equal((error as { outcome?: { kind?: string } }).outcome?.kind, "delivery_indeterminate");
+    assert.doesNotMatch((error as Error).message, /^identity_mismatch$/);
+    return true;
+  });
+  await store.update("child-1", (current) => ({ ...current, execution: { ...current.execution, cycleId: "cycle-2" } }));
+  await assert.rejects(coordinator.message("child-1", { customType: "test", content: "stale", details: {} }), (error: unknown) => {
+    assert.equal((error as { outcome?: { kind?: string } }).outcome?.kind, "stale_execution_cycle");
+    return true;
+  });
 });
 
 test("explicit cancellation terminates one cycle and preserves sibling runtime", async () => {

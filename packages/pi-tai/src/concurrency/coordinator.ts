@@ -5,6 +5,7 @@ import { renderTaskPacket, type ResolvedTaskPacket } from "../subagents/task.ts"
 import type { WorkspaceAttachment } from "../workspaces/domain.ts";
 import type { PrivateChildSessionFactoryPort, PrivateChildSessionHandle } from "./child-session.ts";
 import type { ChildUsageLedger } from "./usage.ts";
+import { SubagentMutationError, type SubagentMutationFailure } from "./mutation-outcome.ts";
 import type {
   ChildContextStore,
   PersistedChildContextV4,
@@ -235,16 +236,46 @@ export class ChildContextCoordinator {
 
   async message(
     contextId: string,
-    input: { customType: string; content: string; details: unknown; delivery?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
+    input: { customType: string; content: string; details: unknown; delivery?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean; expectedCycleId?: string },
   ): Promise<void> {
-    const runtime = this.requireRuntime(contextId);
-    runtime.handle.send({
-      customType: input.customType,
-      content: bounded(input.content, 16_000, "child message"),
-      details: input.details,
-      delivery: input.delivery ?? "steer",
-      triggerTurn: input.triggerTurn ?? true,
-    });
+    const observed = await this.store.get(contextId);
+    if (!observed) throw mutationFailure("runtime_unavailable", contextId, undefined, undefined);
+    const runtime = this.runtimes.get(contextId);
+    if (!runtime) throw mutationForState(observed, "runtime_unavailable");
+    if (input.expectedCycleId && input.expectedCycleId !== observed.execution.cycleId) {
+      throw mutationFailure("stale_execution_cycle", contextId, observed.execution.cycleId, observed.execution.phase);
+    }
+    if (runtime.cycleId !== observed.execution.cycleId) {
+      throw mutationFailure("stale_execution_cycle", contextId, observed.execution.cycleId, observed.execution.phase);
+    }
+    const questionResponse = questionResponseId(input.details);
+    if (observed.execution.phase === "awaiting_parent") {
+      if (!questionResponse || questionResponse !== observed.execution.questionEventId) throw mutationForState(observed);
+    } else if (observed.execution.phase !== "running") {
+      throw mutationForState(observed);
+    }
+    try {
+      runtime.handle.send({
+        customType: input.customType,
+        content: bounded(input.content, 16_000, "child message"),
+        details: input.details,
+        delivery: input.delivery ?? "steer",
+        triggerTurn: input.triggerTurn ?? true,
+      });
+    } catch (error) {
+      const latest = await this.store.get(contextId);
+      if (!latest || latest.execution.cycleId !== observed.execution.cycleId || latest.execution.phase !== observed.execution.phase) {
+        throw latest ? mutationForState(latest, "delivery_race") : mutationFailure("delivery_race", contextId, observed.execution.cycleId, observed.execution.phase);
+      }
+      throw new SubagentMutationError({
+        kind: "delivery_indeterminate",
+        contextId,
+        cycleId: observed.execution.cycleId,
+        phase: observed.execution.phase,
+        retry: "indeterminate",
+        next: { action: "reconcile_children" },
+      }, error instanceof Error ? error.message : String(error));
+    }
   }
 
   async cancel(contextId: string): Promise<ChildCancellationResult> {
@@ -417,6 +448,43 @@ export class ChildContextCoordinator {
       updatedAt: timestamp,
     }));
   }
+}
+
+function questionResponseId(details: unknown): string | undefined {
+  if (!details || typeof details !== "object") return undefined;
+  const value = details as { kind?: unknown; questionEventId?: unknown };
+  return value.kind === "question_response" && typeof value.questionEventId === "string" ? value.questionEventId : undefined;
+}
+
+function mutationForState(context: PersistedChildContextV4, overrideKind?: SubagentMutationFailure["kind"]): SubagentMutationError {
+  const { contextId, execution } = context;
+  if (execution.phase === "awaiting_parent") {
+    return mutationFailure(overrideKind ?? "child_awaiting_response", contextId, execution.cycleId, execution.phase, {
+      action: "respond_to_child", questionId: execution.questionEventId,
+    });
+  }
+  if (["completed", "blocked", "failed", "cancelled"].includes(execution.phase)) {
+    const terminalEventId = "terminalEventId" in execution ? execution.terminalEventId : "";
+    const event = context.events.find((candidate) => candidate.eventId === terminalEventId);
+    return mutationFailure(overrideKind ?? (event?.delivery.phase === "acknowledged" ? "child_terminal" : "terminal_unacknowledged"), contextId, execution.cycleId, execution.phase,
+      event?.delivery.phase === "acknowledged"
+        ? { action: "continue_without_child" }
+        : { action: "ack_child_event", eventId: terminalEventId });
+  }
+  if (execution.phase === "cancelling") return mutationFailure(overrideKind ?? "child_cancelling", contextId, execution.cycleId, execution.phase);
+  if (execution.phase === "interrupted") return mutationFailure(overrideKind ?? "child_interrupted", contextId, execution.cycleId, execution.phase);
+  if (execution.phase === "incident") return mutationFailure(overrideKind ?? "child_incident", contextId, execution.cycleId, execution.phase);
+  return mutationFailure(overrideKind ?? "runtime_unavailable", contextId, execution.cycleId, execution.phase);
+}
+
+function mutationFailure(
+  kind: SubagentMutationFailure["kind"],
+  contextId: string,
+  cycleId?: string,
+  phase?: string,
+  next: SubagentMutationFailure["next"] = { action: "reconcile_children" },
+): SubagentMutationError {
+  return new SubagentMutationError({ kind, contextId, ...(cycleId ? { cycleId } : {}), ...(phase ? { phase } : {}), retry: "after_state_change", next });
 }
 
 function isTerminalExecution(context: PersistedChildContextV4): boolean {

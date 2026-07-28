@@ -51,7 +51,7 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
 
 test("grounded DPIC guidance is integrated into the Orchestrator", () => {
   const orchestrator = readFileSync(join(root, "packages/pi-tai/agents/orchestrator.md"), "utf8");
-  assert.match(orchestrator, /Follow Design–Plan–Implement–Confirm/);
+  assert.match(orchestrator, /Design–Plan–Implement–Closure/);
   assert.match(orchestrator, /Move to Plan only when/);
   assert.match(orchestrator, /intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria/);
   assert.match(orchestrator, /without requesting ceremonial approval/);
@@ -67,15 +67,22 @@ test("checkpoint prompt accepts additional instructions", () => {
   assert.match(prompt, /without weakening the safety requirements above/);
 });
 
-test("DPIC prompt activates subagents before prompt-template expansion", () => {
+test("DPIC and task prompts activate proportionate work-order workflows", () => {
   assert.equal(existsSync(join(root, "packages/pi-tai/prompts/implement.md")), false);
-  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
-  assert.match(prompt, /argument-hint: "\[work description\]"/);
-  assert.match(prompt, /Design–Plan–Implement–Confirm/);
-  assert.match(prompt, /Move to Plan only when/);
+  const dpic = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
+  const task = readFileSync(join(root, "packages/pi-tai/prompts/task.md"), "utf8");
+  assert.match(dpic, /argument-hint: "\[work description\]"/);
+  assert.match(dpic, /Design–Plan–Implement–Closure/);
+  assert.match(dpic, /`large-product` work order/);
+  assert.match(task, /`small-product` work order/);
+  assert.match(task, /`small-product` class selects the Worker/i);
   const source = readFileSync(join(root, "packages/pi-tai/src/subagents/register.ts"), "utf8");
   assert.match(source, /\/dpic/);
+  assert.match(source, /\/task/);
   assert.match(source, /enableRootSubagents/);
+  assert.match(source, /executionClass: StringEnum\(WORK_ORDER_EXECUTION_CLASSES\)/);
+  assert.match(source, /workOrderId: Type\.String/);
+  assert.doesNotMatch(source.match(/name: "workspace_subagent"[\s\S]*?name: "integrate_workspace"/)?.[0] ?? "", /task: taskPacketSchema|agent: StringEnum/);
 });
 
 test("version-control and invariant modeling skills are packaged", () => {

@@ -71,12 +71,11 @@ function renderSubagentToolCall(
 
 function callSummary(name: string, args: Record<string, unknown>): string {
   switch (name) {
-    case "task_create": return separator([text(args.objective)]);
-    case "task_assign": return separator([text(args.ownerRole), text(args.objective)]);
-    case "task_plan": return separator([firstMeaningfulLine(rawText(args.markdown)), text(args.rationale)]);
-    case "task_record_user_direction": return text(args.summary);
-    case "subagent":
-    case "workspace_subagent": return separator([text(args.agent), text(object(args.task).objective)]);
+    case "work_order_create": return separator([text(args.executionClass), text(args.objective)]);
+    case "work_order_revise": return separator([firstMeaningfulLine(rawText(args.instructions)), text(args.rationale)]);
+    case "work_order_record_user_direction": return text(args.summary);
+    case "subagent": return separator([text(args.agent), text(object(args.task).objective)]);
+    case "workspace_subagent": return shortIdentity(args.workOrderId);
     case "message_child": return separator([shortIdentity(args.delegationId), text(args.delivery) || "steer", text(args.message)]);
     case "request_child_status": return separator([shortIdentity(args.contextId), text(args.focus) || "bounded status"]);
     case "respond_to_child": return separator([shortIdentity(args.delegationId), text(args.response)]);
@@ -93,8 +92,8 @@ function callSummary(name: string, args: Record<string, unknown>): string {
     case "rebase_workspace": return separator([shortIdentity(args.delegationId), args.targetChangeId ? `onto ${shortIdentity(args.targetChangeId)}` : "onto source @-"]);
     case "submit_workspace_review": return separator([countSummary(args.findings, "finding"), text(args.summary)]);
     case "accept_workspace_review": return separator([shortIdentity(args.delegationId), countSummary(args.dispositions, "disposition")]);
-    case "begin_workspace_repair": return separator([shortIdentity(args.delegationId), text(args.objective) || "blocking findings"]);
-    case "squash_resolution": return separator([shortIdentity(args.delegationId), countSummary(args.paths, "path")]);
+    case "start_review_repair": return separator([shortIdentity(args.delegationId), text(args.objective) || "blocking findings"]);
+    case "reconcile_integration_conflicts": return separator([shortIdentity(args.delegationId), countSummary(args.paths, "path")]);
     case "verify_integrated_range": return separator([shortIdentity(args.delegationId), countSummary(args.productChecks, "check")]);
     case "describe_integrated_changes": return separator([shortIdentity(args.delegationId), countSummary(args.changes, "change")]);
     case "workspace_custody_status":
@@ -120,9 +119,9 @@ function expandedDetails(name: string, args: Record<string, unknown>): string[] 
       lines.push(`Directions: ${arrayValues(value).length}`);
       continue;
     }
-    if (key === "markdown") {
-      const planLines = rawText(value).split(/\r?\n/).filter((line) => line.trim()).slice(0, 24);
-      if (planLines.length) lines.push("Plan:", ...planLines.map((line) => `  ${bounded(line)}`));
+    if (key === "instructions") {
+      const instructionLines = rawText(value).split(/\r?\n/).filter((line) => line.trim()).slice(0, 24);
+      if (instructionLines.length) lines.push("Instructions:", ...instructionLines.map((line) => `  ${bounded(line)}`));
       continue;
     }
     if (key === "task") {
@@ -143,7 +142,7 @@ function expandedDetails(name: string, args: Record<string, unknown>): string[] 
     }
     lines.push(`${label}: ${bounded(String(value))}`);
   }
-  if (name === "task_status" && lines.length === 0) lines.push("Role-scoped durable task projection");
+  if (name === "work_order_status" && lines.length === 0) lines.push("Role-scoped durable work-order projection");
   return lines.slice(0, 32);
 }
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The concurrency subsystem coordinates Design–Plan–Implement–Confirm, private child contexts, isolated JJ workspaces, parent/child messages, independent review, integration, recovery, and recursive accounting.
+The concurrency subsystem coordinates Design–Plan–Implement–Closure, private child contexts, isolated JJ workspaces, parent/child messages, independent review, integration, recovery, and recursive accounting.
 
 Its output is one of:
 
@@ -39,32 +39,32 @@ flowchart TD
   Integrate --> Verify[Verify product state and close custody]
 ```
 
-The Orchestrator follows the codebase-grounded Design phase for implementation requests. It gathers evidence, presents material decisions and tradeoffs, and asks the user to resolve consequential ambiguity. It moves to Plan only when the intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria are clear enough that implementation will not need to invent product or architectural intent. It then persists the complete effective plan and proceeds without a separate approval ceremony.
+The Orchestrator chooses a proportionate workflow. Large or consequential requests use codebase-grounded DPIC and become large work orders only after consequential ambiguity is resolved. Small, clear requests become small work orders directly. Both persist complete effective implementation and validation instructions without a separate approval ceremony.
 
 ## Roles
 
 | Role | Owns | May delegate | Workspace authority |
 |---|---|---|---|
-| **Orchestrator** | User collaboration, grounded design, effective plan, routing, review disposition, integration, final verification | Implementation Lead, Documenter, Reviewer, Scout, Researcher | Exclusive main orchestration workspace; create, review, integrate, close child workspaces |
-| **Implementation Lead** | One plan-bound product task and its complete delivery | Worker, Scout, Researcher | Implement or coordinate within one dedicated workspace; never create or integrate workspaces |
-| **Worker** | One bounded implementation assignment | Scout, Researcher | Assigned target and file set in the Implementation Lead workspace |
-| **Documenter** | One plan-bound standalone architecture, design, documentation, or roadmap update | None | Explicit Markdown documentation paths in one dedicated workspace |
+| **Orchestrator** | User collaboration, grounded design when needed, work-order sizing and routing, review disposition, integration, final verification | Worker, Implementation Lead, Documenter, Reviewer, Scout, Researcher | Exclusive main orchestration workspace; create, review, integrate, close child workspaces |
+| **Implementation Lead** | One large product work order and its complete delivery | Worker, Scout, Researcher | Implement or coordinate within one dedicated workspace; never create or integrate workspaces |
+| **Worker** | One small bounded product work order | Scout, Researcher | Dedicated workspace when launched by the Orchestrator; assigned target and file set when launched by an Implementation Lead |
+| **Documenter** | One standalone documentation work order | None | Explicit Markdown documentation paths in one dedicated workspace |
 | **Reviewer** | Independent verification against current intent and exact frozen range | Scout, Researcher | Read-only in the implementation workspace |
 | **Scout** | Repository evidence | None | Read-only view of caller workspace |
 | **Researcher** | Current external and repository evidence | None | Read-only view of caller workspace |
 
-The Orchestrator never launches a generic Worker. Small product work still goes to an Implementation Lead, which may implement directly. Documentation accompanying product code remains in that Implementation Lead workspace; Documenter is for standalone documentation changes.
+Small bounded product work goes directly to a Worker; large product work goes to an Implementation Lead. Documentation accompanying product code remains with its product role; Documenter is for standalone documentation changes.
 
-## Task and plan authority
+## Work-order authority
 
-Every substantial request has one durable root task. Plans are append-only revisions with one current effective revision. Implementation Lead and Documenter assignments bind the current plan revision, digest, and user-direction count when queued; no user-approval receipt is required. Later plan revisions remain visible as provenance and make existing review snapshots stale, while already queued work remains in custody for the Orchestrator to redirect, repair, or re-review. Children receive a self-contained task packet and immutable task snapshot rather than parent conversation history.
+`work_order_create` creates `small-product`, `large-product`, and `documentation` work orders. A work order combines objective, constraints, acceptance criteria, effective implementation and validation instructions, and a selected execution role under one durable authority. The role is the durable routing fact: Worker represents small product work and Implementation Lead represents large product work. Instructions have append-only revisions with one current effective revision. Later revisions remain visible as provenance and make existing review snapshots stale, while already queued work remains in custody for redirection, repair, or re-review. Children receive a self-contained task packet and immutable work-order snapshot rather than parent conversation history.
 
 ## Workspace invariants
 
-1. The main workspace is reserved for Orchestrator lifecycle operations and integration.
-2. The Orchestrator cannot edit files or use shell mutation.
-3. Every writable child starts in a dedicated managed JJ workspace.
-4. Workers share their Implementation Lead's workspace under disjoint file-set ownership; nested workspaces are forbidden.
+1. The Orchestrator owns the main workspace for investigation, immediate one-step work, orchestration, integration, reconciliation, and verification.
+2. Multi-step writable work runs in a managed JJ workspace selected by its execution class.
+3. Integration conflicts enter bounded custody while the Orchestrator reconciles them with Bash/JJ and records focused-review evidence.
+4. Direct Workers own a dedicated workspace; Workers delegated by an Implementation Lead share its workspace under disjoint file-set ownership. Nested workspaces are forbidden.
 5. Documenters can modify only assigned documentation paths.
 6. Every nonempty delegated range receives independent review in that same workspace before integration.
 7. Repair resumes through the original workspace role, followed by focused re-review.

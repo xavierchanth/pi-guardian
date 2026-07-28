@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifySharedShellCommand } from "../../packages/pi-tai/src/concurrency/source-guard.ts";
+import { classifyWorkspaceShellCommand } from "../../packages/pi-tai/src/concurrency/workspace-shell-policy.ts";
 
-test("shared shell guard permits bounded inspection and validation", () => {
-  assert.deepEqual(classifySharedShellCommand("rg -n TODO src && npm run typecheck"), {
+test("managed-workspace shell policy permits bounded inspection and validation", () => {
+  assert.deepEqual(classifyWorkspaceShellCommand("rg -n TODO src && npm run typecheck"), {
     kind: "allowed", purpose: "validation",
   });
-  assert.deepEqual(classifySharedShellCommand("jj log --revision @ --no-graph | head -20"), {
+  assert.deepEqual(classifyWorkspaceShellCommand("jj log --revision @ --no-graph | head -20"), {
     kind: "allowed", purpose: "read",
   });
-  assert.deepEqual(classifySharedShellCommand("cargo test --workspace"), {
+  assert.deepEqual(classifyWorkspaceShellCommand("cargo test --workspace"), {
     kind: "allowed", purpose: "validation",
   });
-  assert.deepEqual(classifySharedShellCommand("find src -type f"), {
+  assert.deepEqual(classifyWorkspaceShellCommand("find src -type f"), {
     kind: "allowed", purpose: "read",
   });
 });
 
-test("shared shell guard blocks source and JJ mutation or unknown execution", () => {
+test("managed-workspace shell policy blocks source and JJ mutation or unknown execution", () => {
   assert.match(blocked("jj describe --message nope"), /deterministic JJ tools/);
   assert.match(blocked("sed -i s/a/b/ src/a.ts"), /mutate source files/);
   assert.match(blocked("node scripts/generate.ts"), /not an approved/);
@@ -28,7 +28,7 @@ test("shared shell guard blocks source and JJ mutation or unknown execution", ()
 });
 
 function blocked(command: string): string {
-  const decision = classifySharedShellCommand(command);
+  const decision = classifyWorkspaceShellCommand(command);
   assert.equal(decision.kind, "blocked");
   return decision.kind === "blocked" ? decision.reason : "";
 }

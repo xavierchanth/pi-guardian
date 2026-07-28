@@ -117,7 +117,7 @@ type WorkspaceCustody =
   | { phase: "changes_requested"; attachment: WorkspaceIdentity; review: ReviewerReport; cycle: number }
   | { phase: "approved"; attachment: WorkspaceIdentity; receipt: ReviewReceipt }
   | { phase: "integrating"; attachment: WorkspaceIdentity; receipt: ReviewReceipt; attempt: IntegrationAttempt }
-  | { phase: "conflict_resolution"; attachment: WorkspaceIdentity; integration: IntegrationReceipt; review: ReviewerReport }
+  | { phase: "conflict_reconciliation"; attachment: WorkspaceIdentity; integration: IntegrationReceipt; review: ReviewerReport }
   | { phase: "integrated"; attachment: WorkspaceIdentity; receipt: IntegrationReceipt }
   | { phase: "verifying"; integration: IntegrationReceipt; verificationId: string }
   | { phase: "closed"; integration: IntegrationReceipt; verification: VerificationReceipt }
@@ -131,7 +131,7 @@ allocating → active → reported → acknowledged → reviewing → approved
 reviewing → changes_requested → active       (bounded cycle)
 reviewing → closed_no_changes
 approved → integrating → integrated → verifying → closed
-integrating → conflict_resolution → integrated
+integrating → conflict_reconciliation → focused review → integrated
 closed|closed_no_changes → cleanup_pending when only cleanup remains
 ```
 

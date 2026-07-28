@@ -1,88 +1,12 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { SourceWorkspaceHandle } from "../jj/domain.ts";
-import type { SharedFileSetCoordinator } from "./file-sets.ts";
-
-export interface SharedMutationGuardState {
-  readonly enabled: boolean;
-  readonly ownerContextId?: string;
-  readonly constrainShell?: boolean;
-}
-
-export interface SharedMutationGuardOptions {
-  readonly openSource: (cwd: string) => Promise<SourceWorkspaceHandle>;
-  readonly fileSets: SharedFileSetCoordinator;
-  readonly state: () => SharedMutationGuardState;
-}
-
-interface AuthorizedMutation {
-  readonly source: SourceWorkspaceHandle;
-  readonly ownerContextId: string;
-  readonly path: string;
-}
-
-export function registerSharedMutationGuard(pi: ExtensionAPI, options: SharedMutationGuardOptions): void {
-  const authorized = new Map<string, AuthorizedMutation>();
-  const sources = new Map<string, Promise<SourceWorkspaceHandle>>();
-  const sourceFor = (cwd: string) => {
-    let source = sources.get(cwd);
-    if (!source) {
-      source = options.openSource(cwd);
-      sources.set(cwd, source);
-    }
-    return source;
-  };
-
-  pi.on("tool_call", async (event, ctx) => {
-    const state = options.state();
-    if (!state.enabled) return undefined;
-    if (event.toolName === "write" || event.toolName === "edit") {
-      const path = typeof event.input.path === "string" ? event.input.path : undefined;
-      if (!path) return { block: true, reason: "Shared source mutation requires a concrete file path." };
-      try {
-        const source = await sourceFor(ctx.cwd);
-        if (state.ownerContextId) {
-          await options.fileSets.authorizePath(source, state.ownerContextId, path);
-          authorized.set(event.toolCallId, { source, ownerContextId: state.ownerContextId, path });
-        } else {
-          await options.fileSets.authorizeUnclaimedPath(source, path);
-        }
-        return undefined;
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        if (reason.includes("requires the repository's primary JJ workspace")) return undefined;
-        return { block: true, reason };
-      }
-    }
-    if (event.toolName === "bash" && state.constrainShell) {
-      const command = typeof event.input.command === "string" ? event.input.command : "";
-      const decision = classifySharedShellCommand(command);
-      if (decision.kind !== "allowed") {
-        return { block: true, reason: decision.reason };
-      }
-    }
-    return undefined;
-  });
-
-  pi.on("tool_result", async (event) => {
-    const mutation = authorized.get(event.toolCallId);
-    if (!mutation) return undefined;
-    authorized.delete(event.toolCallId);
-    if (!event.isError) {
-      await options.fileSets.recordOwnedMutation(mutation.source, mutation.ownerContextId, mutation.path);
-    }
-    return undefined;
-  });
-}
-
-export type SharedShellDecision =
+export type WorkspaceShellDecision =
   | { readonly kind: "allowed"; readonly purpose: "read" | "validation" }
   | { readonly kind: "blocked"; readonly reason: string };
 
-export function classifySharedShellCommand(command: string): SharedShellDecision {
+export function classifyWorkspaceShellCommand(command: string): WorkspaceShellDecision {
   const normalized = command.trim();
-  if (!normalized) return { kind: "blocked", reason: "Empty shared-worker shell command." };
+  if (!normalized) return { kind: "blocked", reason: "Empty managed-workspace shell command." };
   if (/(^|[^<])>{1,2}|<\(|>\(|`|\$\(/.test(normalized)) {
-    return { kind: "blocked", reason: "Shared-worker shell redirection or command substitution may mutate source files." };
+    return { kind: "blocked", reason: "Managed-workspace shell redirection or command substitution may mutate source files." };
   }
   const segments = normalized.split(/\s*(?:&&|\|\||;|\|)\s*/).filter(Boolean);
   let validation = false;
@@ -92,7 +16,7 @@ export function classifySharedShellCommand(command: string): SharedShellDecision
     const words = shellWords(segment);
     const executable = basename(words[0] ?? "");
     if (["rm", "mv", "cp", "mkdir", "rmdir", "touch", "truncate", "chmod", "chown", "ln", "tee", "patch", "apply_patch", "sed", "perl", "python", "python3", "ruby"].includes(executable)) {
-      return { kind: "blocked", reason: `Shared-worker shell command ${executable} can mutate source files; use guarded file tools.` };
+      return { kind: "blocked", reason: `Managed-workspace shell command ${executable} can mutate source files; use guarded file tools.` };
     }
     if (executable === "jj") {
       if (!isReadOnlyJj(words.slice(1))) {
@@ -112,7 +36,7 @@ export function classifySharedShellCommand(command: string): SharedShellDecision
     }
     if (executable === "find") {
       if (words.some((word) => ["-delete", "-exec", "-execdir", "-ok", "-okdir"].includes(word))) {
-        return { kind: "blocked", reason: "Mutating find actions are unavailable to shared workers." };
+        return { kind: "blocked", reason: "Mutating find actions are unavailable to managed-workspace children." };
       }
       continue;
     }
@@ -120,7 +44,7 @@ export function classifySharedShellCommand(command: string): SharedShellDecision
       validation = true;
       continue;
     }
-    return { kind: "blocked", reason: `Shared-worker shell command ${executable || "<unknown>"} is not an approved read or validation command.` };
+    return { kind: "blocked", reason: `Managed-workspace shell command ${executable || "<unknown>"} is not an approved read or validation command.` };
   }
   return { kind: "allowed", purpose: validation ? "validation" : "read" };
 }

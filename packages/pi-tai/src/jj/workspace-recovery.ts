@@ -70,7 +70,7 @@ export interface WorkspaceRecoveryAction {
     | "resume_operation"
     | "reconstruct_attachment"
     | "invalidate_review"
-    | "enter_conflict_resolution"
+    | "enter_conflict_reconciliation"
     | "enter_breach"
     | "retry_cleanup"
     | "preserve_incident";
@@ -214,7 +214,7 @@ function actionsFor(disposition: WorkspaceRecoveryDisposition): WorkspaceRecover
     resumable: ["resume_operation", true, "Resume only the next proved idempotent boundary."],
     reconstructable: ["reconstruct_attachment", true, "Reconstruct exact managed workspace state from owned evidence."],
     review_stale: ["invalidate_review", true, "Invalidate stale review evidence and return to review preparation."],
-    owned_conflict: ["enter_conflict_resolution", true, "Enter owned conflict-resolution custody."],
+    owned_conflict: ["enter_conflict_reconciliation", true, "Enter owned conflict-reconciliation custody."],
     breached: ["enter_breach", true, "Stop affected writers and preserve ownership-breach evidence."],
     attention_required: ["preserve_incident", false, "Preserve evidence because no unique automatic recovery is proved."],
     cleanup_pending: ["retry_cleanup", true, "Retry only the exact recorded managed cleanup."],

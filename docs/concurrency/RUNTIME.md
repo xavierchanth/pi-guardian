@@ -77,6 +77,10 @@ One semantic channel carries:
 
 Messages are custom protocol messages, not user-role messages. If a child is suspended awaiting descendants, only the stale await is cancelled before delivery; descendants continue.
 
+Every parent-to-child mutation is lifecycle-aware. The coordinator reads durable execution state immediately before submission, requires a messageable phase, and compares the durable cycle with both the runtime cycle and any caller observation. A lingering runtime never authorizes delivery to a terminal, cancelling, interrupted, or incident cycle. Transport failures are reconciled against current durable state and return a discriminated mutation outcome with retry disposition and an existing next protocol action; SDK identity errors are not exposed as JJ `identity_mismatch` failures.
+
+Question responses transition `awaiting_parent → running` only after the runtime accepts delivery. Failed or indeterminate submission preserves the unanswered question and its correlation identity.
+
 ## Event lifecycle
 
 ```text

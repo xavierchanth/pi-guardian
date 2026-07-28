@@ -59,6 +59,29 @@ test("protocol enforces one unresolved question and routes nested events to pare
   assert.equal((await store.get("child-1"))?.execution.phase, "running");
 });
 
+test("failed question delivery preserves the unanswered awaiting-parent state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-protocol-question-failure-"));
+  const store = new FileChildContextStore(join(root, "records"));
+  await store.create(context());
+  let deliveries = 0;
+  const protocol = new ChildEventProtocol({
+    store,
+    coordinator: { message: async () => { deliveries += 1; throw new Error("transport unavailable"); } },
+    rootBridge: { sendMessage: () => {} } as unknown as ExtensionAPI,
+    id: () => "question-1", now: () => "time",
+  });
+  const question = await protocol.emit("child-1", "cycle-1", { kind: "question", question: "Choose?" });
+  await assert.rejects(protocol.answerQuestion("child-1", question.eventId, "Proceed"), /transport unavailable/);
+  const current = await store.get("child-1");
+  assert.equal(current?.execution.phase, "awaiting_parent");
+  assert.equal((current?.events[0]?.payload as { answeredAt?: string }).answeredAt, undefined);
+  await assert.rejects(protocol.answerQuestion("child-1", question.eventId, "Proceed again"), (error: unknown) => {
+    assert.equal((error as { outcome?: { kind?: string } }).outcome?.kind, "delivery_indeterminate");
+    return true;
+  });
+  assert.equal(deliveries, 1);
+});
+
 test("human execution requirements bypass intermediate agents and surface at the root", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-protocol-human-"));
   const store = new FileChildContextStore(join(root, "records"));

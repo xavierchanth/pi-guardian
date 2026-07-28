@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChildContextStore, PersistedChildContextV4, PersistedChildEventV4 } from "./persistence.ts";
+import { SubagentMutationError } from "./mutation-outcome.ts";
 
 export interface ChildMessageTarget {
   message(
     contextId: string,
-    input: { customType: string; content: string; details: unknown; delivery?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean },
+    input: { customType: string; content: string; details: unknown; delivery?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean; expectedCycleId?: string },
   ): Promise<void>;
 }
 
@@ -102,13 +103,23 @@ export class ChildEventProtocol {
   }
 
   async acknowledge(contextId: string, eventId: string): Promise<PersistedChildEventV4> {
+    const observed = await this.requireContext(contextId);
+    const observedEvent = observed.events.find((candidate) => candidate.eventId === eventId);
+    if (!observedEvent) throw new SubagentMutationError({
+      kind: "event_not_delivered", contextId, cycleId: observed.execution.cycleId, phase: observed.execution.phase,
+      retry: "never", next: { action: "reconcile_children" },
+    });
+    if (observedEvent.delivery.phase === "persisted") throw new SubagentMutationError({
+      kind: "event_not_delivered", contextId, cycleId: observed.execution.cycleId, phase: observed.execution.phase,
+      retry: "after_state_change", next: { action: "reconcile_children" },
+    });
     const timestamp = this.now();
     await this.store.update(contextId, (current) => ({
       ...current,
       events: current.events.map((event) => {
         if (event.eventId !== eventId) return event;
         if (event.delivery.phase === "acknowledged") return event;
-        if (event.delivery.phase !== "delivered") throw new Error("A child event must be delivered before acknowledgement.");
+        if (event.delivery.phase !== "delivered") return event;
         return { ...event, delivery: { ...event.delivery, phase: "acknowledged", acknowledgedAt: timestamp } };
       }),
       updatedAt: timestamp,
@@ -119,32 +130,69 @@ export class ChildEventProtocol {
   async answerQuestion(contextId: string, eventId: string, content: string): Promise<void> {
     const context = await this.requireContext(contextId);
     const event = context.events.find((candidate) => candidate.eventId === eventId);
-    if (!event || event.kind !== "question") throw new Error(`Unknown child question: ${eventId}`);
-    if (isQuestionAnswered(event)) throw new Error(`Child question ${eventId} is already answered.`);
+    if (!event || event.kind !== "question") throw new SubagentMutationError({
+      kind: "stale_question", contextId, cycleId: context.execution.cycleId, phase: context.execution.phase,
+      retry: "never", next: { action: "reconcile_children" },
+    });
+    if (isQuestionAnswered(event)) throw new SubagentMutationError({
+      kind: "question_already_answered", contextId, cycleId: context.execution.cycleId, phase: context.execution.phase,
+      retry: "never", next: { action: "await_child_event", contextIds: [contextId] },
+    });
+    if (questionResponsePhase(event)) throw new SubagentMutationError({
+      kind: "delivery_indeterminate", contextId, cycleId: context.execution.cycleId, phase: context.execution.phase,
+      retry: "indeterminate", next: { action: "reconcile_children" },
+    });
+    if (context.execution.phase !== "awaiting_parent" || context.execution.questionEventId !== eventId || event.cycleId !== context.execution.cycleId) {
+      throw new SubagentMutationError({
+        kind: "stale_question", contextId, cycleId: context.execution.cycleId, phase: context.execution.phase,
+        retry: "never", next: { action: "reconcile_children" },
+      });
+    }
     const message = boundedText(content, 16_000, "question response");
-    const timestamp = this.now();
+    const attemptId = this.id();
+    const submittingAt = this.now();
     await this.store.update(contextId, (current) => ({
       ...current,
-      execution: current.execution.phase === "awaiting_parent"
-        ? {
-            phase: "running",
-            cycleId: current.execution.cycleId,
-            startedAt: current.execution.startedAt,
-            sessionId: current.execution.sessionId,
-            sessionFile: current.execution.sessionFile,
-          }
-        : current.execution,
       events: current.events.map((candidate) => candidate.eventId === eventId
-        ? { ...candidate, payload: { ...(candidate.payload as Record<string, unknown>), answeredAt: timestamp } }
+        ? { ...candidate, payload: { ...(candidate.payload as Record<string, unknown>), response: { phase: "submitting", attemptId, submittingAt } } }
         : candidate),
-      updatedAt: timestamp,
+      updatedAt: submittingAt,
     }));
-    await this.coordinator.message(contextId, {
+    try {
+      await this.coordinator.message(contextId, {
       customType: "pi-tai-parent-message-v1",
       content: `Parent response: ${message}`,
       details: { kind: "question_response", questionEventId: eventId, content: message },
       delivery: "steer",
       triggerTurn: true,
+        expectedCycleId: context.execution.cycleId,
+      });
+    } catch (error) {
+      const failedAt = this.now();
+      await this.store.update(contextId, (current) => ({
+        ...current,
+        events: current.events.map((candidate) => candidate.eventId === eventId
+          ? { ...candidate, payload: { ...(candidate.payload as Record<string, unknown>), response: { phase: "indeterminate", attemptId, failedAt } } }
+          : candidate),
+        updatedAt: failedAt,
+      }));
+      throw error;
+    }
+    const timestamp = this.now();
+    await this.store.update(contextId, (current) => {
+      const currentEvent = current.events.find((candidate) => candidate.eventId === eventId);
+      if (current.execution.phase !== "awaiting_parent" || current.execution.cycleId !== context.execution.cycleId || current.execution.questionEventId !== eventId || !currentEvent || isQuestionAnswered(currentEvent)) return current;
+      return {
+        ...current,
+        execution: {
+          phase: "running", cycleId: current.execution.cycleId, startedAt: current.execution.startedAt,
+          sessionId: current.execution.sessionId, sessionFile: current.execution.sessionFile,
+        },
+        events: current.events.map((candidate) => candidate.eventId === eventId
+          ? { ...candidate, payload: { ...(candidate.payload as Record<string, unknown>), answeredAt: timestamp, response: { phase: "accepted", attemptId, acceptedAt: timestamp } } }
+          : candidate),
+        updatedAt: timestamp,
+      };
     });
   }
 
@@ -254,6 +302,11 @@ function renderEnvelope(context: PersistedChildContextV4, event: PersistedChildE
   return `[${context.agent.name} ${context.contextId}] ${event.kind}: ${summary}`.slice(0, 16_000);
 }
 function isQuestionAnswered(event: PersistedChildEventV4): boolean { return Boolean((event.payload as Record<string, unknown>)?.answeredAt); }
+
+function questionResponsePhase(event: PersistedChildEventV4): string | undefined {
+  const response = (event.payload as { response?: { phase?: unknown } } | undefined)?.response;
+  return typeof response?.phase === "string" ? response.phase : undefined;
+}
 function boundedText(value: string, bytes: number, label: string): string {
   const text = value.trim();
   if (!text) throw new Error(`${label} must not be empty.`);

@@ -4,7 +4,13 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { FileTaskStore, TaskService } from "../../packages/pi-tai/src/concurrency/tasks.ts";
+import { FileTaskStore, ownerRoleForExecutionClass, TaskService } from "../../packages/pi-tai/src/concurrency/tasks.ts";
+
+test("work-order execution classes select exactly one writable role", () => {
+  assert.equal(ownerRoleForExecutionClass("small-product"), "worker");
+  assert.equal(ownerRoleForExecutionClass("large-product"), "implementation-lead");
+  assert.equal(ownerRoleForExecutionClass("documentation"), "documenter");
+});
 
 function user(content: string, messageId = "user-1") {
   return {
@@ -40,6 +46,7 @@ test("task plans expose effective revisions to executors and full history to orc
       creatorContextId: "orchestrator-1",
       objective: "Design integration",
     });
+    assert.equal(implementationLead.assignment?.executionClass, "large-product");
     assert.equal(implementationLead.assignment?.planBinding?.planRevisionId, currentRevisionId);
     await service.bind(implementationLead.taskId, "implementation-lead-1");
     await service.appendPlan(implementationLead.taskId, {
@@ -52,8 +59,12 @@ test("task plans expose effective revisions to executors and full history to orc
       ownerRole: "worker",
       creatorContextId: "implementation-lead-1",
       objective: "Implement integration",
+      instructions: "Implement the bounded integration and run focused validation.",
     });
     await service.bind(worker.taskId, "worker-1");
+    assert.equal(worker.assignment?.executionClass, "small-product");
+    assert.equal(worker.assignment?.instructions, "Implement the bounded integration and run focused validation.");
+    assert.equal(worker.assignment?.planBinding?.planRevisionId, currentRevisionId);
     assert.equal((await service.requireImplementationPlan(worker.taskId))?.planRevisionId, currentRevisionId);
 
     const redirected = await service.recordDirection(task.taskId, {
@@ -68,6 +79,7 @@ test("task plans expose effective revisions to executors and full history to orc
     assert.equal((await service.requireImplementationPlan(implementationLead.taskId))?.planRevisionId, currentRevisionId);
     assert.equal((await service.requireAssignmentPlan(implementationLead.taskId)).planRevisionId, currentRevisionId);
     const documenter = await service.assign(task.taskId, { ownerRole: "documenter", creatorContextId: "orchestrator-1", objective: "Record redirected design" });
+    assert.equal(documenter.assignment?.executionClass, "documentation");
     assert.equal(documenter.assignment?.planBinding?.directionCount, 1);
     await service.appendPlan(implementationLead.taskId, {
       authorContextId: "implementation-lead-1",

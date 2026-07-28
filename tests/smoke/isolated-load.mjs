@@ -72,7 +72,9 @@ lines.on("line", (line) => {
       event.success !== true ||
       names.has("continue") ||
       names.has("design") ||
-      !names.has("implement") ||
+      names.has("implement") ||
+      !names.has("dpic") ||
+      !names.has("task") ||
       !names.has("capabilities") ||
       !names.has("subagents") ||
       !names.has("init-pi-tai") ||
@@ -82,7 +84,7 @@ lines.on("line", (line) => {
       !names.has("profile") ||
       !names.has("effort") ||
       names.has("skill:workspace") ||
-      !names.has("skill:design") ||
+      names.has("skill:design") ||
       !names.has("skill:invariants") ||
       !names.has("skill:jj-guidelines") ||
       names.has("sub-agents") ||

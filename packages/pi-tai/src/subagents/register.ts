@@ -13,19 +13,19 @@ import type { SessionCapabilityController } from "../capabilities/controller.ts"
 import type { SessionPolicyReader } from "../config/register.ts";
 import { registerApprovalGuardian } from "../guardian/register.ts";
 import { PrivateChildSessionFactory } from "../concurrency/child-session.ts";
-import { childContextId, fileSetClaimId } from "../concurrency/ids.ts";
+import { fileSetClaimId } from "../concurrency/ids.ts";
 import { ChildContextCoordinator } from "../concurrency/coordinator.ts";
 import { HostConcurrencyRepository, type HostServiceClientPort } from "../concurrency/host-repository.ts";
 import { HostConcurrencyState } from "../concurrency/host-state.ts";
 import { HostLegacyContextMigrator } from "../concurrency/legacy-import.ts";
 import { HostReviewStore } from "../concurrency/reviews.ts";
-import { HostTaskStore, type TaskOwnerRole } from "../concurrency/tasks.ts";
+import { HostTaskStore, ownerRoleForExecutionClass, WORK_ORDER_EXECUTION_CLASSES, type PersistedTaskV1, type TaskOwnerRole, type WorkOrderExecutionClass } from "../concurrency/tasks.ts";
 import { FileChildContextStore, HostChildContextStore, type ChildContextStore, type PersistedChildContextV4 } from "../concurrency/persistence.ts";
 import { ChildEventProtocol } from "../concurrency/protocol.ts";
 import { ChildEventWaitRegistry } from "../concurrency/waits.ts";
 import { ChildJournalRetention, ChildUsageLedger } from "../concurrency/usage.ts";
 import { ChildContextReconciler } from "../concurrency/reconcile.ts";
-import { classifySharedShellCommand, registerSharedMutationGuard } from "../concurrency/source-guard.ts";
+import { classifyWorkspaceShellCommand } from "../concurrency/workspace-shell-policy.ts";
 import { changeDescription, changeId, checkpointableFileSetClaim, conflictResolutionLease, isolatedWorkspaceWriteLease, workspaceId as jjWorkspaceId, workspaceName as jjWorkspaceName, workspaceRebaseLease, workspaceWriteLeaseId } from "../jj/domain.ts";
 import { IsolatedJjRuntime } from "../jj/isolated-runtime.ts";
 import { FileRepositoryEnrollmentStore, HostRepositoryEnrollmentStore, RepositoryEnrollmentService } from "../jj/repository-enrollment.ts";
@@ -65,7 +65,7 @@ import {
   type DelegationRecord,
   type DelegationStore,
 } from "./store.ts";
-import { normalizeTaskPacket, TASK_RESOURCE_TYPES } from "./task.ts";
+import { normalizeTaskPacket, TASK_RESOURCE_TYPES, type TaskPacket } from "./task.ts";
 import {
   delegationTree,
   delegationTreePrefix,
@@ -261,10 +261,6 @@ export function registerSubagents(
   const reviewerInspections = new Map<string, { reviewId: string; normalizedPatchHash: string }>();
 
   pi.on("tool_call", async (event, ctx) => {
-    if (mode === "root" && currentAgent?.name === "orchestrator") {
-      if (event.toolName === "write" || event.toolName === "edit") return { block: true, reason: "The Orchestrator is read-only; delegate approved repository changes to an Implementation Lead or Documenter workspace." };
-      if (event.toolName === "bash") return { block: true, reason: "The Orchestrator has no shell execution authority; use read-only repository tools or delegate approved validation in a workspace." };
-    }
     if (mode !== "child" || !childDelegation) return undefined;
     const context = await contextStore.get(childDelegation.id);
     if (event.toolName === "bash" && context && ["documenter", "reviewer", "scout", "researcher"].includes(context.agent.name)) return { block: true, reason: `${context.agent.name} is a read-only role without shell execution authority.` };
@@ -308,8 +304,8 @@ export function registerSubagents(
     }
     if (event.toolName === "bash" && !workspaceClaim && !legacyWriter) return { block: true, reason: "Isolated workspace validation requires an active workspace file-set claim." };
     if (event.toolName === "bash") {
-      const decision = classifySharedShellCommand(typeof event.input.command === "string" ? event.input.command : "");
-      if (decision.kind !== "allowed") return { block: true, reason: decision.reason.replaceAll("Shared-worker", "Isolated-worker").replaceAll("shared workers", "isolated workers") };
+      const decision = classifyWorkspaceShellCommand(typeof event.input.command === "string" ? event.input.command : "");
+      if (decision.kind !== "allowed") return { block: true, reason: decision.reason };
     }
     return undefined;
   });
@@ -320,18 +316,6 @@ export function registerSubagents(
     isolatedAuthorizedMutations.delete(event.toolCallId);
     if (!event.isError) await isolatedJj.workspaceFileSets.recordOwnedMutation(jjWorkspaceId(mutation.workspaceId), mutation.ownerContextId, mutation.path);
     return undefined;
-  });
-
-  registerSharedMutationGuard(pi, {
-    openSource: (cwd) => sharedJj.openSource(cwd),
-    fileSets: sharedJj.fileSets,
-    state: () => {
-      const sharedWorker = mode === "child" && currentAgent?.name === "worker" && childDelegation !== undefined && childDelegation.workspace === undefined;
-      return {
-        enabled: mode === "root" || sharedWorker,
-        ...(sharedWorker && childDelegation ? { ownerContextId: childDelegation.id, constrainShell: true } : {}),
-      };
-    },
   });
 
   const childRuntimeExtensions = (contextId: string, delegatedTask?: { objective: string }) => [{
@@ -704,7 +688,8 @@ export function registerSubagents(
   pi.on("input", async (event, ctx) => {
     const callerId = childDelegation?.id ?? ctx.sessionManager.getSessionId();
     waits.interrupt(callerId);
-    if (event.source !== "extension" && /^\/dpic(?:\s|$)/i.test(event.text) && !await enableRootSubagents(ctx)) return { action: "handled" as const };
+    const startsWorkflow = /^\/dpic(?:\s|$)/i.test(event.text) || /^\/task(?:\s|$)/i.test(event.text);
+    if (event.source !== "extension" && startsWorkflow && !await enableRootSubagents(ctx)) return { action: "handled" as const };
     return { action: "continue" as const };
   });
 
@@ -943,70 +928,87 @@ export function registerSubagents(
   });
 
   pi.registerTool({
-    name: "task_create",
-    label: "Create Task",
-    description: "Persist one immutable Orchestrator-owned task goal from the latest user request.",
-    parameters: Type.Object({ objective: Type.String(), acceptanceCriteria: Type.Optional(Type.Array(Type.String())), constraints: Type.Optional(Type.Array(Type.String())) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      if (mode !== "root" || currentAgent?.name !== "orchestrator") throw new Error("Only the root orchestrator may create a root task.");
-      const existing = await isolatedJj.tasks.findRoot(authoritativeRootSessionId(ctx)); if (existing) throw new Error(`Root task ${existing.taskId} already exists.`);
-      const task = await isolatedJj.tasks.createRoot({ rootSessionId: authoritativeRootSessionId(ctx), orchestratorContextId: `orchestrator-${authoritativeRootSessionId(ctx)}`, objective: params.objective, acceptanceCriteria: params.acceptanceCriteria, constraints: params.constraints, userRequest: latestUserEvidence(ctx) });
-      return result(`Created durable task ${task.taskId}.`, task);
-    },
-  });
-
-  pi.registerTool({
-    name: "task_assign",
-    label: "Assign Task",
-    description: "Create an immutable child task assignment before launching its execution context.",
-    parameters: Type.Object({ ownerRole: StringEnum(["implementation-lead", "documenter", "worker", "reviewer", "scout", "researcher"] as const), objective: Type.String(), acceptanceCriteria: Type.Optional(Type.Array(Type.String())), constraints: Type.Optional(Type.Array(Type.String())) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const parent = await taskForContext(ctx); if (!parent) throw new Error("Create or bind a durable parent task first.");
-      if (currentAgent?.name === "orchestrator" && params.ownerRole === "worker") throw new Error("The Orchestrator cannot assign generic Workers directly; use an Implementation Lead.");
-      if (currentAgent?.name === "implementation-lead" && !["worker", "scout", "researcher"].includes(params.ownerRole)) throw new Error("An Implementation Lead may assign only Workers, Scouts, or Researchers.");
-      const creator = childDelegation?.id ?? `orchestrator-${ctx.sessionManager.getSessionId()}`; const task = await isolatedJj.tasks.assign(parent.taskId, { ownerRole: params.ownerRole, creatorContextId: creator, objective: params.objective, acceptanceCriteria: params.acceptanceCriteria, constraints: params.constraints });
-      return result(`Created ${params.ownerRole} task ${task.taskId}.`, task);
-    },
-  });
-
-  pi.registerTool({
-    name: "task_plan",
-    label: "Revise Task Plan",
-    description: "Replace the caller-owned task's current effective plan while retaining immutable revision history.",
+    name: "work_order_create",
+    label: "Create Work Order",
+    description: "Create one durable work order whose execution class selects its implementation role and closure requirements.",
     parameters: Type.Object({
-      markdown: Type.String({ description: "Complete replacement text for the current effective plan" }),
+      executionClass: StringEnum(WORK_ORDER_EXECUTION_CLASSES),
+      objective: Type.String(),
+      instructions: Type.String({ description: "Complete current implementation instructions" }),
+      rationale: Type.Optional(Type.String()),
+      acceptanceCriteria: Type.Array(Type.String(), { minItems: 1, maxItems: 64 }),
+      constraints: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
+      resources: Type.Optional(Type.Array(Type.Object({ type: StringEnum(TASK_RESOURCE_TYPES), value: Type.String(), reason: Type.Optional(Type.String()) }), { maxItems: 64 })),
+      validationRequirements: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
+      documentationRequirements: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
+      statusUpdates: Type.Optional(Type.Array(Type.String(), { maxItems: 64 })),
+    }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      if (currentAgent?.name === "implementation-lead") {
+        if (mode !== "child" || !childDelegation) throw new Error("Implementation Lead work orders require a bound child context.");
+        if (params.executionClass === "large-product") throw new Error("An Implementation Lead may create small-product or documentation child work orders.");
+        const parent = await taskForContext(ctx); if (!parent) throw new Error("No durable parent work order is bound to this context.");
+        const ownerRole = ownerRoleForExecutionClass(params.executionClass);
+        const child = await isolatedJj.tasks.assign(parent.taskId, { ownerRole, executionClass: params.executionClass, creatorContextId: childDelegation.id, objective: params.objective, instructions: params.instructions, acceptanceCriteria: params.acceptanceCriteria, constraints: params.constraints, resources: params.resources, validationRequirements: params.validationRequirements, documentationRequirements: params.documentationRequirements, statusUpdates: params.statusUpdates });
+        return result(`Created ${params.executionClass} work order ${child.taskId} for ${ownerRole}.`, child);
+      }
+      if (mode !== "root" || currentAgent?.name !== "orchestrator") throw new Error("Only an Orchestrator or Implementation Lead may create a work order.");
+      const rootSessionId = authoritativeRootSessionId(ctx);
+      const existing = await isolatedJj.tasks.findRoot(rootSessionId); if (existing) throw new Error(`Root work order ${existing.taskId} already exists.`);
+      const evidence = latestUserEvidence(ctx);
+      const creatorContextId = `orchestrator-${rootSessionId}`;
+      const authority = await isolatedJj.tasks.createRoot({ rootSessionId, orchestratorContextId: creatorContextId, objective: params.objective, acceptanceCriteria: params.acceptanceCriteria, constraints: params.constraints, userRequest: evidence });
+      await isolatedJj.tasks.appendPlan(authority.taskId, { authorContextId: creatorContextId, authorRole: "orchestrator", authorityMessageId: evidence.messageId, markdown: params.instructions, rationale: params.rationale ?? `Created ${params.executionClass} work order.` });
+      const ownerRole = ownerRoleForExecutionClass(params.executionClass);
+      const workOrder = await isolatedJj.tasks.assign(authority.taskId, { ownerRole, executionClass: params.executionClass, creatorContextId, objective: params.objective, instructions: params.instructions, acceptanceCriteria: params.acceptanceCriteria, constraints: params.constraints, resources: params.resources, validationRequirements: params.validationRequirements, documentationRequirements: params.documentationRequirements, statusUpdates: params.statusUpdates });
+      return result(`Created ${params.executionClass} work order ${workOrder.taskId} for ${ownerRole}.`, { authority, workOrder });
+    },
+  });
+
+  pi.registerTool({
+    name: "work_order_revise",
+    label: "Revise Work Order",
+    description: "Replace the caller-owned work order instructions while retaining immutable revision history.",
+    parameters: Type.Object({
+      instructions: Type.String({ description: "Complete replacement implementation and validation instructions" }),
       rationale: Type.String(),
       directionIds: Type.Optional(Type.Array(Type.String(), { maxItems: 64, description: "Sourced user directions that caused this replacement" })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const task = await taskForContext(ctx); if (!task) throw new Error("No durable task is bound to this context."); const role = currentAgent?.name === "implementation-lead" ? "implementation-lead" : currentAgent?.name === "orchestrator" ? "orchestrator" : undefined; if (!role) throw new Error("Only Orchestrators and Implementation Leads may revise task plans."); const contextId = childDelegation?.id ?? `orchestrator-${ctx.sessionManager.getSessionId()}`;
-      await isolatedJj.tasks.appendPlan(task.taskId, { authorContextId: contextId, authorRole: role, ...(role === "orchestrator" ? { authorityMessageId: latestUserEvidence(ctx).messageId } : {}), markdown: params.markdown, rationale: params.rationale, ...(params.directionIds ? { directionIds: params.directionIds } : {}) });
+      const task = await taskForContext(ctx); if (!task) throw new Error("No durable work order is bound to this context."); const role = currentAgent?.name === "implementation-lead" ? "implementation-lead" : currentAgent?.name === "orchestrator" ? "orchestrator" : undefined; if (!role) throw new Error("Only Orchestrators and Implementation Leads may revise work orders."); const contextId = childDelegation?.id ?? `orchestrator-${ctx.sessionManager.getSessionId()}`;
+      await isolatedJj.tasks.appendPlan(task.taskId, { authorContextId: contextId, authorRole: role, ...(role === "orchestrator" ? { authorityMessageId: latestUserEvidence(ctx).messageId } : {}), markdown: params.instructions, rationale: params.rationale, ...(params.directionIds ? { directionIds: params.directionIds } : {}) });
       const status = await isolatedJj.tasks.status(task.taskId, role);
-      return result(`Replaced the current effective plan for ${task.taskId}.`, status);
+      return result(`Revised the current work order ${task.taskId}.`, status);
     },
   });
 
   pi.registerTool({
-    name: "task_record_user_direction",
-    label: "Record User Direction",
-    description: "Append the latest user-authored clarification to the root task with message provenance.",
+    name: "work_order_record_user_direction",
+    label: "Record Work Order Direction",
+    description: "Append the latest user-authored clarification to the root work order with message provenance.",
     parameters: Type.Object({ summary: Type.String() }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      if (mode !== "root" || currentAgent?.name !== "orchestrator") throw new Error("Only the root Orchestrator may record user direction."); const task = await isolatedJj.tasks.findRoot(authoritativeRootSessionId(ctx)); if (!task) throw new Error("No root task exists."); const updated = await isolatedJj.tasks.recordDirection(task.taskId, { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, evidence: latestUserEvidence(ctx), summary: params.summary }); return result(`Recorded user direction on ${task.taskId}.`, updated);
+      if (mode !== "root" || currentAgent?.name !== "orchestrator") throw new Error("Only the root Orchestrator may record user direction."); const task = await isolatedJj.tasks.findRoot(authoritativeRootSessionId(ctx)); if (!task) throw new Error("No root work order exists."); const updated = await isolatedJj.tasks.recordDirection(task.taskId, { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, evidence: latestUserEvidence(ctx), summary: params.summary }); return result(`Recorded user direction on work order ${task.taskId}.`, updated);
     },
   });
 
   pi.registerTool({
-    name: "task_status",
-    label: "Task Status",
-    description: "Inspect the caller's role-scoped durable task projection; execution roles receive only current effective plans.",
+    name: "work_order_status",
+    label: "Work Order Status",
+    description: "Inspect the caller's role-scoped durable work-order projection; execution roles receive only current effective instructions.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const task = await taskForContext(ctx); if (!task) throw new Error("No durable task is bound to this context.");
+      const task = await taskForContext(ctx); if (!task) throw new Error("No durable work order is bound to this context.");
       const role = currentAgent?.name;
-      if (!role || !["orchestrator", "implementation-lead", "documenter", "worker", "reviewer"].includes(role)) throw new Error("This role has no task-status projection.");
+      if (!role || !["orchestrator", "implementation-lead", "documenter", "worker", "reviewer"].includes(role)) throw new Error("This role has no work-order projection.");
       const status = await isolatedJj.tasks.status(task.taskId, role as TaskOwnerRole);
-      return result(`Task projection contains ${status.tasks.length} task(s).`, status);
+      const closure = await Promise.all(status.tasks.filter((item) => item.assignment?.executionClass).map(async (item) => {
+        const contextId = item.execution.phase === "bound" ? item.execution.contextId : undefined;
+        const context = contextId ? await contextStore.get(contextId) : undefined;
+        const workspace = context?.workspaceId ? await isolatedJj.workspaces.get(context.workspaceId) : undefined;
+        return { workOrderId: item.taskId, executionClass: item.assignment!.executionClass, executionPhase: context?.execution.phase ?? item.execution.phase, ...(context?.workspaceId ? { workspaceId: context.workspaceId } : {}), workspacePhase: workspace?.phase ?? "none", nextAction: nextClosureAction(context?.execution.phase, workspace?.phase) };
+      }));
+      return result(`Work-order projection contains ${status.tasks.length} record(s); ${closure.filter((item) => item.nextAction !== "closed").length} require action.`, { ...status, closure });
     },
   });
 
@@ -1033,37 +1035,18 @@ export function registerSubagents(
       if (!caller.allowedChildren.includes(target.name)) {
         throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
       }
-      if (caller.name === "orchestrator" && target.name === "worker") throw new Error("The Orchestrator cannot launch Workers directly; delegate product work to an Implementation Lead workspace.");
-      if (caller.name === "orchestrator" && (target.name === "implementation-lead" || target.name === "documenter")) throw new Error(`${target.name} must be launched with workspace_subagent from a plan-bound task.`);
+      if (caller.name === "orchestrator" && (target.name === "worker" || target.name === "implementation-lead" || target.name === "documenter")) throw new Error(`${target.name} must be launched with workspace_subagent from a bound work order.`);
       if (caller.name === "orchestrator" && target.name === "reviewer") throw new Error("Reviewers are launched only by prepare_workspace_review in the frozen implementation workspace.");
       if (!canonicalNormalChildren(caller.name).has(target.name)) throw new Error(`Agent "${caller.name}" cannot broaden the canonical child policy to "${target.name}".`);
       validateAgentTools(target, availableToolNames());
-      const parentContext = childDelegation ? await contextStore.get(childDelegation.id) : undefined;
-      if (caller.name === "implementation-lead" && target.name === "worker" && !parentContext?.workspaceId) throw new Error("Implementation Lead Workers require the lead's managed workspace.");
-      if (caller.name === "implementation-lead" && target.name === "worker") { if (!parentContext?.taskId) throw new Error("Implementation Lead has no plan-bound task authority."); await isolatedJj.tasks.requireImplementationPlan(parentContext.taskId); }
-      const writableWorkspaceChild = target.name === "worker" && parentContext?.workspaceId;
-      const contextId = writableWorkspaceChild ? randomUUID() : undefined;
-      let transferredLease: ReturnType<typeof isolatedWorkspaceWriteLease> | undefined;
-      if (writableWorkspaceChild && contextId) {
-        const tracked = await isolatedJj.workspaces.get(writableWorkspaceChild);
-        if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== parentContext?.contextId) throw new Error("Parent does not hold a transferable workspace writer lease.");
-        transferredLease = await isolatedJj.operations.transferWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(writableWorkspaceChild), workspaceWriteLeaseId(tracked.writer.leaseId)), contextId);
-      }
-      let record: DelegationRecord;
-      try {
-        record = await spawnManagedChild({
-          task: params.task, agent: target, caller,
-          parentCwd: ctx.cwd, parentSessionId: ctx.sessionManager.getSessionId(),
-          ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
-          ...(contextId ? { contextId } : {}),
-          ...(params.taskId ? { taskId: params.taskId } : {}),
-          ...(writableWorkspaceChild ? { workspaceId: writableWorkspaceChild } : {}),
-          modelRegistry: ctx.modelRegistry,
-        });
-      } catch (error) {
-        if (transferredLease && parentContext) await isolatedJj.operations.transferWriter(transferredLease, parentContext.contextId);
-        throw error;
-      }
+      if (caller.name === "implementation-lead" && (target.name === "worker" || target.name === "documenter")) throw new Error(`${target.name} must be launched with workspace_subagent from a durable child work order.`);
+      const record = await spawnManagedChild({
+        task: params.task, agent: target, caller,
+        parentCwd: ctx.cwd, parentSessionId: ctx.sessionManager.getSessionId(),
+        ...(childDelegation ? { parentDelegationId: childDelegation.id } : {}),
+        ...(params.taskId ? { taskId: params.taskId } : {}),
+        modelRegistry: ctx.modelRegistry,
+      });
       if (params.taskId) await isolatedJj.tasks.bind(params.taskId, record.id);
       await refreshChildWidget(ctx);
       return result(`Spawned ${record.agent.name} child ${record.id} in ${record.cwd}.`, record);
@@ -1087,88 +1070,6 @@ export function registerSubagents(
         claims: durable?.claims.slice(-64) ?? [],
         operations: durable?.operations.slice(-64).map(({ operationId, kind, phase, startedAt }) => ({ operationId, kind, phase, startedAt })) ?? [],
       });
-    },
-  });
-
-  pi.registerTool({
-    name: "insert_change",
-    label: "Insert Shared Change",
-    description: "Insert one named empty shared target before the current source @ and bind it to a direct shared worker context.",
-    promptGuidelines: [
-      "Spawn the shared worker first with instructions not to edit until assigned, then insert_change for that child context and message it to acquire its complete file set.",
-      "The description must be a meaningful Conventional Commit description for the bounded shared work.",
-    ],
-    parameters: Type.Object({
-      ownerContextId: Type.String({ minLength: 1, maxLength: 128, description: "Direct shared worker context returned by subagent" }),
-      description: Type.String({ minLength: 1, maxLength: 4_096 }),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      requireWorkspaceOrchestrator(currentAgent);
-      const owner = await requireDirectChild(orchestrator, params.ownerContextId, ctx.sessionManager.getSessionId());
-      if (owner.agent.name !== "worker" || owner.workspace) throw new Error("Inserted shared changes can be assigned only to a direct non-workspace worker.");
-      if (isResolvedDelegation(owner)) throw new Error(`Worker ${owner.id} is already terminal and cannot receive a shared target.`);
-      const source = await sharedJj.openSource(ctx.cwd);
-      const outcome = await sharedJj.operations.insertChange(source, {
-        description: changeDescription(params.description),
-        owner: childContextId(owner.id),
-      });
-      return result(outcome.kind === "completed" ? `Inserted shared target ${outcome.receipt.insertedChangeId} for ${owner.id}.` : `Shared target insertion stopped: ${outcome.blocker.kind}.`, outcome);
-    },
-  });
-
-  pi.registerTool({
-    name: "acquire_file_set",
-    label: "Acquire File Set",
-    description: "Acquire the complete canonical shared-source path set assigned to this worker; overlapping requests wait FIFO.",
-    parameters: Type.Object({
-      paths: Type.Array(Type.String({ minLength: 1, maxLength: 4_096 }), { minItems: 1, maxItems: 128 }),
-    }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      const owner = requireSharedWorker(currentAgent, childDelegation);
-      const source = await sharedJj.openSource(ctx.cwd);
-      const claim = await sharedJj.fileSets.acquire(source, {
-        rootSessionId: owner.parentSessionId,
-        ownerContextId: owner.id,
-        paths: params.paths,
-        signal,
-      });
-      const active = await sharedJj.fileSets.requireActive(claim);
-      return result(`Acquired file-set claim ${claim.claimId}. Re-read every target before editing.`, {
-        claimId: claim.claimId,
-        paths: active.record.paths,
-        targetChangeId: active.record.targetChangeId,
-        acquiredAt: active.record.acquiredAt,
-      });
-    },
-  });
-
-  pi.registerTool({
-    name: "release_file_set",
-    label: "Release File Set",
-    description: "Release this shared worker's unused active file set. Mutated sets must use checkpoint_change.",
-    parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const owner = requireSharedWorker(currentAgent, childDelegation);
-      const source = await sharedJj.openSource(ctx.cwd);
-      const active = await sharedJj.fileSets.activeForOwner(source, owner.id);
-      if (!active) throw new Error("This worker has no active shared file-set claim.");
-      await sharedJj.fileSets.releaseUnused(active.handle);
-      return result(`Released unused file-set claim ${active.handle.claimId}.`, { claimId: active.handle.claimId });
-    },
-  });
-
-  pi.registerTool({
-    name: "checkpoint_change",
-    label: "Checkpoint Shared Change",
-    description: "Move only this worker's locked shared-source paths into its assigned inserted Change ID and release after receipt verification.",
-    parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      const owner = requireSharedWorker(currentAgent, childDelegation);
-      const source = await sharedJj.openSource(ctx.cwd);
-      const active = await sharedJj.fileSets.activeForOwner(source, owner.id);
-      if (!active) throw new Error("This worker has no active shared file-set claim.");
-      const outcome = await sharedJj.checkpointer.checkpointChange(active.handle);
-      return result(outcome.kind === "completed" ? `Checkpointed ${outcome.receipt.changedPaths.length} path(s) into ${outcome.receipt.checkpointedChangeId}.` : `Shared checkpoint stopped: ${outcome.blocker.kind}.`, outcome);
     },
   });
 
@@ -1306,7 +1207,7 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const caller = requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const implementation = await contextStore.get(child.id); if (!implementation?.workspaceId || !implementation.taskId) throw new Error("Implementation child must bind tracked workspace and task custody."); const terminal = [...implementation.events].reverse().find((event) => event.kind === "terminal" && event.delivery.phase === "acknowledged"); if (!terminal) throw new Error("Implementation terminal event must be acknowledged before review."); await isolatedJj.tasks.requireImplementationPlan(implementation.taskId);
       const tracked = await isolatedJj.workspaces.get(implementation.workspaceId); if (tracked?.phase === "reported") await isolatedJj.reviewCoordinator.acknowledge(jjWorkspaceId(implementation.workspaceId), { implementationEventId: terminal.eventId, taskId: implementation.taskId }); const afterAck = await isolatedJj.workspaces.get(implementation.workspaceId); if (afterAck?.phase === "closed_no_changes") return result("Workspace closed with proved no changes; review is unnecessary.", afterAck);
-      const bundle = afterAck?.phase === "conflict_resolution" ? await isolatedJj.reviewCoordinator.prepareConflictReview(jjWorkspaceId(implementation.workspaceId)) : await isolatedJj.reviewCoordinator.prepareReview(jjWorkspaceId(implementation.workspaceId));
+      const bundle = afterAck?.phase === "conflict_reconciliation" ? await isolatedJj.reviewCoordinator.prepareConflictReview(jjWorkspaceId(implementation.workspaceId)) : await isolatedJj.reviewCoordinator.prepareReview(jjWorkspaceId(implementation.workspaceId));
       const reviewerAgent = loadCatalog(ctx).byName.get("reviewer"); if (!reviewerAgent) throw new Error("Reviewer agent is unavailable."); validateAgentTools(reviewerAgent, availableToolNames()); const reviewTask = await isolatedJj.tasks.assign(implementation.taskId, { ownerRole: "reviewer", creatorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, objective: "Review the exact frozen workspace range against the immutable task snapshot", acceptanceCriteria: ["Submit structured p0-p4 findings", "Do not mutate files or JJ"] }); const reviewContextId = randomUUID();
       const reviewer = await spawnManagedChild({ contextId: reviewContextId, taskId: reviewTask.taskId, task: { objective: "Independently review the exact frozen workspace range", context: [`Review bundle ${bundle.bundleId}`, `Task snapshot ${bundle.taskSnapshot.path}`, `Exact range ${bundle.rootChangeId}::${bundle.contentTipChangeId}`, `Expected empty head ${bundle.workspaceHeadChangeId}`], resources: [{ type: "file", value: bundle.taskSnapshot.path, reason: "Immutable task snapshot" }], constraints: ["Read-only", "Call inspect_workspace_review before judging the range", "Use p0-p4 severity", "Call submit_workspace_review exactly once"], expectedOutput: "Structured review findings", uncertaintyHandling: "block" }, agent: reviewerAgent, caller, parentCwd: implementation.cwd, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: implementation.workspaceId, modelRegistry: ctx.modelRegistry }); await isolatedJj.tasks.bind(reviewTask.taskId, reviewer.id); await refreshChildWidget(ctx); return result(`Started reviewer ${reviewer.id} for ${bundle.bundleId}.`, { reviewer, bundle });
     },
@@ -1348,7 +1249,7 @@ export function registerSubagents(
     description: "Submit one immutable structured p0-p4 report for the injected frozen workspace review.",
     parameters: Type.Object({ summary: Type.String(), validation: Type.Array(Type.String()), findings: Type.Array(Type.Object({ findingId: Type.String(), severity: StringEnum(["p0", "p1", "p2", "p3", "p4"] as const), relation: StringEnum(["introduced", "in_scope_existing", "out_of_scope_existing"] as const), summary: Type.String(), evidence: Type.String(), criterion: Type.Optional(Type.String()), changeIds: Type.Array(Type.String()), paths: Type.Array(Type.String()), suggestedCorrection: Type.Optional(Type.String()), focusedReviewable: Type.Boolean() })) }),
     async execute(_id, params) {
-      if (mode !== "child" || currentAgent?.name !== "reviewer" || !childDelegation) throw new Error("Only an active reviewer may submit workspace review."); const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) throw new Error("Reviewer has no injected workspace."); const custody = await isolatedJj.workspaces.get(context.workspaceId); if (!custody) throw new Error("Reviewer workspace custody is unavailable."); const reviewId = "focusedReviewId" in custody && typeof custody.focusedReviewId === "string" ? custody.focusedReviewId : custody && "reviewId" in custody && typeof custody.reviewId === "string" ? custody.reviewId : undefined; const inspection = reviewerInspections.get(context.contextId); if (!reviewId || inspection?.reviewId !== reviewId) throw new Error("Reviewer must inspect the exact current frozen range before submitting findings."); if ("taskId" in custody && typeof custody.taskId === "string") await isolatedJj.tasks.requireImplementationPlan(custody.taskId); const bundle = await isolatedJj.reviews.requireBundle(reviewId); const currentPatch = await isolatedJj.repository.patchEvidence(jjWorkspaceId(context.workspaceId), `${exactChange(changeId(bundle.rootChangeId))}::${exactChange(changeId(bundle.contentTipChangeId))}`); if (createHash("sha256").update(currentPatch).digest("hex") !== inspection.normalizedPatchHash || inspection.normalizedPatchHash !== bundle.normalizedPatchHash) throw new Error("Frozen patch changed after inspection; inspect the exact range again before submitting."); const report = custody?.phase === "conflict_resolution" ? await isolatedJj.reviewCoordinator.submitConflictReview(jjWorkspaceId(context.workspaceId), { reviewerContextId: context.contextId, summary: params.summary, validation: params.validation, findings: params.findings }) : await isolatedJj.reviewCoordinator.submitReview(jjWorkspaceId(context.workspaceId), { reviewerContextId: context.contextId, summary: params.summary, validation: params.validation, findings: params.findings }); reviewerInspections.delete(context.contextId); return result(`Submitted review with ${report.findings.length} finding(s).`, report);
+      if (mode !== "child" || currentAgent?.name !== "reviewer" || !childDelegation) throw new Error("Only an active reviewer may submit workspace review."); const context = await contextStore.get(childDelegation.id); if (!context?.workspaceId) throw new Error("Reviewer has no injected workspace."); const custody = await isolatedJj.workspaces.get(context.workspaceId); if (!custody) throw new Error("Reviewer workspace custody is unavailable."); const reviewId = "focusedReviewId" in custody && typeof custody.focusedReviewId === "string" ? custody.focusedReviewId : custody && "reviewId" in custody && typeof custody.reviewId === "string" ? custody.reviewId : undefined; const inspection = reviewerInspections.get(context.contextId); if (!reviewId || inspection?.reviewId !== reviewId) throw new Error("Reviewer must inspect the exact current frozen range before submitting findings."); if ("taskId" in custody && typeof custody.taskId === "string") await isolatedJj.tasks.requireImplementationPlan(custody.taskId); const bundle = await isolatedJj.reviews.requireBundle(reviewId); const currentPatch = await isolatedJj.repository.patchEvidence(jjWorkspaceId(context.workspaceId), `${exactChange(changeId(bundle.rootChangeId))}::${exactChange(changeId(bundle.contentTipChangeId))}`); if (createHash("sha256").update(currentPatch).digest("hex") !== inspection.normalizedPatchHash || inspection.normalizedPatchHash !== bundle.normalizedPatchHash) throw new Error("Frozen patch changed after inspection; inspect the exact range again before submitting."); const report = custody?.phase === "conflict_reconciliation" ? await isolatedJj.reviewCoordinator.submitConflictReview(jjWorkspaceId(context.workspaceId), { reviewerContextId: context.contextId, summary: params.summary, validation: params.validation, findings: params.findings }) : await isolatedJj.reviewCoordinator.submitReview(jjWorkspaceId(context.workspaceId), { reviewerContextId: context.contextId, summary: params.summary, validation: params.validation, findings: params.findings }); reviewerInspections.delete(context.contextId); return result(`Submitted review with ${report.findings.length} finding(s).`, report);
     },
   });
 
@@ -1357,13 +1258,13 @@ export function registerSubagents(
     label: "Accept Workspace Review",
     description: "Apply orchestrator dispositions to nonblocking findings and mint an immutable approval receipt.",
     parameters: Type.Object({ delegationId: Type.String(), dispositions: Type.Array(Type.Object({ findingId: Type.String(), disposition: StringEnum(["deferred", "not_applicable"] as const), rationale: Type.String() })) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const custody = await isolatedJj.workspaces.get(context.workspaceId); const approval = custody?.phase === "conflict_resolution" ? await isolatedJj.reviewCoordinator.approveConflictReview(jjWorkspaceId(context.workspaceId), { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, dispositions: params.dispositions }) : await isolatedJj.reviewCoordinator.approve(jjWorkspaceId(context.workspaceId), { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, dispositions: params.dispositions }); return result(`Approved workspace review ${approval.reviewId}.`, approval); },
+    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const custody = await isolatedJj.workspaces.get(context.workspaceId); const approval = custody?.phase === "conflict_reconciliation" ? await isolatedJj.reviewCoordinator.approveConflictReview(jjWorkspaceId(context.workspaceId), { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, dispositions: params.dispositions }) : await isolatedJj.reviewCoordinator.approve(jjWorkspaceId(context.workspaceId), { orchestratorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, dispositions: params.dispositions }); return result(`Approved workspace review ${approval.reviewId}.`, approval); },
   });
 
   pi.registerTool({
-    name: "begin_workspace_repair",
-    label: "Begin Workspace Repair",
-    description: "Thaw one changes-requested workspace for its single automatic repair cycle.",
+    name: "start_review_repair",
+    label: "Start Review Repair",
+    description: "Start one explicit, provenance-bound repair attempt for the current blocking review findings.",
     parameters: Type.Object({ delegationId: Type.String(), objective: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const caller = requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId || !context.taskId) throw new Error("Delegation has no tracked workspace task.");
@@ -1371,90 +1272,90 @@ export function registerSubagents(
       const findings = Array.isArray(reviewStatus.blockingFindings) ? reviewStatus.blockingFindings : [];
       const repairPaths: string[] = [...new Set<string>(findings.flatMap((finding: any) => Array.isArray(finding.paths) ? finding.paths.map(String) : []) as string[])].sort();
       if (!findings.length || !repairPaths.length) throw new Error("Workspace repair requires current blocking findings with exact affected paths.");
-      const repairRole = context.agent.name === "documenter" ? "documenter" as const : "implementation-lead" as const;
+      const repairRole = context.agent.name === "documenter" ? "documenter" as const : context.agent.name === "worker" ? "worker" as const : "implementation-lead" as const;
       const repairAgent = loadCatalog(ctx).byName.get(repairRole); if (!repairAgent) throw new Error(`${repairRole} agent is unavailable.`);
-      const repairTask = await isolatedJj.tasks.assign(context.taskId, { ownerRole: repairRole, creatorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, objective: params.objective ?? "Repair all blocking p0/p1 review findings", constraints: ["One bounded repair cycle", "Checkpoint only the assigned workspace file set"] });
-      await isolatedJj.reviewCoordinator.beginRepair(jjWorkspaceId(context.workspaceId));
+      const executionClass: WorkOrderExecutionClass = repairRole === "worker" ? "small-product" : repairRole === "implementation-lead" ? "large-product" : "documentation";
+      const repairObjective = params.objective ?? "Repair all current blocking p0/p1 review findings";
+      const repairTask = await isolatedJj.tasks.assign(context.taskId, { ownerRole: repairRole, executionClass, creatorContextId: `orchestrator-${ctx.sessionManager.getSessionId()}`, objective: repairObjective, instructions: `Repair only the current blocking findings and validate the corrected paths.\n\n${findings.map((finding: any) => `${finding.findingId}: ${finding.summary} — ${finding.evidence}`).join("\n")}`, constraints: ["Checkpoint only the assigned workspace file set", `Modify only: ${repairPaths.join(", ")}`], resources: repairPaths.map((path) => ({ type: "file" as const, value: path, reason: "Blocking review finding" })), validationRequirements: ["Validate every repaired finding", "Prepare the range for focused re-review"] });
+      await isolatedJj.reviewCoordinator.startRepair(jjWorkspaceId(context.workspaceId), { findingIds: findings.map((finding: any) => String(finding.findingId)), affectedPaths: repairPaths, implementationRole: repairRole, repairWorkOrderId: repairTask.taskId });
       const repairContextId = randomUUID(); const repairAttemptId = `repair-${randomUUID()}`;
       const targetChangeId = await isolatedJj.workspaceFileSets.assignTarget(jjWorkspaceId(context.workspaceId), { ownerContextId: repairContextId, description: changeDescription("fix: address workspace review findings") });
       const claim = await isolatedJj.workspaceFileSets.acquire(jjWorkspaceId(context.workspaceId), { ownerContextId: repairContextId, paths: repairPaths });
       try {
-        const repair = await spawnManagedChild({ contextId: repairContextId, taskId: repairTask.taskId, task: { objective: params.objective ?? "Repair all blocking workspace review findings", context: [`Review ${reviewStatus.reviewId}`, ...findings.map((finding: any) => `${finding.findingId}: ${finding.summary} — ${finding.evidence}`)], resources: repairPaths.map((path) => ({ type: "file" as const, value: path, reason: "Blocking review finding" })), constraints: ["One repair cycle", "Call checkpoint_workspace_file_set", `Modify only: ${repairPaths.join(", ")}`], expectedOutput: "Validated focused repair", uncertaintyHandling: "ask-parent" }, agent: repairAgent, caller, parentCwd: context.cwd, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: context.workspaceId, modelRegistry: ctx.modelRegistry });
+        const repair = await spawnManagedChild({ contextId: repairContextId, taskId: repairTask.taskId, task: workOrderTaskPacket(repairTask), agent: repairAgent, caller, parentCwd: context.cwd, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: context.workspaceId, modelRegistry: ctx.modelRegistry });
         const launched = await contextStore.get(repair.id); const active = await isolatedJj.workspaceFileSets.activeForOwner(jjWorkspaceId(context.workspaceId), repairContextId);
         if (!launched || launched.execution.phase !== "running" || !active || active.handle.claimId !== claim.claimId) throw new Error("Repair runtime and workspace claim did not become active together.");
         await isolatedJj.tasks.bind(repairTask.taskId, repair.id);
-        const receipt = { repairAttemptId, taskId: repairTask.taskId, contextId: repair.id, executionCycleId: launched.execution.cycleId, workspaceId: context.workspaceId, reviewId: reviewStatus.reviewId, claimId: claim.claimId, targetChangeId, paths: repairPaths };
+        await isolatedJj.reviewCoordinator.markRepairRunning(jjWorkspaceId(context.workspaceId), repair.id, launched.execution.cycleId);
+        const receipt = { repairAttemptId, workOrderId: repairTask.taskId, contextId: repair.id, executionCycleId: launched.execution.cycleId, workspaceId: context.workspaceId, reviewId: reviewStatus.reviewId, claimId: claim.claimId, targetChangeId, paths: repairPaths };
         return result(`Started repair ${repairRole} ${repair.id} in ${context.workspaceId}.`, { child: repair, repairReceipt: receipt });
-      } catch (error) { await isolatedJj.workspaceFileSets.interrupt(jjWorkspaceId(context.workspaceId), "repair child startup failed"); throw error; }
+      } catch (error) { const reason = error instanceof Error ? error.message : String(error); await isolatedJj.workspaceFileSets.interrupt(jjWorkspaceId(context.workspaceId), "repair child startup failed"); await isolatedJj.reviewCoordinator.markRepairAttention(jjWorkspaceId(context.workspaceId), reason); throw error; }
     },
   });
 
   pi.registerTool({
     name: "workspace_subagent",
     label: "Workspace Subagent",
-    description: "Create an isolated JJ workspace for a plan-bound task and launch an Implementation Lead or Documenter there. Only the root Orchestrator may call this tool.",
-    promptSnippet: "Delegate planned implementation or standalone documentation in an isolated JJ workspace",
+    description: "Launch the role and self-contained packet derived from one durable work order. The Orchestrator creates a managed workspace; an Implementation Lead launches Worker or Documenter children in its existing workspace.",
+    promptSnippet: "Launch a durable work order without restating its authority",
     promptGuidelines: [
-      "Use workspace_subagent after persisting a clear current plan: choose implementation-lead for product work and documenter for standalone architecture, roadmap, or documentation updates.",
-      "Launching a workspace child is not completion. Use await_child_event for its pushed terminal event, acknowledge it, freeze it, independently review every nonempty range, and integrate only with a clean review receipt.",
-      "workspace_subagent resolves source @- only when allocation executes; source @ and @- may move freely between later workspace operations.",
+      "Pass only the work order returned by work_order_create; its execution class, instructions, resources, validation, documentation, and status requirements are authoritative.",
+      "Launching is not completion. Track with await_child_event, respond to questions, acknowledge terminal results with ack_child_event, and include all same-workspace child changes before reporting the parent work order.",
     ],
     parameters: Type.Object({
-      agent: StringEnum(["implementation-lead", "documenter"] as const),
-      taskId: Type.String({ description: "Plan-bound durable task assignment to bind" }),
-      name: Type.Optional(Type.String({ description: "Optional lowercase workspace name" })),
-      task: taskPacketSchema(),
+      workOrderId: Type.String({ description: "Durable work order to bind" }),
+      name: Type.Optional(Type.String({ description: "Optional lowercase workspace name for a root launch" })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const caller = requireWorkspaceOrchestrator(currentAgent);
+      const caller = requireOrchestrator(currentAgent);
+      const assignedTask = await isolatedJj.tasks.get(params.workOrderId);
+      if (!assignedTask?.assignment?.executionClass) throw new Error("Workspace launch requires a durable executable work order.");
+      const expectedRole = ownerRoleForExecutionClass(assignedTask.assignment.executionClass);
+      if (assignedTask.ownerRole !== expectedRole) throw new Error("Work-order execution class and durable owner role disagree.");
       const effectiveCatalog = loadCatalog(ctx);
-      const target = effectiveCatalog.byName.get(params.agent);
-      if (!target) throw new Error(`The agent catalog has no ${params.agent} definition.`);
-      const assignedTask = await isolatedJj.tasks.get(params.taskId); if (!assignedTask || assignedTask.ownerRole !== params.agent) throw new Error(`Workspace role ${params.agent} requires a matching durable task assignment.`);
-      const rootSessionId = authoritativeRootSessionId(ctx); const rootTask = await isolatedJj.tasks.findRoot(rootSessionId);
-      if (!rootTask || assignedTask.rootSessionId !== rootSessionId || assignedTask.parentTaskId !== rootTask.taskId) throw new Error("Workspace task must be a direct assignment in the current Orchestrator task tree.");
-      await isolatedJj.tasks.requireAssignmentPlan(assignedTask.taskId);
+      const target = effectiveCatalog.byName.get(expectedRole); if (!target) throw new Error(`The agent catalog has no ${expectedRole} definition.`);
       if (!caller.allowedChildren.includes(target.name)) throw new Error(`Agent "${caller.name}" cannot create "${target.name}".`);
       validateAgentTools(target, availableToolNames());
-      const name = workspaceName(params.name, params.task.objective, params.agent);
-      await isolatedReady;
-      const source = await isolatedJj.shared.openSource(ctx.cwd);
-      const contextId = randomUUID();
-      const created = await isolatedJj.operations.createWorkspace(source, {
-        name: jjWorkspaceName(name),
-        ownerContextId: contextId,
-        rootSessionId: authoritativeRootSessionId(ctx),
-      });
-      if (created.kind !== "completed") throw new Error(`Workspace allocation stopped: ${created.blocker.kind}.`);
-      const sourceState = await isolatedJj.shared.store.get(source.sourceId);
-      const tracked = await isolatedJj.workspaces.get(created.receipt.workspaceId);
-      if (!sourceState || tracked?.phase !== "active") throw new Error("Tracked workspace state disappeared after allocation.");
-      const attachment: WorkspaceAttachment = {
-        backend: "jj", purpose: "delegation", repoRoot: sourceState.workspacePath,
-        sourceWorkspace: sourceState.workspaceName, sourcePath: sourceState.workspacePath,
-        name: tracked.identity.name, path: tracked.identity.path,
-        rootChangeId: tracked.identity.rootChangeId,
-      };
-      let record: DelegationRecord;
-      try {
-        record = await spawnManagedChild({
-          task: params.task, agent: target, caller, contextId,
-          ...(params.taskId ? { taskId: params.taskId } : {}),
-          parentCwd: created.receipt.path,
-          parentSessionId: ctx.sessionManager.getSessionId(),
-          workspaceId: created.receipt.workspaceId,
-          workspace: attachment,
-          modelRegistry: ctx.modelRegistry,
-        });
-      } catch (error) {
-        await isolatedJj.workspaces.interruptLiveWriters(created.receipt.workspaceId, "child startup failed");
-        throw error;
+      await isolatedJj.tasks.requireAssignmentPlan(assignedTask.taskId);
+      const task = workOrderTaskPacket(assignedTask);
+
+      if (caller.name === "implementation-lead") {
+        if (mode !== "child" || !childDelegation) throw new Error("Implementation Lead launches require a bound child context.");
+        if (expectedRole !== "worker" && expectedRole !== "documenter") throw new Error("Implementation Leads may launch only small-product or documentation work orders.");
+        const parentContext = await contextStore.get(childDelegation.id); if (!parentContext?.workspaceId || !parentContext.taskId) throw new Error("Implementation Lead has no managed workspace work order.");
+        if (assignedTask.parentTaskId !== parentContext.taskId) throw new Error("Child work order does not belong to this Implementation Lead.");
+        const contextId = randomUUID();
+        const tracked = await isolatedJj.workspaces.get(parentContext.workspaceId);
+        if (!tracked || tracked.phase !== "active" || tracked.writer.phase !== "leased" || tracked.writer.ownerContextId !== parentContext.contextId) throw new Error("Implementation Lead must settle its workspace writer before launching a writable child.");
+        const paths = (assignedTask.assignment.resources ?? []).filter((resource) => resource.type === "file" || resource.type === "directory").map((resource) => resource.value);
+        if (!paths.length) throw new Error("Writable child work orders require explicit file or directory resources.");
+        await isolatedJj.operations.releaseWriter(isolatedWorkspaceWriteLease(jjWorkspaceId(parentContext.workspaceId), workspaceWriteLeaseId(tracked.writer.leaseId)));
+        const targetChangeId = await isolatedJj.workspaceFileSets.assignTarget(jjWorkspaceId(parentContext.workspaceId), { ownerContextId: contextId, description: changeDescription(`${expectedRole === "documenter" ? "docs" : "feat"}: ${assignedTask.assignment.objective.slice(0, 200)}`) });
+        const claim = await isolatedJj.workspaceFileSets.acquire(jjWorkspaceId(parentContext.workspaceId), { ownerContextId: contextId, paths });
+        try {
+          const record = await spawnManagedChild({ task, agent: target, caller, contextId, taskId: assignedTask.taskId, parentCwd: ctx.cwd, parentSessionId: ctx.sessionManager.getSessionId(), parentDelegationId: childDelegation.id, workspaceId: parentContext.workspaceId, modelRegistry: ctx.modelRegistry });
+          await isolatedJj.tasks.bind(assignedTask.taskId, record.id); await refreshChildWidget(ctx);
+          return result(`Spawned ${target.name} ${record.id} for ${assignedTask.assignment.executionClass} work order ${assignedTask.taskId} in the existing workspace.`, { child: record, workOrderId: assignedTask.taskId, workspaceId: parentContext.workspaceId, targetChangeId, claimId: claim.claimId, paths });
+        } catch (error) { await isolatedJj.workspaceFileSets.interrupt(jjWorkspaceId(parentContext.workspaceId), "writable child startup failed"); throw error; }
       }
-      if (params.taskId) await isolatedJj.tasks.bind(params.taskId, record.id);
-      const launched = await contextStore.get(record.id);
-      const launchReceipt = { taskId: launched?.taskId, contextId: record.id, parentContextId: launched?.parentContextId, executionCycleId: launched?.execution.cycleId, workspaceId: created.receipt.workspaceId, workspacePath: created.receipt.path, rootChangeId: created.receipt.rootChangeId, workspaceHeadChangeId: created.receipt.workspaceHeadChangeId, operationId: created.receipt.operationId };
-      await refreshChildWidget(ctx);
-      return result(`Spawned ${target.name} ${record.id} in tracked JJ workspace ${created.receipt.path}.`, { child: record, launchReceipt });
+
+      const rootCaller = requireWorkspaceOrchestrator(caller);
+      const rootSessionId = authoritativeRootSessionId(ctx); const rootTask = await isolatedJj.tasks.findRoot(rootSessionId);
+      if (!rootTask || assignedTask.rootSessionId !== rootSessionId || assignedTask.parentTaskId !== rootTask.taskId) throw new Error("Root workspace work order must be a direct assignment in the current Orchestrator authority tree.");
+      const name = workspaceName(params.name, assignedTask.assignment.objective, expectedRole);
+      await isolatedReady;
+      const source = await isolatedJj.shared.openSource(ctx.cwd); const contextId = randomUUID();
+      const created = await isolatedJj.operations.createWorkspace(source, { name: jjWorkspaceName(name), ownerContextId: contextId, rootSessionId });
+      if (created.kind !== "completed") throw new Error(`Workspace allocation stopped: ${created.blocker.kind}.`);
+      const sourceState = await isolatedJj.shared.store.get(source.sourceId); const tracked = await isolatedJj.workspaces.get(created.receipt.workspaceId);
+      if (!sourceState || tracked?.phase !== "active") throw new Error("Tracked workspace state disappeared after allocation.");
+      const attachment: WorkspaceAttachment = { backend: "jj", purpose: "delegation", repoRoot: sourceState.workspacePath, sourceWorkspace: sourceState.workspaceName, sourcePath: sourceState.workspacePath, name: tracked.identity.name, path: tracked.identity.path, rootChangeId: tracked.identity.rootChangeId };
+      try {
+        const record = await spawnManagedChild({ task, agent: target, caller: rootCaller, contextId, taskId: assignedTask.taskId, parentCwd: created.receipt.path, parentSessionId: ctx.sessionManager.getSessionId(), workspaceId: created.receipt.workspaceId, workspace: attachment, modelRegistry: ctx.modelRegistry });
+        await isolatedJj.tasks.bind(assignedTask.taskId, record.id); const launched = await contextStore.get(record.id); await refreshChildWidget(ctx);
+        const launchReceipt = { workOrderId: assignedTask.taskId, contextId: record.id, executionCycleId: launched?.execution.cycleId, workspaceId: created.receipt.workspaceId, workspacePath: created.receipt.path, rootChangeId: created.receipt.rootChangeId, workspaceHeadChangeId: created.receipt.workspaceHeadChangeId, operationId: created.receipt.operationId };
+        return result(`Spawned ${target.name} ${record.id} for ${assignedTask.assignment.executionClass} work order ${assignedTask.taskId}.`, { child: record, launchReceipt });
+      } catch (error) { await isolatedJj.workspaces.interruptLiveWriters(created.receipt.workspaceId, "child startup failed"); throw error; }
     },
   });
 
@@ -1481,19 +1382,19 @@ export function registerSubagents(
   });
 
   pi.registerTool({
-    name: "squash_resolution",
-    label: "Squash Conflict Resolution",
-    description: "Squash exact resolved conflict paths from the then-current source @ into their uniquely owning integrated changes.",
+    name: "reconcile_integration_conflicts",
+    label: "Reconcile Integration Conflicts",
+    description: "After the Orchestrator resolves recorded integration conflicts with Bash/JJ, place exact resolved paths into their uniquely owning changes, verify clean identities, and record focused-review evidence.",
     parameters: Type.Object({ delegationId: Type.String(), paths: Type.Array(Type.String(), { minItems: 1 }) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const lease = conflictResolutionLease(jjWorkspaceId(context.workspaceId), fileSetClaimId(`conflict-${randomUUID()}`)); const receipt = await isolatedJj.conflicts.squashResolution(lease, params.paths); return result(`Squashed ${receipt.resolvedPaths.length} resolved conflict path(s); focused re-review is required.`, receipt); },
+    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const lease = conflictResolutionLease(jjWorkspaceId(context.workspaceId), fileSetClaimId(`conflict-${randomUUID()}`)); const receipt = await isolatedJj.conflicts.squashResolution(lease, params.paths); return result(`Reconciled ${receipt.resolvedPaths.length} integration conflict path(s); focused review is required before Closure continues.`, receipt); },
   });
 
   pi.registerTool({
     name: "verify_integrated_range",
     label: "Verify Integrated Range",
-    description: "Verify exact JJ integration evidence and persist separate product acceptance evidence.",
-    parameters: Type.Object({ delegationId: Type.String(), productChecks: Type.Array(Type.String(), { minItems: 1 }) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const receipt = await isolatedJj.closure.verify(jjWorkspaceId(context.workspaceId), params.productChecks); return result(`Verified integrated workspace ${context.workspaceId}.`, receipt); },
+    description: "Verify exact JJ integration and product acceptance evidence and persist the Closure documentation disposition.",
+    parameters: Type.Object({ delegationId: Type.String(), productChecks: Type.Array(Type.String(), { minItems: 1 }), documentation: Type.Union([Type.Object({ kind: Type.Literal("updated"), paths: Type.Array(Type.String(), { minItems: 1 }), evidence: Type.String() }), Type.Object({ kind: Type.Literal("not_required"), rationale: Type.String() })]) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const receipt = await isolatedJj.closure.verify(jjWorkspaceId(context.workspaceId), params.productChecks, params.documentation); return result(`Verified integrated workspace ${context.workspaceId} with documentation disposition ${params.documentation.kind}.`, receipt); },
   });
 
   pi.registerTool({
@@ -1617,7 +1518,7 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
-      if (coordinator?.getRuntime(params.delegationId)) {
+      if (coordinator) {
         await coordinator.message(params.delegationId, {
           customType: "pi-tai-parent-message-v1",
           content: params.message,
@@ -1722,11 +1623,25 @@ export function registerSubagents(
       const kinds = new Set<"question" | "status" | "terminal" | "incident" | "human_execution_required">(
         params.kinds ?? ["question", "terminal", "incident", "human_execution_required"],
       );
+      if (selectedIds.length === 0) return result("No child contexts selected; continue without a child.", {
+        kind: "child_terminal", retry: "never", next: { action: "continue_without_child" },
+      });
+      let liveSelection = false;
       for (const contextId of selectedIds) {
         const context = await contextStore.get(contextId);
         const existing = context?.events.find((event) => event.delivery.phase === "delivered" && kinds.has(event.kind));
         if (existing) return result(`Received ${existing.kind} event ${existing.eventId} from ${contextId}.`, existing);
+        if (context?.events.some((event) => event.delivery.phase === "persisted" && kinds.has(event.kind))) {
+          return result(`Event delivery is pending for ${contextId}; call reconcile_children.`, {
+            kind: "event_not_delivered", contextId, cycleId: context.execution.cycleId, phase: context.execution.phase,
+            retry: "after_state_change", next: { action: "reconcile_children" },
+          });
+        }
+        if (context && !["completed", "blocked", "failed", "cancelled", "interrupted", "incident"].includes(context.execution.phase)) liveSelection = true;
       }
+      if (!liveSelection) return result("Selected child contexts are fully settled; continue without a child.", {
+        kind: "child_terminal", retry: "never", next: { action: "continue_without_child" },
+      });
       const callerId = childDelegation?.id ?? ctx.sessionManager.getSessionId();
       const waited = await waits.wait({
         callerId,
@@ -1850,7 +1765,7 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.contextId, ctx.sessionManager.getSessionId());
-      if (!coordinator?.getRuntime(params.contextId)) throw new Error("Child has no active SDK runtime.");
+      if (!coordinator) throw new Error("Typed child coordinator is unavailable.");
       const requestId = randomUUID();
       const focus = params.focus ? `\nFocus: ${params.focus}` : "";
       const questions = params.questions?.length
@@ -1932,7 +1847,7 @@ export function registerSubagents(
     async execute(_id, params, _signal, _onUpdate, ctx) {
       requireOrchestrator(currentAgent);
       await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId());
-      if (coordinator?.getRuntime(params.delegationId)) {
+      if (coordinator) {
         const cancellation = await coordinator.cancel(params.delegationId);
         const context = cancellation.contexts.find((candidate) => candidate.contextId === params.delegationId);
         if (!context) throw new Error(`Cancellation lost child context ${params.delegationId}.`);
@@ -2056,6 +1971,48 @@ export function registerSubagents(
   });
 }
 
+function nextClosureAction(executionPhase: string | undefined, workspacePhase: string | undefined): string {
+  if (!executionPhase || executionPhase === "unassigned" || executionPhase === "created" || executionPhase === "starting") return "workspace_subagent";
+  if (["running", "awaiting_parent", "cancelling"].includes(executionPhase)) return executionPhase === "awaiting_parent" ? "respond_to_child" : "await_child_event";
+  switch (workspacePhase) {
+    case "active": return "normalize_change_range";
+    case "reported": return "acknowledge terminal event then prepare_workspace_review";
+    case "acknowledged": return "prepare_workspace_review";
+    case "reviewing": return "workspace_review_status";
+    case "changes_requested": return "start_review_repair";
+    case "approved": return "integrate_workspace";
+    case "integrating": return "resume_workspace_operation";
+    case "conflict_reconciliation": return "resolve with Bash/JJ then reconcile_integration_conflicts";
+    case "integrated": return "verify_integrated_range";
+    case "verifying": return "close_workspace";
+    case "closed":
+    case "closed_no_changes": return "closed";
+    case "cleanup_pending": return "retry_workspace_cleanup";
+    case "incident": return "workspace_recovery_plan";
+    default: return "await_child_event";
+  }
+}
+
+function workOrderTaskPacket(workOrder: PersistedTaskV1): TaskPacket {
+  const assignment = workOrder.assignment;
+  if (!assignment?.executionClass || !assignment.instructions) throw new Error("Executable work order is missing durable instructions or execution class.");
+  const context = [
+    assignment.instructions,
+    ...(assignment.validationRequirements?.length ? [`Validation requirements:\n${assignment.validationRequirements.map((item) => `- ${item}`).join("\n")}`] : []),
+    ...(assignment.documentationRequirements?.length ? [`Documentation requirements:\n${assignment.documentationRequirements.map((item) => `- ${item}`).join("\n")}`] : []),
+    ...(assignment.statusUpdates?.length ? [`Status updates:\n${assignment.statusUpdates.map((item) => `- ${item}`).join("\n")}`] : []),
+  ];
+  return {
+    objective: assignment.objective,
+    context,
+    ...(assignment.resources?.length ? { resources: assignment.resources.map((resource) => ({ ...resource })) } : {}),
+    ...(assignment.constraints.length ? { constraints: [...assignment.constraints] } : {}),
+    ...(assignment.acceptanceCriteria.length ? { acceptanceCriteria: [...assignment.acceptanceCriteria] } : {}),
+    expectedOutput: "Complete the work order, validate it, satisfy documentation and status requirements, and report exact changed files and evidence.",
+    uncertaintyHandling: "ask-parent",
+  };
+}
+
 function taskPacketSchema() {
   return Type.Object({
     objective: Type.String({ minLength: 1, maxLength: 16_000 }),
@@ -2106,7 +2063,7 @@ function canonicalAgentName(name: string): string {
 
 export function canonicalNormalChildren(parent: string): ReadonlySet<string> {
   if (parent === "orchestrator") return new Set(["scout", "researcher"]);
-  if (parent === "implementation-lead") return new Set(["worker", "scout", "researcher"]);
+  if (parent === "implementation-lead") return new Set(["worker", "documenter", "scout", "researcher"]);
   if (parent === "worker" || parent === "reviewer") return new Set(["scout", "researcher"]);
   return new Set();
 }
@@ -2123,19 +2080,9 @@ function requireWorkspaceOrchestrator(agent: AgentDefinition | undefined): Agent
   return agent;
 }
 
-function requireSharedWorker(
-  agent: AgentDefinition | undefined,
-  delegation: DelegationRecord | undefined,
-): DelegationRecord {
-  if (agent?.name !== "worker" || !delegation || delegation.workspace) {
-    throw new Error("Shared file-set tools require a non-workspace worker context.");
-  }
-  return delegation;
-}
-
 function requireDelegatedWorkspace(record: DelegationRecord): void {
-  if (!record.workspace || (record.agent.name !== "implementation-lead" && record.agent.name !== "documenter")) {
-    throw new Error(`Delegation ${record.id} is not an isolated Implementation Lead or Documenter workspace.`);
+  if (!record.workspace || !["worker", "implementation-lead", "documenter"].includes(record.agent.name)) {
+    throw new Error(`Delegation ${record.id} is not an isolated writable workspace.`);
   }
 }
 
@@ -2152,7 +2099,7 @@ export function isAssignedDocumentationPath(cwd: string, requested: string, reso
   return resources.some((resource) => resource.type === "file" && resolve(cwd, resource.value) === target);
 }
 
-function workspaceName(requested: string | undefined, objective: string, agent: "implementation-lead" | "documenter"): string {
+function workspaceName(requested: string | undefined, objective: string, agent: "worker" | "implementation-lead" | "documenter"): string {
   if (requested) {
     const normalized = requested.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(normalized)) {
