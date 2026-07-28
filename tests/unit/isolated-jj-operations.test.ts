@@ -29,6 +29,36 @@ test("tracked isolated workspace allocates, checkpoints with a fresh lease, and 
   finally { await fixture.dispose(); }
 });
 
+test("workspace allocation and source-parent rebase resolve source revisions only at operation time", async () => {
+  const fixture = await RealJjFixture.create("pi-tai-isolated-moving-source-");
+  try {
+    await fixture.seed({ changes: [{ description: "base", files: { "base.txt": "base\n" } }] });
+    const runtime = new IsolatedJjRuntime({ stateRoot: join(fixture.root, "state"), executor: fixture.executor });
+    const source = await runtime.shared.openSource(fixture.repoPath);
+    assert.equal((await runtime.shared.operations.ensureWip(source)).kind, "completed");
+    await writeFile(join(fixture.repoPath, "external-before.txt"), "before allocation\n");
+    await fixture.run(fixture.repoPath, ["describe", "--message", "feat: external checkpoint before allocation"], "write");
+    await fixture.run(fixture.repoPath, ["new"], "write");
+    const allocationParent = await fixture.run(fixture.repoPath, ["log", "--revision", "@-", "--no-graph", "--template", 'change_id ++ "\\n"']);
+    const created = await runtime.operations.createWorkspace(source, { name: workspaceName("moving-source"), ownerContextId: "child-moving", rootSessionId: "root-1" });
+    assert.equal(created.kind, "completed"); if (created.kind !== "completed") return;
+    assert.equal(await fixture.run(created.receipt.path, ["log", "--revision", "@-", "--no-graph", "--template", 'change_id ++ "\\n"']), allocationParent);
+    await runtime.operations.releaseWriter(created.receipt.lease);
+    await writeFile(join(fixture.repoPath, "external-after.txt"), "before rebase\n");
+    await fixture.run(fixture.repoPath, ["describe", "--message", "feat: external checkpoint before rebase"], "write");
+    await fixture.run(fixture.repoPath, ["new"], "write");
+    const rebaseParent = await fixture.run(fixture.repoPath, ["log", "--revision", "@-", "--no-graph", "--template", 'change_id ++ "\\n"']);
+    const rebased = await runtime.operations.rebaseWorkspace(workspaceRebaseLease(created.receipt.workspaceId, workspaceWriteLeaseId("moving-source-rebase")), { kind: "source_parent" });
+    assert.equal(rebased.kind, "completed");
+    assert.equal(await fixture.run(created.receipt.path, ["log", "--revision", `parents(exactly(change_id(${created.receipt.rootChangeId}), 1))`, "--no-graph", "--template", 'change_id ++ "\\n"']), rebaseParent);
+    const tracked = await runtime.workspaces.get(created.receipt.workspaceId);
+    if (tracked?.phase === "active") {
+      assert.equal(tracked.identity.sourceWipChangeId, undefined);
+      assert.equal(tracked.identity.baseChangeId, undefined);
+    }
+  } finally { await fixture.dispose(); }
+});
+
 test("interrupted allocation adopts exactly one matching workspace without a writer", async () => {
   const fixture = await RealJjFixture.create("pi-tai-isolated-allocation-recovery-"); let interrupt = true;
   try {

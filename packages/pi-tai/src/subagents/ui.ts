@@ -211,7 +211,7 @@ export function formatChildDetail(summary: ChildActivitySummary): string {
       `Backend: ${workspace.attachment.backend}`,
       `Name: ${workspace.attachment.name}`,
       `Phase: ${workspace.phase}`,
-      `Base change: ${workspace.attachment.baseChangeId}`,
+      ...(workspace.attachment.baseChangeId ? [`Legacy base observation: ${workspace.attachment.baseChangeId}`] : []),
       `Root change: ${workspace.attachment.rootChangeId}`,
       ...(workspace.phase === "attention_required" ? [`STOPPED: ${workspace.reason}`] : []),
     ].join("\n"));

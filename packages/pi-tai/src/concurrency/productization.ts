@@ -47,8 +47,9 @@ export interface SessionWorkspaceIdentityV1 {
   readonly workspaceName: string;
   readonly path: string;
   readonly sourceWorkspaceName: string;
-  readonly sourceWorkspaceChangeId: string;
-  readonly baseChangeId: string;
+  /** Legacy wire observations; new session custody does not persist source @ or @-. */
+  readonly sourceWorkspaceChangeId?: string;
+  readonly baseChangeId?: string;
   readonly orchestrationChangeId: string;
 }
 

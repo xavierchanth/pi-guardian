@@ -89,8 +89,6 @@ interface WorkspaceRebaseReceiptBase {
   readonly rootChangeId: ChangeId;
   readonly contentTipChangeId: ChangeId;
   readonly workspaceHeadChangeId: ChangeId;
-  readonly oldBaseChangeId: ChangeId;
-  readonly newBaseChangeId: ChangeId;
   readonly operationId: JjOperationId;
 }
 
@@ -107,7 +105,6 @@ export interface CreateWorkspaceReceipt {
   readonly name: WorkspaceName;
   readonly rootChangeId: ChangeId;
   readonly workspaceHeadChangeId: ChangeId;
-  readonly sourceWipChangeId: ChangeId;
   readonly operationId: JjOperationId;
 }
 
@@ -126,7 +123,6 @@ export type WorkspaceReportReceipt = WorkspaceReportReceiptBase & (
 export interface IntegrationReceipt {
   readonly workspaceId: WorkspaceId;
   readonly integratedChangeIds: readonly ChangeId[];
-  readonly sourceWipChangeId: ChangeId;
   readonly conflicted: boolean;
   readonly operationId: JjOperationId;
 }

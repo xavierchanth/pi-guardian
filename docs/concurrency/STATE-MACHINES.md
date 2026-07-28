@@ -152,8 +152,10 @@ closed|closed_no_changes → cleanup_pending when only cleanup remains
 ## JJ invariants
 
 - Managed backend is JJ only.
-- Source workspace creation branches from source `@-` and preserves source `@`.
-- Tracked root, head, content-tip, source base, source working-change, and feature IDs resolve exactly once.
+- Managed workspace creation resolves source `@-` only when the JJ operation executes and does not persist it as durable identity.
+- Source `@` and `@-` may move freely between workspace operations; no workspace custody or approval binds either source Change ID.
+- Isolated custody tracks only the workspace root, expected head, content tip, and ordered feature range Change IDs.
+- Source-parent rebase resolves the then-current source `@-`; integration inserts the approved range immediately before the then-current source `@`.
 - Workspace rebase preserves tracked range identity and order.
 - Review covers the complete inclusive root-to-content-tip range.
 - Every nonempty isolated range has reviewer evidence before integration.

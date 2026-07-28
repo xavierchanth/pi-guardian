@@ -13,7 +13,7 @@ Models choose intent, scope, descriptions, and findings. Deterministic operation
 - Report freeze adds the last nonempty content-tip Change ID.
 - Review covers the inclusive exact `root::content-tip` range.
 - Commit-ID changes alone never invalidate ownership or review.
-- The original base is diagnostic; an explicit clean rebase may change it.
+- Source `@` and `@-` are operation-time revsets, never durable isolated-workspace identities.
 - An unexplained tracked Change-ID change stops automatic mutation.
 - Divergent IDs are never resolved by selecting an arbitrary side.
 
@@ -22,12 +22,12 @@ Models choose intent, scope, descriptions, and findings. Deterministic operation
 Repository enrollment creates a managed workspace root and a private `pi_tai_private()` revset policy. Every Host session receives an independent workspace based on the invoking workspace's `@-`:
 
 ```text
-invoking @- (recorded base)
-├── invoking user @ (preserved)
+invoking @- at allocation time
+├── invoking user @
 └── pi-tai: session <id>  ← managed session @
 ```
 
-The managed session change receives integrated task work. Pi-Tai records its workspace name, path, base Change ID, and orchestration Change ID under Host custody. Allocation and cleanup run under a repository mutation lease; they verify that the invoking workspace was not moved or rewritten. Cleanup refuses to forget a session workspace while its orchestration change contains unresolved work.
+The managed session change receives integrated task work. Pi-Tai records its workspace name, path, and orchestration Change ID under Host custody; it does not persist the invoking source `@` or `@-`. Allocation and cleanup run under a repository mutation lease. Cleanup refuses to forget a session workspace while its orchestration change contains unresolved work.
 
 ## Task-plan artifact
 
@@ -36,7 +36,7 @@ For substantial work, the orchestrator maintains a durable state-owned task tree
 - objective and acceptance criteria;
 - decisions and constraints;
 - task slices and ownership;
-- source base and working-change IDs plus workspace root/head/content-tip Change IDs;
+- workspace root/head/content-tip Change IDs and the current operation-time source position;
 - review/integration state;
 - deferred findings.
 
@@ -87,15 +87,15 @@ acquire complete set
 
 ### Workspace allocation
 
-The Orchestrator allocates from source `@-`, preserving source `@` bytes, description, and Change ID:
+The Orchestrator resolves source `@-` when allocation executes and creates the isolated root there without changing source `@`:
 
 ```text
-recorded source @-
-├── user @ (preserved)
+source @- at allocation time
+├── source @
 └── isolated root @
 ```
 
-Custody records source workspace and working change, diagnostic base, managed name/path, root, and expected head. No Git fallback or shared fallback occurs after allocation begins.
+Source `@` and `@-` may move freely before later operations. Custody records the source workspace locator, managed name/path, and only the isolated root and expected head Change IDs. It does not persist a source base or source working-copy Change ID. No Git fallback or shared fallback occurs after allocation begins.
 
 ### Workspace file claims and checkpoint
 
@@ -137,7 +137,7 @@ An entirely empty range closes as no-change without creating synthetic history.
 
 ## Manual workspace rebase
 
-Fetching is separate. The orchestrator may explicitly rebase the verified root and all owned descendants onto source `@-` or one exact local Change ID.
+Fetching is separate. The orchestrator may explicitly rebase the verified root and all owned descendants onto source `@-` as resolved when the rebase command executes, or onto one explicit exact local Change ID.
 
 The operation holds workspace token and repository mutex and preserves:
 
@@ -179,8 +179,8 @@ Deterministic integration:
 3. capture recovery identities;
 4. forget workspace only at the documented mutation boundary;
 5. remove only approved empty changes/expected empty head;
-6. insert the approved nonempty range after the recorded source base and before the user's working change;
-7. preserve source working-change ID, description, and content;
+6. insert the approved nonempty range immediately before source `@` as resolved when insertion executes;
+7. preserve the then-current source working-copy content;
 8. verify ancestry, order, names, conflicts, and patches;
 9. remove managed directory only after graph independence;
 10. persist every phase and final receipt.
@@ -216,7 +216,7 @@ model tool handler
 → pinned supported JJ binary
 ```
 
-One repository mutation kernel/mutex exists per process and is shared across root coordinators. Source handles, claims, attempts, and receipts remain attributable to their root/session. Versioned atomic shared-source state persists base and working-change identity, target ownership, claim transitions, attempts, and completed receipts.
+One repository mutation kernel/mutex exists per process and is shared across root coordinators. Source handles, claims, attempts, and receipts remain attributable to their root/session. Versioned atomic shared-source state persists shared-lane target ownership, claim transitions, attempts, and completed receipts. Isolated custody persists only its owned range identities, never source `@` or `@-` Change IDs.
 
 The process executor uses argv directly, bounded output, cancellation, timeout, inherited policy configuration, no config edits, built-in commands, and explicit long-form options. It distinguishes missing binary, spawn failure, exit failure, cancellation, timeout, and output overflow.
 

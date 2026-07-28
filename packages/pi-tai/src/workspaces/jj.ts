@@ -52,6 +52,7 @@ export class JjWorkspacePort implements WorkspacePort {
 
   async integrate(workspace: WorkspaceAttachment): Promise<WorkspaceIntegrationResult> {
     const jj = requireJjWorkspace(workspace);
+    if (!jj.baseChangeId) throw new Error("Legacy workspace integration requires its captured base; managed isolated workspaces use range integration.");
     return this.service.integrateChildWorkspace({
       repoRoot: jj.repoRoot,
       parentWorkspace: jj.sourceWorkspace,

@@ -165,8 +165,7 @@ export class SessionWorkspaceService {
       const identity = existing.identity;
       if (identity.repositoryId !== input.enrollment.repositoryId || identity.rootSessionId !== input.rootSessionId || resolve(identity.path) !== resolve(path)) throw new Error("Persisted session workspace custody conflicts with repository or session identity.");
       const orchestrationChangeId = line(await this.run(identity.path, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "recovered session orchestration Change ID");
-      const baseChangeId = line(await this.run(identity.path, ["log", "--revision", "@-", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "recovered session base Change ID");
-      if (orchestrationChangeId !== identity.orchestrationChangeId || baseChangeId !== identity.baseChangeId) throw new Error("Persisted session workspace no longer matches its acknowledged custody identity.");
+      if (orchestrationChangeId !== identity.orchestrationChangeId) throw new Error("Persisted session workspace no longer matches its acknowledged custody identity.");
       await this.store.put(workspaceId, { ...existing, generation: input.runtimeGeneration, verifiedAt: this.now() });
       return identity;
     }
@@ -183,18 +182,13 @@ export class SessionWorkspaceService {
         const sourceChangeId = line(await this.run(input.invokingCwd, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "source @ Change ID");
         const sourceWorkspaceName = currentWorkspace(await this.run(input.invokingCwd, ["workspace", "list", "--template", WORKSPACE_TEMPLATE], "read"), sourceChangeId);
         const baseChangeId = line(await this.run(input.invokingCwd, ["log", "--revision", "@-", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "source @- Change ID");
-        const sourcePatchHash = hash(await this.run(input.invokingCwd, ["diff", "--revision", "@", "--git"], "read"));
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await this.run(input.invokingCwd, ["workspace", "add", path, "--name", workspaceName, "--revision", exactChange(baseChangeId), "--message", `pi-tai: session ${input.rootSessionId}`], "write");
         this.failpoint?.("workspace_added");
         const orchestrationChangeId = line(await this.run(path, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "session orchestration Change ID");
-        const actualBase = line(await this.run(path, ["log", "--revision", "@-", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "session base Change ID");
-        const sourceAfter = line(await this.run(input.invokingCwd, ["log", "--revision", "@", "--no-graph", "--template", CHANGE_ID_TEMPLATE], "read"), "source @ Change ID");
-        const patchAfter = hash(await this.run(input.invokingCwd, ["diff", "--revision", "@", "--git"], "read"));
-        if (actualBase !== baseChangeId || sourceAfter !== sourceChangeId || patchAfter !== sourcePatchHash) throw new Error("Session workspace allocation changed the invoking user workspace or used the wrong base.");
         const identity: SessionWorkspaceIdentityV1 = {
           repositoryId: input.enrollment.repositoryId, rootSessionId: input.rootSessionId, workspaceId, workspaceName, path,
-          sourceWorkspaceName, sourceWorkspaceChangeId: sourceChangeId, baseChangeId, orchestrationChangeId,
+          sourceWorkspaceName, orchestrationChangeId,
         };
         await this.store.put(workspaceId, { version: 1, phase: "ready", identity, generation: input.runtimeGeneration, verifiedAt: this.now() });
         this.failpoint?.("verified");
@@ -246,7 +240,6 @@ function currentWorkspace(output: string, currentChangeId: string): string {
 }
 function exactChange(value: string): string { if (!/^[a-z]{32}$/.test(value)) throw new Error(`Invalid full JJ Change ID: ${value}`); return `exactly(change_id(${value}), 1)`; }
 function line(output: string, label: string): string { const values = output.split(/\r?\n/).map((value) => value.trim()).filter(Boolean); if (values.length !== 1) throw new Error(`Unable to resolve one ${label}.`); return values[0]!; }
-function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function shortId(value: string): string { return createHash("sha256").update(value).digest("hex").slice(0, 20); }
 function requireInside(root: string, path: string): void { const base = resolve(root); const target = resolve(path); if (target !== base && !target.startsWith(`${base}${sep}`)) throw new Error("Managed session workspace escaped its enrolled root."); if (relative(base, target).split(sep).includes("..")) throw new Error("Managed session workspace escaped its enrolled root."); }
 function validateId(value: string): void { if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)) throw new Error(`Invalid managed ID: ${value}`); }

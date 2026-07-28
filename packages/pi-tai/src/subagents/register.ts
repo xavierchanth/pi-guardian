@@ -1465,7 +1465,7 @@ export function registerSubagents(
     promptGuidelines: [
       "Use workspace_subagent only after task_approve_plan: choose implementation-lead for product work and documenter for standalone architecture, roadmap, or documentation updates.",
       "Launching a workspace child is not completion. Use await_child_event for its pushed terminal event, acknowledge it, freeze it, independently review every nonempty range, and integrate only with an approval receipt.",
-      "workspace_subagent branches from source @- while source @ may contain ongoing work; creation does not move or rewrite source files.",
+      "workspace_subagent resolves source @- only when allocation executes; source @ and @- may move freely between later workspace operations.",
     ],
     parameters: Type.Object({
       agent: StringEnum(["implementation-lead", "documenter"] as const),
@@ -1487,8 +1487,6 @@ export function registerSubagents(
       const name = workspaceName(params.name, params.task.objective, params.agent);
       await isolatedReady;
       const source = await isolatedJj.shared.openSource(ctx.cwd);
-      const ensured = await isolatedJj.shared.operations.ensureWip(source);
-      if (ensured.kind !== "completed") throw new Error(`Workspace allocation stopped: ${ensured.blocker.kind}.`);
       const contextId = randomUUID();
       const created = await isolatedJj.operations.createWorkspace(source, {
         name: jjWorkspaceName(name),
@@ -1502,8 +1500,8 @@ export function registerSubagents(
       const attachment: WorkspaceAttachment = {
         backend: "jj", purpose: "delegation", repoRoot: sourceState.workspacePath,
         sourceWorkspace: sourceState.workspaceName, sourcePath: sourceState.workspacePath,
-        baseChangeId: tracked.identity.baseChangeId, name: tracked.identity.name,
-        path: tracked.identity.path, rootChangeId: tracked.identity.rootChangeId,
+        name: tracked.identity.name, path: tracked.identity.path,
+        rootChangeId: tracked.identity.rootChangeId,
       };
       let record: DelegationRecord;
       try {
@@ -1531,10 +1529,10 @@ export function registerSubagents(
   pi.registerTool({
     name: "integrate_workspace",
     label: "Integrate Workspace",
-    description: "Integrate only an approved tracked workspace range before source WIP through persisted deterministic phases; unreviewed legacy work is preserved for explicit recovery.",
+    description: "Integrate only an approved tracked workspace range immediately before the source @ resolved at insertion time; unreviewed legacy work is preserved for explicit recovery.",
     promptGuidelines: [
       "Tracked integration requires an accepted matching review receipt and preserves exact approved identities and patches.",
-      "Integration permits a dirty source WIP and preserves its Change ID and file content; verification and closure remain separate.",
+      "Integration permits a dirty source @, resolves it only when insertion executes, and preserves its file content; verification and closure remain separate.",
     ],
     parameters: Type.Object({ delegationId: Type.String() }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -1553,7 +1551,7 @@ export function registerSubagents(
   pi.registerTool({
     name: "squash_resolution",
     label: "Squash Conflict Resolution",
-    description: "Squash exact resolved conflict paths from source WIP into their uniquely owning integrated changes.",
+    description: "Squash exact resolved conflict paths from the then-current source @ into their uniquely owning integrated changes.",
     parameters: Type.Object({ delegationId: Type.String(), paths: Type.Array(Type.String(), { minItems: 1 }) }),
     async execute(_id, params, _signal, _onUpdate, ctx) { requireWorkspaceOrchestrator(currentAgent); const child = await requireDirectChild(orchestrator, params.delegationId, ctx.sessionManager.getSessionId()); const context = await contextStore.get(child.id); if (!context?.workspaceId) throw new Error("Delegation has no tracked workspace."); const lease = conflictResolutionLease(jjWorkspaceId(context.workspaceId), fileSetClaimId(`conflict-${randomUUID()}`)); const receipt = await isolatedJj.conflicts.squashResolution(lease, params.paths); return result(`Squashed ${receipt.resolvedPaths.length} resolved conflict path(s); focused re-review is required.`, receipt); },
   });

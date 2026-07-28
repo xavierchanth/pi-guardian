@@ -25,7 +25,10 @@ test("multiple Host sessions receive independent private workspaces without chan
       ]);
       assert.notEqual(first.workspaceName, second.workspaceName);
       assert.notEqual(first.orchestrationChangeId, second.orchestrationChangeId);
-      assert.equal(first.baseChangeId, second.baseChangeId);
+      assert.equal(first.baseChangeId, undefined);
+      assert.equal(first.sourceWorkspaceChangeId, undefined);
+      assert.equal(second.baseChangeId, undefined);
+      assert.equal(second.sourceWorkspaceChangeId, undefined);
       assert.equal(await fixture.currentChangeId(fixture.repoPath), userBefore);
       assert.match(await fixture.run(first.path, ["log", "--revision", "@", "--no-graph", "--template", "description.first_line()"]), /^pi-tai: session session-1$/);
       assert.match(await fixture.run(second.path, ["log", "--revision", "@", "--no-graph", "--template", "description.first_line()"]), /^pi-tai: session session-2$/);

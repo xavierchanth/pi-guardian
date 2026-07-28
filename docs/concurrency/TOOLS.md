@@ -37,7 +37,7 @@ Creates a private read-only evidence child or a same-workspace child allowed by 
 
 ### `spawn_workspace_child`
 
-Atomic Orchestrator-only operation: require a task bound to the current approved-plan receipt, validate the source base and working change, allocate a managed JJ workspace from source `@-`, capture exact identities and custody, then start an Implementation Lead or Documenter. Startup failure preserves custody. No fallback to shared execution.
+Atomic Orchestrator-only operation: require a task bound to the current approved-plan receipt, resolve source `@-` when allocation executes, capture only the managed workspace range identities and custody, then start an Implementation Lead or Documenter. Startup failure preserves custody. No fallback to shared execution.
 
 ### `message_child` / `message_parent`
 
@@ -97,7 +97,7 @@ Injected workspace, claim, owner, target, and stable-WIP evidence constrain the 
 
 ### `rebase_workspace`
 
-Orchestrator-only manual operation onto source parent or one exact local Change ID. Moves exact root plus owned descendants under token/mutex and returns range-equivalent, range-changed, or conflicted receipt.
+Orchestrator-only manual operation onto source `@-` resolved when the rebase executes, or one exact local Change ID. Moves exact root plus owned descendants under token/mutex and returns range-equivalent, range-changed, or conflicted receipt.
 
 ### `prepare_workspace_report`
 
@@ -113,7 +113,7 @@ Removes exact safe interior empties and applies supplied semantic descriptions w
 
 ### `integrate_workspace`
 
-Orchestrator-only and review-receipt-gated. Revalidates under mutex, performs documented phases, preserves the source working change, and returns a durable integration, conflict, or cleanup receipt.
+Orchestrator-only and review-receipt-gated. Revalidates under mutex, inserts the approved range immediately before source `@` as resolved by the integration operation, and returns a durable integration, conflict, or cleanup receipt.
 
 ### `squash_resolution`
 

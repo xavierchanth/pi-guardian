@@ -6,7 +6,8 @@ export interface JjWorkspaceAttachment {
   repoRoot: string;
   sourceWorkspace: string;
   sourcePath: string;
-  baseChangeId: string;
+  /** Legacy backend observation; managed isolated workspaces do not persist a source base. */
+  baseChangeId?: string;
   name: string;
   path: string;
   rootChangeId: string;
