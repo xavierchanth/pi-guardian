@@ -46,7 +46,7 @@ The Orchestrator goal and sourced user directions are immutable. Explicit user a
 
 ### Shared target allocation
 
-`insert_change` creates a named empty feature change as a child of source `@-`, immediately before the user's working change, and binds it to one owner. Source `@` is observed as the content source but is never described or rewritten by Pi-Tai.
+`insert_change` creates a named empty feature change as a child of source `@-`, immediately before the user's working change, and binds it to one owner. Source `@` is ordinary user working state. Its identity and sole parent are resolved when insertion executes; neither is persisted as source-wide ownership policy. Pi-Tai never describes it, and only path-scoped checkpoint or approved integration operations rewrite its graph while preserving unrelated content.
 
 ```text
 source @- (recorded base)
@@ -106,16 +106,16 @@ New workspaces use the shared-file checkpoint shape:
 ```text
 assigned target A
 └── assigned target B
-    └── stable workspace WIP @
+    └── stable managed workspace head @
 ```
 
 A writable task receives one assigned target Change ID. `acquire_workspace_file_set` grants its complete path set atomically. `checkpoint_workspace_file_set`:
 
 1. validates the context, workspace, assigned target, active claim, and path fingerprints;
-2. verifies current `@` is the stable workspace WIP;
-3. moves only claimed paths from WIP into the assigned target;
-4. verifies unrelated WIP content and other targets are unchanged;
-5. persists exact path, patch, target, WIP, and JJ operation evidence;
+2. verifies current `@` is the stable managed workspace head;
+3. moves only claimed paths from that head into the assigned target;
+4. verifies unrelated working-head content and other targets are unchanged;
+5. persists exact path, patch, target, working-head, and JJ operation evidence;
 6. releases the claim only after the receipt is durable.
 
 An isolated worker checkpoints through file claims and cannot mutate through arbitrary shell JJ commands.

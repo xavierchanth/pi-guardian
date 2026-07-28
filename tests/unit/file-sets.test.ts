@@ -11,7 +11,7 @@ import {
 import { sourceWorkspaceHandle, sourceWorkspaceId } from "../../packages/pi-tai/src/jj/domain.ts";
 import { FileSharedSourceStore, type PersistedSharedSourceV1 } from "../../packages/pi-tai/src/jj/persistence.ts";
 
-const WIP = "a".repeat(32);
+const WORKING = "a".repeat(32);
 const TARGETS = ["b", "c", "d"].map((letter) => letter.repeat(32));
 const EMPTY_PATCH_HASH = "0".repeat(64);
 
@@ -29,10 +29,10 @@ async function fixture() {
     repositoryRoot: join(workspace, ".jj", "repo"),
     workspacePath: workspace,
     workspaceName: "default",
-    wip: { changeId: WIP, description: "wip: orchestrator workspace", ensuredOperationId: "operation-1" },
     targets: TARGETS.map((changeId, index) => ({
       changeId,
-      wipChangeId: WIP,
+      baseChangeId: WORKING,
+      workingChangeId: WORKING,
       ownerContextId: `child-${index + 1}`,
       description: `feat: child ${index + 1}`,
       insertOperationId: `operation-${index + 2}`,
@@ -47,7 +47,7 @@ async function fixture() {
   const source = sourceWorkspaceHandle(sourceWorkspaceId("source-1"));
   const coordinator = new SharedFileSetCoordinator({
     store,
-    verifyBaseline: async () => ({ patchHash: EMPTY_PATCH_HASH, changedPaths: [] }),
+    verifyBaseline: async () => ({ workingChangeId: WORKING, patchHash: EMPTY_PATCH_HASH, changedPaths: [] }),
     now: () => "2026-01-01T00:00:01.000Z",
   });
   return { root, workspace, store, source, coordinator };
@@ -149,7 +149,7 @@ test("restart interrupts authority but permits exact owner reacquisition from ma
     await f.coordinator.recordOwnedMutation(f.source, "child-1", "src/a.ts");
     const restarted = new SharedFileSetCoordinator({
       store: f.store,
-      verifyBaseline: async () => ({ patchHash: EMPTY_PATCH_HASH, changedPaths: ["src/a.ts"] }),
+      verifyBaseline: async () => ({ workingChangeId: WORKING, patchHash: EMPTY_PATCH_HASH, changedPaths: ["src/a.ts"] }),
       now: () => "2026-01-01T00:00:02.000Z",
     });
     await restarted.initialize(f.source);

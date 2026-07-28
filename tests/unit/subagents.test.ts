@@ -971,7 +971,7 @@ test("subagents toggles the orchestrator definition without pausing concurrent p
   };
   await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
   assert.equal(handlers.has("tool_call"), true);
-  for (const name of ["ensure_wip_change", "insert_change", "acquire_file_set", "checkpoint_change"]) {
+  for (const name of ["insert_change", "acquire_file_set", "checkpoint_change"]) {
     const properties = tools.get(name)?.parameters?.properties ?? {};
     for (const forbidden of ["cwd", "changeId", "wipChangeId", "targetChangeId", "revset", "fileset", "argv", "operationId"]) {
       assert.equal(forbidden in properties, false, `${name} exposes ${forbidden}`);

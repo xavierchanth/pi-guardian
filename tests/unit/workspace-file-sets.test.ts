@@ -12,7 +12,6 @@ test("one isolated workspace checkpoints disjoint active claims into assigned ta
     await fixture.seed({ changes: [{ description: "base", files: { "base.txt": "base\n" } }] });
     const runtime = new IsolatedJjRuntime({ stateRoot: join(fixture.root, "state"), executor: fixture.executor });
     const source = await runtime.shared.openSource(fixture.repoPath);
-    assert.equal((await runtime.shared.operations.ensureWip(source)).kind, "completed");
     const created = await runtime.operations.createWorkspace(source, { name: workspaceName("file-claims"), ownerContextId: "implementation-lead-1", rootSessionId: "root-1" });
     assert.equal(created.kind, "completed"); if (created.kind !== "completed") return;
     await runtime.operations.releaseWriter(created.receipt.lease);

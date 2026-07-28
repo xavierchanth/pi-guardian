@@ -1,9 +1,11 @@
 # I14 — The source workspace belongs to the user
 
-**Status:** Planned  
+**Status:** Completed  
 **Depends on:** I06, I08. Start after I13 checkpoint 4.
 
 ## Outcome
+
+Completed in the I14 shared consolidation: the shared lane now records distinct base and working-change identities, validates and strips legacy managed-WIP records, and has no `ensure_wip_change` runtime/tool surface.
 
 The main workspace is free to be used. `@-` is the stable identity that delegated work branches from
 and rebases back onto; `@` is the user's live working change and is never described, relabelled, or
@@ -27,9 +29,9 @@ Every document except the shared-source lane already states this:
 I06 delivered the shared lane as the sole dissenter: it preserves "the orchestrator's private WIP change"
 by seizing `@`.
 
-## Problem
+## Superseded implementation
 
-`SharedJjOperations.ensureWip` in `packages/pi-tai/src/jj/shared-operations.ts` requires the source
+Before I14, `SharedJjOperations.ensureWip` in `packages/pi-tai/src/jj/shared-operations.ts` required the source
 workspace's `@` to carry a Pi-Tai-managed `wip:`/`private:` description, running
 `jj describe --message "wip: orchestrator workspace"` when it can safely adopt the change.
 `insertChange` refuses without a stored `wip` record. Three blockers exist only to defend that label:
@@ -45,7 +47,7 @@ real uncommitted work in `@`. Although `ensure_wip_change` is no longer exposed 
 the workspace-allocation runtime still invokes the same operation internally, so the obsolete label
 remains a hidden execution precondition.
 
-## Root cause — one field doing two jobs
+## Resolved root cause — one field was doing two jobs
 
 `wipChangeId` conflates two roles, and the `wip:` label exists only to make the conflation safe:
 
@@ -67,10 +69,9 @@ re-verifies both. It does not consult the description.
 
 ## Scope
 
-1. **Record the base explicitly.** `JjRepositoryKernel.inspect` in `jj/repository.ts` resolves only
-   `@`; `ResolvedJjChange.parentChangeIds` is already populated by `CHANGE_TEMPLATE`. Add a `base`
-   to `SourceInspection` derived from `current.parentChangeIds`, requiring **exactly one parent** — a
-   merge `@` has no unambiguous `@-` and must block as `decision_required` rather than pick a side.
+1. **Record the base explicitly.** `SharedJjOperations.insertChange` derives the base from the
+   operation-time `current.parentChangeIds`, requiring **exactly one parent** — a merge `@` has no
+   unambiguous `@-` and blocks as `decision_required` rather than picking a side.
 2. **Anchor `insertChange` on the base.** Replace the `inspected.source.wip` lookup in
    `jj/shared-operations.ts` with the inspected base. The insertion command is unchanged — inserting
    before `@` *is* creating a child of `@-` — but the recorded and verified identity becomes `@-`,
@@ -83,10 +84,10 @@ re-verifies both. It does not consult the description.
    `isWipDescription`.
 5. **Retire the three label blockers.** `identity_mismatch`, `immutable`, `conflicted`, and
    `unknown` remain; the new single-parent check joins them.
-6. **Split the persisted field.** `PersistedSharedSourceV1.wip` becomes per-target `baseChangeId`
-   and `workingChangeId` in `concurrency/file-sets.ts`. `sourceWipChangeId` / `sourcePatchHash` in
-   `PersistedIntegrationAttemptV1` become `sourceWorkingChangeId` / `sourceWorkingPatchHash` in
-   `jj/workspace-persistence.ts`. One migration, not several.
+6. **Split the persisted field.** `PersistedSharedSourceV1.wip` becomes per-target and per-claim
+   `baseChangeId` and `workingChangeId`. Validation migrates legacy `wipChangeId` records and strips
+   legacy `wip` metadata and `ensure_wip` operations. Isolated integration custody already stopped
+   persisting source working/base observations in the inherited baseline.
 7. **Rewrite the adapter projection.** `WorkspaceClaimStoreAdapter.project` loses its fabricated
    `wip` record and supplies `baseChangeId === workingChangeId === identity.expectedHeadChangeId`,
    which is the truth for an isolated workspace. Its stable-identity assertion moves to the surviving
@@ -112,7 +113,7 @@ context and explicitly marks those invariants as superseded by I14.
 - The Orchestrator can allocate approved Implementation Lead or Documenter work against a source workspace whose `@` holds arbitrary nonempty user work with a user-authored description; nothing runs `describe` on it, and the `@` Change ID, description, and bytes are unchanged afterwards.
 - Amending or re-describing `@` mid-flight does not invalidate an outstanding target or claim.
 - A merge `@` blocks with `decision_required` rather than choosing a parent.
-- No production path calls `ensureWip`; `grep -rn ensure_wip packages services` is empty.
+- The managed source-WIP operation and tool are absent; the production-tree verification command documented for I14 is empty.
 - Integration still fails closed when the source working change's identity or patch hash changes.
 - Implementation Leads and Documenters remain isolated from the source workspace throughout implementation and review; only deterministic integration mutates the graph around the preserved source working change.
 - Real-JJ tests cover a dirty, user-described, nonempty source `@` across allocation, review-gated integration, and verification.

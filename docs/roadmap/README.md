@@ -37,7 +37,7 @@ The latest accepted concurrency checkpoint completes the collaborative responsib
 | I11 | [Remote and multi-Host access](initiatives/I11-remote-multihost.md) | Exploratory | I04, I10 | Authenticated remote clients with one home Host per session |
 | I12 | [Stateful machine capabilities](initiatives/I12-machine-capabilities.md) | Exploratory | I02, I03, I04 | Browser/computer/image/cmux capabilities governed and persisted uniformly |
 | I13 | [Host configuration authority](initiatives/I13-host-configuration-authority.md) | In progress | I02, I03 | Policy is resolved once, pinned into the session aggregate, provenanced, and privilege-enforced |
-| I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Planned | I06, I08 | Source `@` is the user's; the shared lane anchors on `@-`; `ensure_wip_change` is gone |
+| I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Complete | I06, I08 | Source `@` is the user's; operations resolve `@`/`@-` when they execute; shared targets sit immediately before current `@` |
 | I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
 

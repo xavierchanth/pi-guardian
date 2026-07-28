@@ -14,113 +14,59 @@ async function runtime(fixture: RealJjFixture) {
   const kernel = new JjRepositoryKernel({ executor: fixture.executor, store });
   const operations = new SharedJjOperations({ kernel, store });
   const source = await kernel.openSource(fixture.repoPath);
-  return { store, kernel, operations, source };
+  return { store, operations, source };
 }
 
-test("Real-JJ ensures an empty source WIP without changing its Change ID", async (t) => {
-  const fixture = await RealJjFixture.create("pi-tai-ensure-wip-");
-  try {
-    const before = await fixture.snapshot();
-    const { operations, source } = await runtime(fixture);
-    const current = await fixture.currentChangeId(fixture.repoPath);
-    const result = await operations.ensureWip(source);
-    assert.equal(result.kind, "completed");
-    if (result.kind !== "completed") return;
-    assert.equal(result.receipt.wipChangeId, current);
-    assert.equal(result.receipt.disposition, "described_existing");
-    assert.equal(result.receipt.privateProtection, "missing");
-    const after = await fixture.snapshot();
-    assert.equal(after.workingCopies[0]?.changeId, before.workingCopies[0]?.changeId);
-    const wip = after.changes.find((change) => change.changeId === current);
-    assert.equal(wip?.description, "wip: orchestrator workspace");
-    assert.equal(wip?.empty, true);
-  } catch (error) {
-    const retained = await fixture.retainOnFailure(t.name);
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
-  } finally {
-    await fixture.dispose();
-  }
-});
-
-test("Real-JJ adopts an existing canonical nonempty WIP without rewriting content", async (t) => {
-  const fixture = await RealJjFixture.create("pi-tai-adopt-wip-");
-  try {
-    await fixture.run(fixture.repoPath, ["describe", "--message", "wip: existing private work"], "write");
-    await writeFile(join(fixture.repoPath, "existing.txt"), "existing work\n");
-    const before = await fixture.snapshot();
-    const { operations, source } = await runtime(fixture);
-    const result = await operations.ensureWip(source);
-    assert.equal(result.kind, "completed");
-    if (result.kind !== "completed") return;
-    assert.equal(result.receipt.disposition, "existing");
-    const after = await fixture.snapshot();
-    assert.equal(after.workingCopies[0]?.changeId, before.workingCopies[0]?.changeId);
-    assert.equal(after.workingCopies[0]?.contentHash, before.workingCopies[0]?.contentHash);
-  } catch (error) {
-    const retained = await fixture.retainOnFailure(t.name);
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
-  } finally {
-    await fixture.dispose();
-  }
-});
-
-test("Real-JJ refuses to relabel unknown nonempty source work", async (t) => {
-  const fixture = await RealJjFixture.create("pi-tai-unknown-wip-");
-  try {
-    await writeFile(join(fixture.repoPath, "unknown.txt"), "user work\n");
-    const before = await fixture.snapshot();
-    const { operations, source } = await runtime(fixture);
-    const result = await operations.ensureWip(source);
-    assert.deepEqual(result.kind === "blocked" ? result.blocker.kind : "completed", "decision_required");
-    const after = await fixture.snapshot();
-    assert.equal(after.workingCopies[0]?.changeId, before.workingCopies[0]?.changeId);
-    assert.equal(after.workingCopies[0]?.contentHash, before.workingCopies[0]?.contentHash);
-    const current = after.changes.find((change) => change.changeId === after.workingCopies[0]?.changeId);
-    assert.equal(current?.description, "");
-  } catch (error) {
-    const retained = await fixture.retainOnFailure(t.name);
-    throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
-  } finally {
-    await fixture.dispose();
-  }
-});
-
-test("Real-JJ inserts assigned empty targets before WIP while preserving WIP content", async (t) => {
+test("Real-JJ inserts shared targets before arbitrary nonempty user @ without rewriting it", async (t) => {
   const fixture = await RealJjFixture.create("pi-tai-insert-shared-");
   try {
-    const { store, operations, source } = await runtime(fixture);
-    const ensured = await operations.ensureWip(source);
-    assert.equal(ensured.kind, "completed");
+    await fixture.run(fixture.repoPath, ["describe", "--message", "user: ongoing work"], "write");
     await mkdir(join(fixture.repoPath, "src"), { recursive: true });
-    await writeFile(join(fixture.repoPath, "src", "owned.ts"), "export const value = 1;\n");
+    await writeFile(join(fixture.repoPath, "src", "user.ts"), "export const user = true;\n");
     const before = await fixture.snapshot();
     const beforeHead = before.workingCopies[0]!;
-    const first = await operations.insertChange(source, {
-      description: changeDescription("feat(shared): add owned value"),
-      owner: childContextId("child-1"),
-    });
+    const beforeWorking = before.changes.find((change) => change.changeId === beforeHead.changeId)!;
+    const base = beforeWorking.parentChangeIds[0]!;
+    const { store, operations, source } = await runtime(fixture);
+    const first = await operations.insertChange(source, { description: changeDescription("feat(shared): add owned value"), owner: childContextId("child-1") });
     assert.equal(first.kind, "completed");
     if (first.kind !== "completed") return;
-    const second = await operations.insertChange(source, {
-      description: changeDescription("test(shared): cover owned value"),
-      owner: childContextId("child-2"),
-    });
+    assert.equal(first.receipt.baseChangeId, base);
+    assert.equal(first.receipt.workingChangeId, beforeHead.changeId);
+    const second = await operations.insertChange(source, { description: changeDescription("test(shared): cover owned value"), owner: childContextId("child-2") });
     assert.equal(second.kind, "completed");
     if (second.kind !== "completed") return;
     const after = await fixture.snapshot();
     assert.equal(after.workingCopies[0]?.changeId, beforeHead.changeId);
     assert.equal(after.workingCopies[0]?.contentHash, beforeHead.contentHash);
-    const wip = after.changes.find((change) => change.changeId === beforeHead.changeId)!;
-    assert.deepEqual(wip.parentChangeIds, [second.receipt.insertedChangeId]);
-    const secondTarget = after.changes.find((change) => change.changeId === second.receipt.insertedChangeId)!;
-    assert.deepEqual(secondTarget.parentChangeIds, [first.receipt.insertedChangeId]);
-    assert.equal(after.changes.find((change) => change.changeId === first.receipt.insertedChangeId)?.empty, true);
-    assert.equal(secondTarget.empty, true);
-    assert.deepEqual((await store.get(source.sourceId))?.targets.map((target) => target.ownerContextId), ["child-1", "child-2"]);
+    assert.equal(after.changes.find((change) => change.changeId === beforeHead.changeId)?.description, "user: ongoing work");
+    const working = after.changes.find((change) => change.changeId === beforeHead.changeId)!;
+    assert.deepEqual(working.parentChangeIds, [second.receipt.insertedChangeId]);
+    assert.deepEqual(after.changes.find((change) => change.changeId === second.receipt.insertedChangeId)?.parentChangeIds, [first.receipt.insertedChangeId]);
+    assert.deepEqual(after.changes.find((change) => change.changeId === first.receipt.insertedChangeId)?.parentChangeIds, [base]);
+    const targets = (await store.get(source.sourceId))?.targets ?? [];
+    assert.deepEqual(targets.map((target) => target.ownerContextId), ["child-1", "child-2"]);
+    assert.equal(targets[0]?.baseChangeId, base);
+    assert.equal(targets[0]?.workingChangeId, beforeHead.changeId);
   } catch (error) {
     const retained = await fixture.retainOnFailure(t.name);
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nRetained fixture: ${retained.path}`);
-  } finally {
-    await fixture.dispose();
-  }
+  } finally { await fixture.dispose(); }
+});
+
+test("shared insertion blocks when current @ is a merge", async () => {
+  const current = "a".repeat(32); const left = "b".repeat(32); const right = "c".repeat(32);
+  let blocked: unknown;
+  const kernel = {
+    withRepositoryMutation: async (_source: unknown, fn: () => Promise<unknown>) => fn(),
+    inspect: async () => ({ current: { changeId: current, commitId: "commit", empty: false, conflicted: false, immutable: false, parentChangeIds: [left, right], description: "user merge" }, jjOperationId: "op-before", source: {} }),
+    startOperation: async () => ({ operationId: "jjop-merge", beforeJjOperationId: "op-before" }),
+    blockOperation: async (_source: unknown, _operationId: string, blocker: unknown) => { blocked = blocker; },
+  } as unknown as JjRepositoryKernel;
+  const store = { update: async () => { throw new Error("must not persist a target"); } } as unknown as FileSharedSourceStore;
+  const operations = new SharedJjOperations({ kernel, store });
+  const source = { kind: "source_workspace", sourceId: "source-merge" } as const;
+  const result = await operations.insertChange(source as any, { description: changeDescription("feat: must not choose a parent"), owner: childContextId("child-1") });
+  assert.deepEqual(result.kind === "blocked" ? result.blocker.kind : "completed", "decision_required");
+  assert.deepEqual((blocked as any)?.kind, "decision_required");
 });

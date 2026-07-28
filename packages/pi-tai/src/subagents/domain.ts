@@ -18,7 +18,6 @@ export const PARENT_TOOL_NAMES = [
   "integrate_workspace",
   "describe_integrated_changes",
   "jj_concurrency_status",
-  "ensure_wip_change",
   "insert_change",
   "acquire_file_set",
   "release_file_set",

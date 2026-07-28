@@ -162,7 +162,7 @@ export class JjRepositoryKernel {
 
   async startOperation(
     source: SourceWorkspaceHandle,
-    kind: "ensure_wip" | "insert_change" | "checkpoint_change",
+    kind: "insert_change" | "checkpoint_change",
     idempotencyKey: string,
   ): Promise<{ operationId: string; beforeJjOperationId: string }> {
     const beforeJjOperationId = await this.operationIdFor(source);

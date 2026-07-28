@@ -50,40 +50,29 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
       const sourceRecord = await this.store.get(active.source.sourceId);
       if (!sourceRecord) throw new Error(`Unknown shared source: ${active.source.sourceId}`);
       const targetBinding = sourceRecord.targets.find((target) => target.changeId === refreshed.record.targetChangeId);
-      if (!targetBinding || targetBinding.ownerContextId !== refreshed.record.ownerContextId || targetBinding.wipChangeId !== refreshed.record.wipChangeId) {
+      if (!targetBinding || targetBinding.ownerContextId !== refreshed.record.ownerContextId || targetBinding.baseChangeId !== refreshed.record.baseChangeId) {
         return {
           kind: "blocked",
-          blocker: { kind: "foreign_work", reason: "Active file-set claim no longer matches its assigned target owner and WIP." },
+          blocker: { kind: "foreign_work", reason: "Active file-set claim no longer matches its assigned target owner and base." },
         };
       }
-      const wipId = changeId(refreshed.record.wipChangeId);
+      const workingId = await this.kernel.currentChangeId(active.source);
       const targetId = changeId(refreshed.record.targetChangeId);
-      const [wip, target, current] = await Promise.all([
-        this.resolve(active.source, wipId),
-        this.resolve(active.source, targetId),
-        this.kernel.currentChangeId(active.source),
-      ]);
-      if (!wip || !target) {
-        return { kind: "blocked", blocker: { kind: "identity_mismatch", expected: !wip ? wipId : targetId, observed: [] } };
-      }
-      if (current !== wipId) {
-        return { kind: "blocked", blocker: { kind: "identity_mismatch", expected: wipId, observed: [current] } };
-      }
-      if (wip.immutable) return { kind: "blocked", blocker: { kind: "immutable", changeId: wipId } };
+      const [working, target] = await Promise.all([this.resolve(active.source, workingId), this.resolve(active.source, targetId)]);
+      if (!working || !target) return { kind: "blocked", blocker: { kind: "identity_mismatch", expected: !working ? workingId : targetId, observed: [] } };
+      if (working.immutable) return { kind: "blocked", blocker: { kind: "immutable", changeId: workingId } };
       if (target.immutable) return { kind: "blocked", blocker: { kind: "immutable", changeId: targetId } };
-      if (wip.conflicted || target.conflicted) {
-        return { kind: "blocked", blocker: { kind: "conflicted", changeIds: [wipId, targetId], paths: refreshed.record.paths } };
-      }
+      if (working.conflicted || target.conflicted) return { kind: "blocked", blocker: { kind: "conflicted", changeIds: [workingId, targetId], paths: refreshed.record.paths } };
       const filesets = refreshed.record.paths.map(literalRootFileset);
-      const changedPaths = await this.kernel.changedPaths(active.source, exactChange(wipId), filesets);
+      const changedPaths = await this.kernel.changedPaths(active.source, exactChange(workingId), filesets);
       if (!changedPaths.length) {
-        return { kind: "blocked", blocker: { kind: "decision_required", reason: "Locked file set has no effective WIP changes to checkpoint." } };
+        return { kind: "blocked", blocker: { kind: "decision_required", reason: "Locked file set has no effective working-change content to checkpoint." } };
       }
       if (changedPaths.some((path) => !refreshed.record.paths.some((root) => covered(root, path)))) {
         return { kind: "blocked", blocker: { kind: "foreign_work", reason: "JJ selected a path outside the active file-set claim." } };
       }
       const unownedFileset = complementFileset(refreshed.record.paths);
-      const beforeUnownedHash = hash(await this.kernel.patchEvidence(active.source, exactChange(wipId), [unownedFileset]));
+      const beforeUnownedHash = hash(await this.kernel.patchEvidence(active.source, exactChange(workingId), [unownedFileset]));
       const operation = await this.kernel.startOperation(active.source, "checkpoint_change", `checkpoint:${claim.claimId}`);
       try {
         await this.fileSets.beginCheckpoint(claim, operation.operationId);
@@ -96,7 +85,7 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
         await this.kernel.runMutation(active.source, [
           "squash",
           "--from",
-          exactChange(wipId),
+          exactChange(workingId),
           "--into",
           exactChange(targetId),
           "--keep-emptied",
@@ -105,23 +94,23 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
       } catch (error) {
         return this.unknown(active.source, operation.operationId, error);
       }
-      const [verifiedWip, verifiedTarget, verifiedCurrent] = await Promise.all([
-        this.resolve(active.source, wipId),
+      const [verifiedWorking, verifiedTarget, verifiedCurrent] = await Promise.all([
+        this.resolve(active.source, workingId),
         this.resolve(active.source, targetId),
         this.kernel.currentChangeId(active.source),
       ]);
-      if (!verifiedWip || !verifiedTarget || verifiedCurrent !== wipId) {
+      if (!verifiedWorking || !verifiedTarget || verifiedCurrent !== workingId) {
         return this.unknown(active.source, operation.operationId, "Checkpoint identity verification failed after squash.");
       }
-      const afterUnownedHash = hash(await this.kernel.patchEvidence(active.source, exactChange(wipId), [unownedFileset]));
-      const remainingOwned = await this.kernel.changedPaths(active.source, exactChange(wipId), filesets);
+      const afterUnownedHash = hash(await this.kernel.patchEvidence(active.source, exactChange(workingId), [unownedFileset]));
+      const remainingOwned = await this.kernel.changedPaths(active.source, exactChange(workingId), filesets);
       if (afterUnownedHash !== beforeUnownedHash || remainingOwned.length) {
-        return this.unknown(active.source, operation.operationId, "Checkpoint did not preserve unrelated WIP evidence or fully extract the locked paths.");
+        return this.unknown(active.source, operation.operationId, "Checkpoint did not preserve unrelated working-change evidence or fully extract the locked paths.");
       }
-      if (verifiedWip.conflicted || verifiedTarget.conflicted) {
+      if (verifiedWorking.conflicted || verifiedTarget.conflicted) {
         const blocker: JjOperationBlocker = {
           kind: "conflicted",
-          changeIds: [verifiedTarget.changeId, verifiedWip.changeId],
+          changeIds: [verifiedTarget.changeId, verifiedWorking.changeId],
           paths: changedPaths,
         };
         await this.kernel.blockOperation(active.source, operation.operationId, blocker);
@@ -133,11 +122,11 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
       }
       const receipt: CheckpointChangeReceipt = {
         checkpointedChangeId: targetId,
-        wipChangeId: wipId,
+        workingChangeId: workingId,
         claimId: claim.claimId,
         changedPaths,
         parentChangeIds: verifiedTarget.parentChangeIds,
-        unownedWipPatchHash: afterUnownedHash,
+        unownedWorkingPatchHash: afterUnownedHash,
         conflicted: false,
         operationId: jjOperationId(operation.operationId),
       };
@@ -164,24 +153,24 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
         dispositions.push({ operationId: operation.operationId, claimId: claim.claimId, classification: "safe_to_reissue" });
         continue;
       }
-      const wipId = changeId(claim.wipChangeId);
+      const workingId = changeId(claim.workingChangeId);
       const targetId = changeId(claim.targetChangeId);
-      const [wip, target] = await Promise.all([this.resolve(source, wipId), this.resolve(source, targetId)]);
+      const [working, target] = await Promise.all([this.resolve(source, workingId), this.resolve(source, targetId)]);
       const filesets = claim.paths.map(literalRootFileset);
-      const [remainingWip, targetPaths] = await Promise.all([
-        this.kernel.changedPaths(source, exactChange(wipId), filesets).catch((): string[] => ["<unresolved>"]),
+      const [remainingWorking, targetPaths] = await Promise.all([
+        this.kernel.changedPaths(source, exactChange(workingId), filesets).catch((): string[] => ["<unresolved>"]),
         this.kernel.changedPaths(source, exactChange(targetId), filesets).catch((): string[] => []),
       ]);
       const expectedPaths = claim.recovery.mutatedPaths;
-      if (wip && target && remainingWip.length === 0 && expectedPaths.length > 0 && expectedPaths.every((path) => targetPaths.includes(path))) {
+      if (working && target && remainingWorking.length === 0 && expectedPaths.length > 0 && expectedPaths.every((path) => targetPaths.includes(path))) {
         const receipt: CheckpointChangeReceipt = {
           checkpointedChangeId: targetId,
-          wipChangeId: wipId,
+          workingChangeId: workingId,
           claimId: claim.claimId,
           changedPaths: expectedPaths,
           parentChangeIds: target.parentChangeIds,
-          unownedWipPatchHash: hash(await this.kernel.patchEvidence(source, exactChange(wipId), [complementFileset(claim.paths)])),
-          conflicted: wip.conflicted || target.conflicted,
+          unownedWorkingPatchHash: hash(await this.kernel.patchEvidence(source, exactChange(workingId), [complementFileset(claim.paths)])),
+          conflicted: working.conflicted || target.conflicted,
           operationId: jjOperationId(operation.operationId),
         };
         await this.kernel.completeOperation(source, operation.operationId, receipt);
@@ -217,12 +206,14 @@ export class DeterministicSharedCheckpointer implements SharedChangeCheckpointer
 }
 
 export function createJjBaselineVerifier(kernel: JjRepositoryKernel): FileSetBaselineVerifier {
-  return async (source, wipChangeId, paths) => {
+  return async (source, paths) => {
     const filesets = paths.map(literalRootFileset);
-    const patch = await kernel.patchEvidence(source, exactChange(changeId(wipChangeId)), filesets);
+    const workingChangeId = await kernel.currentChangeId(source);
+    const patch = await kernel.patchEvidence(source, exactChange(workingChangeId), filesets);
     return {
+      workingChangeId,
       patchHash: hash(patch),
-      changedPaths: await kernel.changedPaths(source, exactChange(changeId(wipChangeId)), filesets),
+      changedPaths: await kernel.changedPaths(source, exactChange(workingChangeId), filesets),
     };
   };
 }

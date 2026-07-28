@@ -34,37 +34,27 @@ export interface JjStatus {
   readonly conflicted: boolean;
   readonly immutable: boolean;
   readonly parentChangeIds: readonly ChangeId[];
-  readonly trackedWipChangeId?: ChangeId;
-  readonly privateProtection: "present" | "missing";
-}
-
-export interface EnsureWipReceipt {
-  readonly wipChangeId: ChangeId;
-  readonly operationId: JjOperationId;
-  readonly disposition: "existing" | "described_existing" | "created";
-  readonly description: ChangeDescription;
-  readonly privateProtection: "present" | "missing";
 }
 
 export interface InsertChangeReceipt {
   readonly insertedChangeId: ChangeId;
-  readonly wipChangeId: ChangeId;
+  readonly baseChangeId: ChangeId;
+  readonly workingChangeId: ChangeId;
   readonly owner: ChildContextId;
   readonly description: ChangeDescription;
   readonly parentChangeIds: readonly ChangeId[];
-  readonly priorWipParentChangeIds: readonly ChangeId[];
-  readonly wipParentChangeIds: readonly ChangeId[];
-  readonly wipPatchHash: string;
+  readonly workingParentChangeIds: readonly ChangeId[];
+  readonly workingPatchHash: string;
   readonly operationId: JjOperationId;
 }
 
 export interface CheckpointChangeReceipt {
   readonly checkpointedChangeId: ChangeId;
-  readonly wipChangeId: ChangeId;
+  readonly workingChangeId: ChangeId;
   readonly claimId: string;
   readonly changedPaths: readonly string[];
   readonly parentChangeIds: readonly ChangeId[];
-  readonly unownedWipPatchHash: string;
+  readonly unownedWorkingPatchHash: string;
   readonly conflicted: boolean;
   readonly operationId: JjOperationId;
 }
@@ -131,10 +121,6 @@ export interface JjStatusReader {
   inspectStatus(source: SourceWorkspaceHandle): Promise<JjStatus>;
 }
 
-export interface WipEnsurer {
-  ensureWip(source: SourceWorkspaceHandle): Promise<JjOperationResult<EnsureWipReceipt>>;
-}
-
 export interface ChangeInserter {
   insertChange(
     source: SourceWorkspaceHandle,
@@ -177,7 +163,6 @@ export interface WorkspaceIntegrator {
 
 export interface JjOperations
   extends JjStatusReader,
-    WipEnsurer,
     ChangeInserter,
     SharedChangeCheckpointer,
     WorkspaceCheckpointer,

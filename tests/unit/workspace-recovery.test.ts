@@ -162,7 +162,7 @@ test("workspace recovery reconstructs an exact missing managed attachment", asyn
   const fixture = await RealJjFixture.create("pi-tai-reconstruct-attachment-");
   try {
     await fixture.seed({ changes: [{ description: "base", files: { "base.txt": "base\n" } }] });
-    const runtime = new IsolatedJjRuntime({ stateRoot: join(fixture.root, "state"), executor: fixture.executor }); const source = await runtime.shared.openSource(fixture.repoPath); await runtime.shared.operations.ensureWip(source);
+    const runtime = new IsolatedJjRuntime({ stateRoot: join(fixture.root, "state"), executor: fixture.executor }); const source = await runtime.shared.openSource(fixture.repoPath);
     const created = await runtime.operations.createWorkspace(source, { name: workspaceName("reconstruct"), ownerContextId: "worker-1", rootSessionId: "root-1" }); if (created.kind !== "completed") throw new Error(); await runtime.operations.releaseWriter(created.receipt.lease);
     await rm(created.receipt.path, { recursive: true, force: true }); const before = await runtime.recoveryInspector.inspect(created.receipt.workspaceId); assert.equal(runtime.recoveryPlanner.plan(before).disposition, "reconstructable");
     const receipt = await runtime.operations.reconstructWorkspaceAttachment(created.receipt.workspaceId); assert.equal(receipt.reconstructed, true); assert.notEqual(receipt.headChangeId, created.receipt.workspaceHeadChangeId);

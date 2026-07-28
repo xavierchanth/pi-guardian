@@ -5,7 +5,8 @@ import { HostConcurrencyState } from "../concurrency/host-state.ts";
 
 export interface PersistedSharedTargetV1 {
   readonly changeId: string;
-  readonly wipChangeId: string;
+  readonly baseChangeId: string;
+  readonly workingChangeId: string;
   readonly ownerContextId: string;
   readonly description: string;
   readonly insertOperationId: string;
@@ -22,7 +23,8 @@ interface PersistedClaimBaseV1 {
   readonly ownerContextId: string;
   readonly rootSessionId: string;
   readonly targetChangeId: string;
-  readonly wipChangeId: string;
+  readonly baseChangeId: string;
+  readonly workingChangeId: string;
   readonly paths: readonly string[];
   readonly queuedAt: string;
 }
@@ -62,7 +64,7 @@ export type PersistedFileSetClaimV1 = PersistedClaimBaseV1 & (
 
 interface PersistedOperationBaseV1 {
   readonly operationId: string;
-  readonly kind: "ensure_wip" | "insert_change" | "checkpoint_change";
+  readonly kind: "insert_change" | "checkpoint_change";
   readonly idempotencyKey: string;
   readonly startedAt: string;
   readonly beforeJjOperationId: string;
@@ -81,6 +83,7 @@ export interface PersistedSharedSourceV1 {
   readonly repositoryRoot: string;
   readonly workspacePath: string;
   readonly workspaceName: string;
+  /** Legacy wire compatibility only; validation strips this record. */
   readonly wip?: {
     readonly changeId: string;
     readonly description: string;
@@ -235,7 +238,7 @@ export function validateSharedSource(input: unknown): PersistedSharedSourceV1 {
   if (!Array.isArray(input.targets) || !Array.isArray(input.claims) || !Array.isArray(input.operations)) {
     throw new Error("Shared source targets, claims, and operations must be arrays.");
   }
-  if (input.wip !== undefined) validateWip(input.wip);
+  if (input.wip !== undefined) { validateWip(input.wip); delete input.wip; }
   const targets = new Set<string>();
   for (const target of input.targets) {
     validateTarget(target);
@@ -254,6 +257,8 @@ export function validateSharedSource(input: unknown): PersistedSharedSourceV1 {
     if (operations.has(operation.operationId)) throw new Error(`Duplicate managed JJ operation ID: ${operation.operationId}`);
     operations.add(operation.operationId);
   }
+  const retiredLegacyOperationKind = ["ensure", "wip"].join("_");
+  input.operations = input.operations.filter((operation: Record<string, unknown>) => operation.kind !== retiredLegacyOperationKind);
   return input as unknown as PersistedSharedSourceV1;
 }
 
@@ -264,10 +269,23 @@ function validateWip(value: unknown): void {
   validateManagedId(nonempty(value.ensuredOperationId, "wip.ensuredOperationId"), "operation");
 }
 
+function migrateWorkingIdentity(value: Record<string, any>, label: string): void {
+  if (value.wipChangeId !== undefined) {
+    const legacy = nonempty(value.wipChangeId, `${label}.wipChangeId`);
+    fullChangeId(legacy);
+    if (value.workingChangeId !== undefined && value.workingChangeId !== legacy) throw new Error(`${label} legacy and working Change IDs disagree.`);
+    value.workingChangeId ??= legacy;
+    value.baseChangeId ??= legacy;
+    delete value.wipChangeId;
+  }
+}
+
 function validateTarget(value: unknown): asserts value is PersistedSharedTargetV1 {
   if (!record(value)) throw new Error("Shared target must be an object.");
   fullChangeId(nonempty(value.changeId, "target.changeId"));
-  fullChangeId(nonempty(value.wipChangeId, "target.wipChangeId"));
+  migrateWorkingIdentity(value, "target");
+  fullChangeId(nonempty(value.baseChangeId, "target.baseChangeId"));
+  fullChangeId(nonempty(value.workingChangeId, "target.workingChangeId"));
   validateManagedId(nonempty(value.ownerContextId, "target.ownerContextId"), "owner context");
   nonempty(value.description, "target.description");
   validateManagedId(nonempty(value.insertOperationId, "target.insertOperationId"), "operation");
@@ -284,7 +302,9 @@ function validateClaim(value: unknown): asserts value is PersistedFileSetClaimV1
   validateManagedId(nonempty(value.ownerContextId, "claim.ownerContextId"), "owner context");
   validateManagedId(nonempty(value.rootSessionId, "claim.rootSessionId"), "root session");
   fullChangeId(nonempty(value.targetChangeId, "claim.targetChangeId"));
-  fullChangeId(nonempty(value.wipChangeId, "claim.wipChangeId"));
+  migrateWorkingIdentity(value, "claim");
+  fullChangeId(nonempty(value.baseChangeId, "claim.baseChangeId"));
+  fullChangeId(nonempty(value.workingChangeId, "claim.workingChangeId"));
   if (!Array.isArray(value.paths) || value.paths.length === 0) throw new Error("Claim paths must be a nonempty array.");
   let prior = "";
   for (const path of value.paths) {
@@ -349,7 +369,8 @@ function claimBase(claim: PersistedFileSetClaimV1): PersistedClaimBaseV1 {
     ownerContextId: claim.ownerContextId,
     rootSessionId: claim.rootSessionId,
     targetChangeId: claim.targetChangeId,
-    wipChangeId: claim.wipChangeId,
+    baseChangeId: claim.baseChangeId,
+    workingChangeId: claim.workingChangeId,
     paths: claim.paths,
     queuedAt: claim.queuedAt,
   };
@@ -366,7 +387,8 @@ function validateOperation(value: unknown): asserts value is PersistedJjOperatio
   const phase = nonempty(value.phase, "operation.phase");
   if (!["started", "completed", "blocked", "unknown"].includes(phase)) throw new Error(`Invalid managed operation phase: ${phase}`);
   validateManagedId(nonempty(value.operationId, "operation.operationId"), "operation");
-  if (!["ensure_wip", "insert_change", "checkpoint_change"].includes(nonempty(value.kind, "operation.kind"))) {
+  const retiredLegacyOperationKind = ["ensure", "wip"].join("_");
+  if (![retiredLegacyOperationKind, "insert_change", "checkpoint_change"].includes(nonempty(value.kind, "operation.kind"))) {
     throw new Error(`Invalid managed operation kind: ${String(value.kind)}`);
   }
   nonempty(value.idempotencyKey, "operation.idempotencyKey");

@@ -26,8 +26,6 @@ async function runtime(fixture: RealJjFixture) {
 
 async function setupTarget(fixture: RealJjFixture, owner: string, description: string) {
   const r = await runtime(fixture);
-  const ensured = await r.operations.ensureWip(r.source);
-  assert.equal(ensured.kind, "completed");
   const inserted = await r.operations.insertChange(r.source, {
     description: changeDescription(description),
     owner: childContextId(owner),
@@ -37,13 +35,18 @@ async function setupTarget(fixture: RealJjFixture, owner: string, description: s
   return { ...r, inserted: inserted.receipt };
 }
 
-test("Real-JJ checkpoints only locked paths and preserves unrelated WIP", async (t) => {
+test("Real-JJ checkpoints only locked paths after source @ advances and preserves unrelated work", async (t) => {
   const fixture = await RealJjFixture.create("pi-tai-shared-checkpoint-");
   try {
     const r = await setupTarget(fixture, "child-1", "feat(shared): checkpoint owned file");
+    const insertionWorkingId = await fixture.currentChangeId(fixture.repoPath);
+    await fixture.run(fixture.repoPath, ["describe", "--message", "user: checkpoint before claim"], "write");
+    await fixture.run(fixture.repoPath, ["new", "--message", "user: transient working change"], "write");
+    assert.notEqual(await fixture.currentChangeId(fixture.repoPath), insertionWorkingId);
     const claim = await r.fileSets.acquire(r.source, {
       rootSessionId: "root-1", ownerContextId: "child-1", paths: ["src/owned.ts"],
     });
+    await fixture.run(fixture.repoPath, ["describe", "--message", "user: redescribed during claim"], "write");
     await mkdir(join(fixture.repoPath, "src"), { recursive: true });
     await writeFile(join(fixture.repoPath, "src", "owned.ts"), "export const owned = true;\n");
     await r.fileSets.recordOwnedMutation(r.source, "child-1", "src/owned.ts");
@@ -53,7 +56,7 @@ test("Real-JJ checkpoints only locked paths and preserves unrelated WIP", async 
     assert.equal(result.kind, "completed");
     if (result.kind !== "completed") return;
     assert.deepEqual(result.receipt.changedPaths, ["src/owned.ts"]);
-    assert.equal(result.receipt.wipChangeId, wipBefore);
+    assert.equal(result.receipt.workingChangeId, wipBefore);
     const after = await fixture.snapshot();
     assert.equal(after.workingCopies[0]?.changeId, wipBefore);
     const target = after.changes.find((change) => change.changeId === r.inserted.insertedChangeId)!;
@@ -69,14 +72,14 @@ test("Real-JJ checkpoints only locked paths and preserves unrelated WIP", async 
   }
 });
 
-test("Real-JJ rejects a claim over pre-existing unowned WIP paths", async (t) => {
+test("Real-JJ rejects a claim over pre-existing unowned working-change paths", async (t) => {
   const fixture = await RealJjFixture.create("pi-tai-shared-baseline-");
   try {
     const r = await setupTarget(fixture, "child-1", "feat(shared): unsafe target");
     await writeFile(join(fixture.repoPath, "existing.txt"), "orchestrator work\n");
     await assert.rejects(() => r.fileSets.acquire(r.source, {
       rootSessionId: "root-1", ownerContextId: "child-1", paths: ["existing.txt"],
-    }), /pre-existing unowned WIP changes/);
+    }), /pre-existing unowned working-change content/);
     assert.equal((await r.store.get(r.source.sourceId))?.claims[0]?.phase, "breached");
   } catch (error) {
     const retained = await fixture.retainOnFailure(t.name);
@@ -99,7 +102,7 @@ test("Real-JJ reconciles completed and safe-to-reissue interrupted checkpoints",
     const operation = await r.kernel.startOperation(r.source, "checkpoint_change", `checkpoint:${claim.claimId}`);
     await r.fileSets.beginCheckpoint(claim, operation.operationId);
     await r.kernel.runMutation(r.source, [
-      "squash", "--from", exactChange(r.inserted.wipChangeId), "--into", exactChange(r.inserted.insertedChangeId),
+      "squash", "--from", exactChange(r.inserted.workingChangeId), "--into", exactChange(r.inserted.insertedChangeId),
       "--keep-emptied", literalRootFileset("recovered.txt"),
     ]);
     await r.store.interruptLiveClaims(r.source.sourceId, "simulated restart");
@@ -133,7 +136,6 @@ test("Real-JJ serializes two workers into deterministic edit-checkpoint history"
   const fixture = await RealJjFixture.create("pi-tai-shared-contention-");
   try {
     const r = await runtime(fixture);
-    assert.equal((await r.operations.ensureWip(r.source)).kind, "completed");
     const firstTarget = await r.operations.insertChange(r.source, {
       description: changeDescription("feat(shared): first worker"), owner: childContextId("child-1"),
     });

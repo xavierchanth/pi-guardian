@@ -16,13 +16,13 @@ import type {
 import { childContextId, fileSetClaimId, rootSessionId } from "./ids.ts";
 
 export interface FileSetBaseline {
+  readonly workingChangeId: string;
   readonly patchHash: string;
   readonly changedPaths: readonly string[];
 }
 
 export type FileSetBaselineVerifier = (
   source: SourceWorkspaceHandle,
-  wipChangeId: string,
   paths: readonly string[],
 ) => Promise<FileSetBaseline>;
 
@@ -94,7 +94,8 @@ export class SharedFileSetCoordinator {
       ownerContextId: childContextId(input.ownerContextId),
       rootSessionId: rootSessionId(input.rootSessionId),
       targetChangeId: target.changeId,
-      wipChangeId: target.wipChangeId,
+      baseChangeId: target.baseChangeId,
+      workingChangeId: target.workingChangeId,
       paths,
       queuedAt: at,
     };
@@ -301,7 +302,7 @@ export class SharedFileSetCoordinator {
         earlierBlocked.push(current);
         continue;
       }
-      const baseline = await this.verifyBaseline(source, current.wipChangeId, current.paths);
+      const baseline = await this.verifyBaseline(source, current.paths);
       const fingerprints = await fingerprintSet(sourceRecord.workspacePath, current.paths);
       const recovery = [...sourceRecord.claims].reverse().find((claim) =>
         claim.phase === "interrupted"
@@ -314,7 +315,7 @@ export class SharedFileSetCoordinator {
       const recoveryEvidence = recovery?.phase === "interrupted" ? recovery.recovery : undefined;
       const at = this.now();
       if (baseline.changedPaths.length && !recoveryEvidence) {
-        const reason = `Claimed paths contain pre-existing unowned WIP changes: ${baseline.changedPaths.join(", ")}`;
+        const reason = `Claimed paths contain pre-existing unowned working-change content: ${baseline.changedPaths.join(", ")}`;
         await this.store.update(source.sourceId, (record) => ({
           ...record,
           claims: record.claims.map((claim): PersistedFileSetClaimV1 => claim.claimId === current.claimId && claim.phase === "queued"
@@ -331,12 +332,12 @@ export class SharedFileSetCoordinator {
       await this.store.update(source.sourceId, (record) => ({
         ...record,
         claims: record.claims.map((claim): PersistedFileSetClaimV1 => claim.claimId === current.claimId && claim.phase === "queued"
-          ? { ...claim, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths }
+          ? { ...claim, phase: "active", workingChangeId: baseline.workingChangeId, acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths }
           : claim),
         updatedAt: at,
       }));
       activeIds.add(current.claimId);
-      activeClaims.push({ ...current, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths });
+      activeClaims.push({ ...current, workingChangeId: baseline.workingChangeId, phase: "active", acquiredAt: at, fingerprints, baselinePatchHash: baseline.patchHash, mutatedPaths });
       this.active.set(source.sourceId, activeIds);
       this.removeWaiter(waiter);
       waiter.resolve(checkpointableFileSetClaim(fileSetClaimId(current.claimId)));
@@ -414,7 +415,8 @@ function claimBase(claim: PersistedFileSetClaimV1) {
     ownerContextId: claim.ownerContextId,
     rootSessionId: claim.rootSessionId,
     targetChangeId: claim.targetChangeId,
-    wipChangeId: claim.wipChangeId,
+    baseChangeId: claim.baseChangeId,
+    workingChangeId: claim.workingChangeId,
     paths: claim.paths,
     queuedAt: claim.queuedAt,
   };

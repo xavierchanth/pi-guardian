@@ -21,11 +21,13 @@ export class WorkspaceFileSetCoordinator {
     this.adapter = new WorkspaceClaimStoreAdapter(options.workspaces);
     this.coordinator = new SharedFileSetCoordinator({
       store: this.adapter,
-      verifyBaseline: async (source, wipChangeId, paths) => {
+      verifyBaseline: async (source, paths) => {
         const id = source.sourceId as unknown as WorkspaceId;
         const filesets = paths.map(literalRootFileset);
-        const patch = await this.repository.patchEvidence(id, exactChange(changeId(wipChangeId)), filesets);
-        return { patchHash: hash(patch), changedPaths: await this.repository.changedPaths(id, exactChange(changeId(wipChangeId)), filesets) };
+        const record = await this.requireWorkspace(id);
+        const workingChangeId = record.identity.expectedHeadChangeId;
+        const patch = await this.repository.patchEvidence(id, exactChange(changeId(workingChangeId)), filesets);
+        return { workingChangeId, patchHash: hash(patch), changedPaths: await this.repository.changedPaths(id, exactChange(changeId(workingChangeId)), filesets) };
       },
       ...(options.now ? { now: options.now } : {}),
     });
@@ -44,7 +46,7 @@ export class WorkspaceFileSetCoordinator {
       if (target.changeId === identity.expectedHeadChangeId || !target.empty) throw new Error("Workspace target allocation did not create one empty assigned target.");
       await this.workspaces.update(id, (current) => {
         if (current.phase !== "active" || current.identity.expectedHeadChangeId !== identity.expectedHeadChangeId) throw new Error("Workspace identity changed during target assignment.");
-        return { ...current, targets: [...current.targets, { changeId: target.changeId, wipChangeId: identity.expectedHeadChangeId, ownerContextId: childContextId(input.ownerContextId), description: changeDescription(input.description), insertOperationId: operationId, createdAt: at }], updatedAt: this.now() };
+        return { ...current, targets: [...current.targets, { changeId: target.changeId, baseChangeId: identity.expectedHeadChangeId, workingChangeId: identity.expectedHeadChangeId, ownerContextId: childContextId(input.ownerContextId), description: changeDescription(input.description), insertOperationId: operationId, createdAt: at }], updatedAt: this.now() };
       });
       return target.changeId;
     });
@@ -76,7 +78,7 @@ class WorkspaceClaimStoreAdapter implements SharedSourceStore {
     await this.workspaces.update(sourceId, (record) => {
       if (record.phase !== "active") throw new Error(`Workspace ${sourceId} is not active.`);
       projected = reducer(project(record));
-      if (projected.sourceId !== sourceId || projected.wip?.changeId !== record.identity.expectedHeadChangeId) throw new Error("Workspace claim update changed stable identity.");
+      if (projected.sourceId !== sourceId || projected.targets.some((target) => target.baseChangeId !== record.identity.expectedHeadChangeId || target.workingChangeId !== record.identity.expectedHeadChangeId)) throw new Error("Workspace claim update changed stable identity.");
       return { ...record, targets: projected.targets, claims: projected.claims, updatedAt: projected.updatedAt };
     });
     return projected;
@@ -91,7 +93,6 @@ function project(record: Extract<Awaited<ReturnType<IsolatedWorkspaceStore["get"
     repositoryRoot: record.identity.path,
     workspacePath: record.identity.path,
     workspaceName: record.identity.name,
-    wip: { changeId: record.identity.expectedHeadChangeId, description: "wip: isolated workspace", ensuredOperationId: record.operations[0]?.operationId ?? "operation-initial" },
     targets: record.targets,
     claims: record.claims,
     operations: [],

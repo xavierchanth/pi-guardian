@@ -1128,7 +1128,7 @@ export function registerSubagents(
   pi.registerTool({
     name: "jj_concurrency_status",
     label: "JJ Concurrency Status",
-    description: "Inspect bounded shared-source WIP, target, claim, and recovery state without mutating JJ.",
+    description: "Inspect bounded shared-source target, claim, and recovery state without mutating JJ.",
     parameters: Type.Object({}),
     async execute(_id, _params, _signal, _onUpdate, ctx) {
       if (!currentAgent) throw new Error("JJ concurrency status requires an active Pi-Tai role.");
@@ -1146,22 +1146,9 @@ export function registerSubagents(
   });
 
   pi.registerTool({
-    name: "ensure_wip_change",
-    label: "Ensure WIP Change",
-    description: "Verify or canonically describe the root orchestrator's empty shared-source orchestration WIP without relabeling unknown work.",
-    parameters: Type.Object({}),
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
-      requireWorkspaceOrchestrator(currentAgent);
-      const source = await sharedJj.openSource(ctx.cwd);
-      const outcome = await sharedJj.operations.ensureWip(source);
-      return result(outcome.kind === "completed" ? `Shared WIP ${outcome.receipt.wipChangeId} is ready.` : `Shared WIP preparation stopped: ${outcome.blocker.kind}.`, outcome);
-    },
-  });
-
-  pi.registerTool({
     name: "insert_change",
     label: "Insert Shared Change",
-    description: "Insert one named empty shared target before the same WIP and bind it to a direct shared worker context.",
+    description: "Insert one named empty shared target before the current source @ and bind it to a direct shared worker context.",
     promptGuidelines: [
       "Spawn the shared worker first with instructions not to edit until assigned, then insert_change for that child context and message it to acquire its complete file set.",
       "The description must be a meaningful Conventional Commit description for the bounded shared work.",

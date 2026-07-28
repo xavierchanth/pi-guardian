@@ -20,10 +20,10 @@ function source(root: string): PersistedSharedSourceV1 {
     repositoryRoot: root,
     workspacePath: join(root, "workspace"),
     workspaceName: "default",
-    wip: { changeId: CHANGE_A, description: "wip: orchestrator workspace", ensuredOperationId: "operation-1" },
     targets: [{
       changeId: CHANGE_B,
-      wipChangeId: CHANGE_A,
+      baseChangeId: CHANGE_A,
+      workingChangeId: CHANGE_A,
       ownerContextId: "child-1",
       description: "feat: bounded work",
       insertOperationId: "operation-2",
@@ -35,7 +35,8 @@ function source(root: string): PersistedSharedSourceV1 {
       ownerContextId: "child-1",
       rootSessionId: "root-1",
       targetChangeId: CHANGE_B,
-      wipChangeId: CHANGE_A,
+      baseChangeId: CHANGE_A,
+      workingChangeId: CHANGE_A,
       paths: ["src/a.ts"],
       queuedAt: "2026-01-01T00:00:00.000Z",
       acquiredAt: "2026-01-01T00:00:01.000Z",
@@ -69,6 +70,26 @@ test("shared source store round trips strict versioned state", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("shared source validation migrates and strips legacy managed-WIP records", () => {
+  const legacy = structuredClone(source("/tmp/repo")) as any;
+  legacy.wip = { changeId: CHANGE_A, description: "wip: legacy", ensuredOperationId: "operation-1" };
+  legacy.targets[0].wipChangeId = legacy.targets[0].workingChangeId;
+  delete legacy.targets[0].baseChangeId;
+  delete legacy.targets[0].workingChangeId;
+  legacy.claims[0].wipChangeId = legacy.claims[0].workingChangeId;
+  delete legacy.claims[0].baseChangeId;
+  delete legacy.claims[0].workingChangeId;
+  legacy.operations.unshift({ phase: "completed", operationId: "operation-1", kind: "ensure_wip", idempotencyKey: "ensure", startedAt: "2026-01-01T00:00:00.000Z", beforeJjOperationId: "jj-op-0", completedAt: "2026-01-01T00:00:01.000Z", afterJjOperationId: "jj-op-1", receipt: {} });
+  const migrated = validateSharedSource(legacy);
+  assert.equal(migrated.wip, undefined);
+  assert.equal(migrated.targets[0]?.baseChangeId, CHANGE_A);
+  assert.equal(migrated.targets[0]?.workingChangeId, CHANGE_A);
+  assert.equal(migrated.claims[0]?.baseChangeId, CHANGE_A);
+  assert.equal(migrated.claims[0]?.workingChangeId, CHANGE_A);
+  assert.equal(migrated.operations.some((operation) => (operation as any).kind === "ensure_wip"), false);
+  assert.equal("wipChangeId" in (migrated.targets[0] as any), false);
 });
 
 test("shared source validation rejects invalid phase combinations and paths", () => {
@@ -109,7 +130,8 @@ test("shared source updates serialize and restart interrupts every live claim", 
       ownerContextId: "child-1",
       rootSessionId: "root-1",
       targetChangeId: CHANGE_B,
-      wipChangeId: CHANGE_A,
+      baseChangeId: CHANGE_A,
+      workingChangeId: CHANGE_A,
       paths: ["src/a.ts"],
       queuedAt: "2026-01-01T00:00:00.000Z",
       phase: "interrupted",
