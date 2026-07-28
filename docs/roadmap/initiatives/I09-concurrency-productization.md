@@ -42,9 +42,11 @@ Concurrency has complete custody/closure semantics, bounded multi-client project
 - Restart verifies existing session custody, interrupts unproved writers, resumes only private SDK journals with durable identity, and refuses ambiguous JJ mutation.
 - Cleanup is receipt/custody gated and refuses to discard a nonempty session orchestration change.
 - One-way migration imports only quiescent identity-proved v3 records and quarantines subprocess state, unproved writers, terminal records without exact cycle identity, ambiguous workspaces, and conflicting mirrors.
+- Canonical role projections expose only Orchestrator, Implementation Lead, Documenter, Worker, Reviewer, Scout, and Researcher. Persisted `thinker` and `planner` identifiers are accepted only as legacy migration inputs and normalize to canonical roles.
+- UI and accounting report canonical role names, explicit approved-plan state, isolated workspace custody, and review/integration status.
 
 ## Validation
 
-- TypeScript typecheck and **238** package/runtime/integration/Real-JJ tests pass.
+- TypeScript typecheck and the full package/runtime/integration/Real-JJ test suite pass.
 - Full Rust workspace tests pass, including Host restart continuity, aggregate CAS/idempotency, exact accounting, protocol fixtures, ACP reconnect, and runtime supervision.
 - Isolated Real-JJ tests prove repository enrollment, multi-session workspace allocation/recovery/cleanup, isolated review/integration, shared claims, and preservation of invoking user `@`.

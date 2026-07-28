@@ -25,13 +25,13 @@ Real-JJ tests cover dirty-source allocation, repeated identity tracking, checkpo
 
 ## Outcome
 
-The Orchestrator can allocate tracked isolated JJ workspaces; Implementation Leads, Documenters, and Workers checkpoint coherent units under scoped ownership; workspaces can rebase explicitly, freeze exact review boundaries, and prove no-effect work.
+The Orchestrator can allocate tracked isolated JJ workspaces for an Implementation Lead or Documenter. An Implementation Lead owns product delivery in its workspace and may implement directly or delegate bounded, claim-scoped work to Workers in that same workspace. A Documenter owns only its explicitly assigned documentation paths and cannot delegate. Workspaces can rebase explicitly, freeze exact review boundaries, and prove no-effect work.
 
 ## Work slices
 
 1. **Delivered:** authoritative workspace persistence and exact linked-workspace repository access.
 2. **Delivered:** allocation from source `@-` with source WIP/root/head identity capture and startup-failure custody.
-3. **Delivered:** workspace-wide writer leases, parent/child transfer, guarded mutation, and exact checkpoint head transitions.
+3. **Delivered:** workspace-wide writer leases, Implementation Lead-to-Worker transfer, disjoint file claims, guarded mutation, and exact checkpoint head transitions.
 4. **Delivered:** manual `rebase_workspace` onto source parent/exact local Change ID.
 5. **Delivered:** safe empty/naming normalization, report freeze, content-tip derivation, and no-change proof.
 6. **Delivered:** restart reconciliation reconstructs matching allocation, checkpoint, rebase, and normalization boundaries; safe-to-resume and attention-required states remain explicit.
@@ -51,6 +51,6 @@ The Orchestrator can allocate tracked isolated JJ workspaces; Implementation Lea
 
 - Implementation Leads, Documenters, and Workers cannot create nested workspaces or use arbitrary JJ mutation.
 - Every frozen report has exact root/head/content-tip and no live writer.
-- One workspace has at most one writable context.
+- Each workspace has one owning Implementation Lead or Documenter; bounded Worker writes remain inside the owning Implementation Lead workspace, and overlapping claims cannot be active together.
 - Workspace rebase never fetches or publishes.
 - Real-JJ tests cover normal, conflict, interruption, and identity-drift cases.
