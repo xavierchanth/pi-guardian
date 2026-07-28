@@ -36,6 +36,7 @@ test("packaged agent definitions provide the intended acyclic hierarchy", () => 
   assert.equal(catalog.root.allowedChildren.includes("worker"), false);
   for (const name of ["orchestrator", "implementation-lead", "worker", "documenter"]) assert.equal(catalog.byName.get(name)?.tools.includes("update_plan"), false, name);
   assert.ok(catalog.root.tools.includes("task_create"));
+  assert.ok(catalog.root.tools.includes("request_plan_approval"));
   assert.ok(catalog.byName.get("implementation-lead")?.tools.includes("task_plan"));
   assert.ok(catalog.byName.get("reviewer")?.tools.includes("inspect_workspace_review"));
   assert.ok(catalog.byName.get("reviewer")?.tools.includes("submit_workspace_review"));
@@ -88,6 +89,7 @@ test("packaged delegating prompts require pushed-event acknowledgement before co
   assert.match(catalog.root.systemPrompt, /Every nonempty range must pass an independent Reviewer/);
   assert.match(catalog.root.systemPrompt, /work with the user as a design partner/i);
   assert.match(catalog.root.systemPrompt, /explicitly approves the current plan/);
+  assert.match(catalog.root.systemPrompt, /`request_plan_approval`/);
   assert.match(catalog.root.systemPrompt, /Never launch a generic Worker directly/);
   assert.match(catalog.root.systemPrompt, /Every writable delegated task runs in its own managed workspace/);
   assert.match(catalog.byName.get("documenter")?.systemPrompt ?? "", /Modify only explicitly assigned Markdown documentation paths/);

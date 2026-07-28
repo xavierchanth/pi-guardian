@@ -37,7 +37,9 @@ test("task plans expose effective revisions to executors and full history to orc
     await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("Implement M4") }), /distinct subsequent user message/);
     await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I have another question", "user-question-1") }), /does not explicitly approve/);
     for (const [content, messageId] of [["Can you proceed with this plan?", "user-question-2"], ["Should we implement this plan?", "user-question-3"], ["Do you approve this plan?", "user-question-4"], ["I do not approve this plan", "user-rejection-1"], ["I approved the previous plan, but this one needs changes", "user-rejection-2"], ["This looks good, but wait before proceeding", "user-rejection-3"]] as const) await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user(content, messageId) }), /does not explicitly approve/);
-    const approval = await service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I approve this plan", "user-approval-1") });
+    await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I approve this plan: plan-stale.", "user-stale-approval-1") }), /different plan revision/);
+    const currentRevisionId = (await service.get(task.taskId))!.planRevisions.at(-1)!.revisionId;
+    const approval = await service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user(`I approve this plan: ${currentRevisionId}.`, "user-approval-1") });
     assert.equal((await service.currentApproval(task.taskId))?.approvalId, approval.approvalId);
     const implementationLead = await service.assign(task.taskId, {
       ownerRole: "implementation-lead",

@@ -735,6 +735,83 @@ test("acknowledging a terminal child attributes its full tree usage exactly once
   assert.equal(second.usage, undefined);
 });
 
+test("orchestrator can prompt the user to approve or deny the current persisted plan", async () => {
+  const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
+  const tools = new Map<string, any>();
+  const sent: Array<{ message: string; options: unknown }> = [];
+  let active: string[] = [];
+  let effort = "high";
+  const pi = {
+    on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
+    registerCommand() {},
+    registerTool(tool: { name: string }) { tools.set(tool.name, tool); },
+    getActiveTools: () => [...active],
+    getAllTools: () => [...new Set([...TOOL_NAMES, ...tools.keys()])].map((name) => ({ name })),
+    setActiveTools(next: string[]) { active = [...next]; },
+    appendEntry() {},
+    getThinkingLevel: () => effort,
+    setThinkingLevel(next: string) { effort = next; },
+    setModel: async () => true,
+    sendUserMessage(message: string, options: unknown) { sent.push({ message, options }); },
+  } as unknown as ExtensionAPI;
+  const revision = {
+    revisionId: "plan-current",
+    markdown: Array.from({ length: 40 }, (_, index) => `${index + 1}. Plan step ${index + 1}`).join("\n"),
+  };
+  registerSubagents(pi, {
+    runtime: "legacy-child-process",
+    store: {} as DelegationStore,
+    orchestrator: {} as SubagentOrchestrator,
+    isolatedJj: {
+      initialize: async () => undefined,
+      tasks: { findRoot: async () => ({ taskId: "task-root", planRevisions: [revision] }) },
+    } as any,
+    discoverAgents: () => agentCatalog(),
+    loadInstructions: () => ({ system: "" }),
+  });
+  let selected = "Approve";
+  const ctx = {
+    mode: "tui", hasUI: true, cwd: "/repo", isProjectTrusted: () => true,
+    modelRegistry: { find: () => ({ provider: "openai-codex", id: "gpt-5.6-sol" }) },
+    sessionManager: {
+      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "orchestrator" } }],
+      getSessionId: () => "root-session", getSessionFile: () => "/session.jsonl",
+    },
+    ui: {
+      notify() {}, setWidget() {},
+      custom(factory: Function) {
+        return new Promise<void>((resolve) => {
+          const component = factory({ requestRender() {} }, { fg: (_color: string, text: string) => text }, {}, resolve);
+          const top = component.render(100);
+          assert.match(top.join("\n"), /1\. Plan step 1/);
+          assert.match(top.join("\n"), /Ctrl\+B\/F page · Ctrl\+U\/D half-page/);
+          assert.match(top.join("\n"), /Enter\s+approve · Esc deny/);
+          component.handleInput("\u0006");
+          const pageDown = component.render(100);
+          assert.notDeepEqual(pageDown, top);
+          component.handleInput("\u0002");
+          assert.deepEqual(component.render(100), top);
+          component.handleInput("\u0004");
+          const halfDown = component.render(100);
+          assert.notDeepEqual(halfDown, top);
+          component.handleInput("\u0015");
+          assert.deepEqual(component.render(100), top);
+          component.handleInput(selected === "Approve" ? "\r" : "\u001b");
+        });
+      },
+      select: async () => { throw new Error("TUI approval must not open a second selection dialog."); },
+    },
+  };
+  await handlers.get("session_start")?.[0]({ reason: "startup" }, ctx);
+  const approved = await tools.get("request_plan_approval").execute("approval-1", {}, undefined, undefined, ctx);
+  assert.match(approved.content[0].text, /User approved plan plan-current/);
+  assert.deepEqual(sent.at(-1), { message: "I approve this plan: plan-current.", options: { deliverAs: "steer" } });
+  selected = "Deny";
+  const denied = await tools.get("request_plan_approval").execute("approval-2", {}, undefined, undefined, ctx);
+  assert.match(denied.content[0].text, /User denied plan plan-current/);
+  assert.deepEqual(sent.at(-1), { message: "I do not approve this plan: plan-current.", options: { deliverAs: "steer" } });
+});
+
 test("subagents toggles the orchestrator definition without pausing concurrent parent work", async () => {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
@@ -839,6 +916,10 @@ test("subagents toggles the orchestrator definition without pausing concurrent p
   assert.match(
     tools.get("subagent")?.promptGuidelines.join("\n") ?? "",
     /Spawning is not completion.*repeatedly use await_child_event/s,
+  );
+  assert.match(
+    tools.get("request_plan_approval")?.promptGuidelines.join("\n") ?? "",
+    /instead of asking the user to type a separate approval response/,
   );
   assert.match(
     tools.get("workspace_subagent")?.promptGuidelines.join("\n") ?? "",

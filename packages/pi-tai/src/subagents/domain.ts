@@ -34,6 +34,7 @@ export const PARENT_TOOL_NAMES = [
   "task_create",
   "task_assign",
   "task_plan",
+  "request_plan_approval",
   "task_approve_plan",
   "task_record_user_direction",
   "task_status",

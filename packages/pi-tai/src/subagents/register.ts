@@ -469,8 +469,9 @@ export function registerSubagents(
   const showInlinePane = async (
     ctx: ExtensionContext,
     tabs: readonly { label: string; content: string; truncateLines?: boolean }[],
-  ): Promise<void> => {
-    await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+    approvalKeys = false,
+  ): Promise<"approve" | "deny" | undefined> => {
+    return ctx.ui.custom<"approve" | "deny" | undefined>((tui, theme, _keybindings, done) => {
       let tabIndex = 0;
       let offset = 0;
       let cachedWidth: number | undefined;
@@ -507,7 +508,7 @@ export function registerSubagents(
           return [
             ...new Text(tabLine, 1, 1).render(width),
             ...bodyLines.slice(offset, offset + rows),
-            ...new Text(theme.fg("dim", `↑/↓ scroll · PgUp/PgDn page · Home/g top · End/G bottom${tabs.length > 1 ? " · ←/→ tabs" : ""} · Esc close · ${position}`), 1, 1).render(width),
+            ...new Text(theme.fg("dim", `↑/↓ scroll · PgUp/PgDn or Ctrl+B/F page · Ctrl+U/D half-page · Home/g top · End/G bottom${tabs.length > 1 ? " · ←/→ tabs" : ""} · ${approvalKeys ? "Enter approve · Esc deny" : "Esc close"} · ${position}`), 1, 1).render(width),
           ];
         },
         invalidate() {
@@ -515,11 +516,14 @@ export function registerSubagents(
           cachedTab = undefined;
         },
         handleInput(data: string) {
-          if (matchesKey(data, Key.escape)) return done();
+          if (matchesKey(data, Key.enter) && approvalKeys) return done("approve");
+          if (matchesKey(data, Key.escape)) return done(approvalKeys ? "deny" : undefined);
           if (matchesKey(data, Key.up)) return move(-1);
           if (matchesKey(data, Key.down)) return move(1);
-          if (matchesKey(data, Key.pageUp)) return move(-viewportRows());
-          if (matchesKey(data, Key.pageDown)) return move(viewportRows());
+          if (matchesKey(data, Key.pageUp) || matchesKey(data, Key.ctrl("b"))) return move(-viewportRows());
+          if (matchesKey(data, Key.pageDown) || matchesKey(data, Key.ctrl("f"))) return move(viewportRows());
+          if (matchesKey(data, Key.ctrl("u"))) return move(-Math.max(1, Math.floor(viewportRows() / 2)));
+          if (matchesKey(data, Key.ctrl("d"))) return move(Math.max(1, Math.floor(viewportRows() / 2)));
           if (matchesKey(data, Key.home) || data === "g") { offset = 0; return tui.requestRender(); }
           if (matchesKey(data, Key.end) || data === "G") { offset = Math.max(0, bodyLines.length - viewportRows()); return tui.requestRender(); }
           if (tabs.length > 1 && (matchesKey(data, Key.left) || matchesKey(data, Key.right))) {
@@ -976,6 +980,51 @@ export function registerSubagents(
       await isolatedJj.tasks.appendPlan(task.taskId, { authorContextId: contextId, authorRole: role, ...(role === "orchestrator" ? { authorityMessageId: latestUserEvidence(ctx).messageId } : {}), markdown: params.markdown, rationale: params.rationale, ...(params.directionIds ? { directionIds: params.directionIds } : {}) });
       const status = await isolatedJj.tasks.status(task.taskId, role);
       return result(`Replaced the current effective plan for ${task.taskId}.`, status);
+    },
+  });
+
+  pi.registerTool({
+    name: "request_plan_approval",
+    label: "Request Plan Approval",
+    description: "Show the current persisted Orchestrator plan to the user in an interactive Approve/Deny prompt and queue their explicit response as the next user message.",
+    promptSnippet: "Ask the user to approve or deny the current persisted plan interactively",
+    promptGuidelines: [
+      "Use request_plan_approval after presenting a persisted Orchestrator plan instead of asking the user to type a separate approval response.",
+      "Call task_approve_plan only after the approval response from request_plan_approval arrives as a subsequent user message.",
+    ],
+    parameters: Type.Object({}),
+    async execute(_id, _params, signal, _onUpdate, ctx) {
+      if (mode !== "root" || currentAgent?.name !== "orchestrator") throw new Error("Only the root Orchestrator may request plan approval.");
+      if (!ctx.hasUI) throw new Error("Plan approval requires an interactive TUI or RPC client.");
+      const task = await isolatedJj.tasks.findRoot(authoritativeRootSessionId(ctx));
+      const revision = task?.planRevisions.at(-1);
+      if (!task || !revision) throw new Error("A current persisted Orchestrator plan is required before requesting approval.");
+      const tuiDecision = ctx.mode === "tui"
+        ? await showInlinePane(ctx, [{
+            label: `Review plan · ${revision.revisionId}`,
+            content: revision.markdown,
+          }], true)
+        : undefined;
+      if (signal?.aborted) return result(`Plan approval prompt for ${revision.revisionId} was cancelled.`, { decision: "cancelled", planRevisionId: revision.revisionId });
+      const choice = ctx.mode === "tui"
+        ? tuiDecision
+        : await ctx.ui.select(
+            ["Approve the current plan?", `Revision: ${revision.revisionId}`, revision.markdown].join("\n\n"),
+            ["Approve", "Deny"],
+            signal ? { signal } : undefined,
+          );
+      if (!choice) return result(`Plan approval prompt for ${revision.revisionId} was cancelled.`, { decision: "cancelled", planRevisionId: revision.revisionId });
+      const approved = choice === "approve" || choice === "Approve";
+      pi.sendUserMessage(
+        approved
+          ? `I approve this plan: ${revision.revisionId}.`
+          : `I do not approve this plan: ${revision.revisionId}.`,
+        { deliverAs: "steer" },
+      );
+      return result(
+        `User ${approved ? "approved" : "denied"} plan ${revision.revisionId}; their explicit response is queued as the next user message.`,
+        { decision: approved ? "approved" : "denied", planRevisionId: revision.revisionId },
+      );
     },
   });
 

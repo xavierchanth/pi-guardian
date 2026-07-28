@@ -4,7 +4,7 @@ import { ROLE_TOOL_NAMES } from "../../packages/pi-tai/src/subagents/domain.ts";
 import { formatSubagentToolCall } from "../../packages/pi-tai/src/subagents/tool-presentation.ts";
 
 test("every production subagent tool has a bounded semantic call presentation", () => {
-  assert.equal(new Set(ROLE_TOOL_NAMES).size, 51);
+  assert.equal(new Set(ROLE_TOOL_NAMES).size, 52);
   for (const name of ROLE_TOOL_NAMES) {
     const rendered = formatSubagentToolCall(name, name, {}, false);
     assert.ok(rendered.startsWith(name), name);
