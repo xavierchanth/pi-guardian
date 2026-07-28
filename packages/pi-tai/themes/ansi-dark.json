@@ -1,0 +1,81 @@
+{
+  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
+  "name": "ansi-dark",
+  "vars": {
+    "neutral": 7,
+    "uiMuted": 5,
+    "panelBg": 0,
+    "panelText": 15,
+    "red": 9,
+    "green": 10,
+    "yellow": 11,
+    "blue": 12,
+    "magenta": 13,
+    "cyan": 14
+  },
+  "colors": {
+    "accent": "blue",
+    "border": "cyan",
+    "borderAccent": "blue",
+    "borderMuted": "neutral",
+    "success": "green",
+    "error": "red",
+    "warning": "yellow",
+    "muted": "neutral",
+    "dim": "uiMuted",
+    "text": "",
+    "thinkingText": "uiMuted",
+
+    "selectedBg": "panelBg",
+    "userMessageBg": "panelBg",
+    "userMessageText": "panelText",
+    "customMessageBg": "panelBg",
+    "customMessageText": "panelText",
+    "customMessageLabel": "magenta",
+    "toolPendingBg": "panelBg",
+    "toolSuccessBg": "panelBg",
+    "toolErrorBg": "panelBg",
+    "toolTitle": "panelText",
+    "toolOutput": "panelText",
+
+    "mdHeading": "yellow",
+    "mdLink": "blue",
+    "mdLinkUrl": "neutral",
+    "mdCode": "cyan",
+    "mdCodeBlock": "green",
+    "mdCodeBlockBorder": "neutral",
+    "mdQuote": "neutral",
+    "mdQuoteBorder": "neutral",
+    "mdHr": "neutral",
+    "mdListBullet": "cyan",
+
+    "toolDiffAdded": "green",
+    "toolDiffRemoved": "red",
+    "toolDiffContext": "neutral",
+
+    "syntaxComment": "neutral",
+    "syntaxKeyword": "magenta",
+    "syntaxFunction": "blue",
+    "syntaxVariable": "panelText",
+    "syntaxString": "green",
+    "syntaxNumber": "red",
+    "syntaxType": "cyan",
+    "syntaxOperator": "neutral",
+    "syntaxPunctuation": "neutral",
+
+    "thinkingOff": "neutral",
+    "thinkingMinimal": "neutral",
+    "thinkingLow": "blue",
+    "thinkingMedium": "cyan",
+    "thinkingHigh": "magenta",
+    "thinkingXhigh": "red",
+    "thinkingMax": "yellow",
+
+    "bashMode": "green"
+  },
+  "export": {
+    "pageBg": "#181818",
+    "cardBg": "#1e1e1e",
+    "infoBg": "#2a2a1e"
+  }
+}

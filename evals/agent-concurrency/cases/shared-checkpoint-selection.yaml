@@ -1,0 +1,19 @@
+version: 1
+suite: agent-concurrency
+id: shared-checkpoint-selection
+title: Shared source work selects semantic checkpoint capabilities
+mode: policy
+prompt: >-
+  Implement a bounded change to src/example.ts in the shared source workspace.
+  Preserve unrelated orchestrator work and checkpoint the result safely.
+expectedTools:
+  - acquire_file_set
+  - insert_change
+  - checkpoint_change
+forbiddenTools:
+  - workspace_checkpoint
+  - bash:jj
+expectedReportFields:
+  - changed files
+  - validation
+  - checkpoint receipt

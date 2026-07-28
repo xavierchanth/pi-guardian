@@ -1,0 +1,97 @@
+{
+  "config": {
+    "sessionPolicy": {
+      "sessionTitle": {
+        "effort": "minimal",
+        "maxWords": 6,
+        "fallback": "heuristic"
+      },
+      "compaction": {
+        "enabled": true,
+        "thresholdPercent": 90
+      },
+      "modelProfiles": [
+        {
+          "name": "sol-low",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "low"
+        },
+        {
+          "name": "sol-medium",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "medium"
+        },
+        {
+          "name": "sol-high",
+          "provider": "openai-codex",
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      ]
+    },
+    "clientPreferences": {
+      "ansiTheme": {
+        "darkTheme": "ansi-dark",
+        "lightTheme": "ansi-light",
+        "pollIntervalMs": 2000
+      },
+      "notifications": {
+        "reviewFailure": true,
+        "agentCompletion": true
+      },
+      "cmux": {
+        "enabled": false
+      }
+    },
+    "hostMachine": {}
+  },
+  "provenance": {
+    "sessionPolicy.sessionTitle.provider": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.model": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.effort": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.maxWords": {
+      "layer": "default"
+    },
+    "sessionPolicy.sessionTitle.fallback": {
+      "layer": "default"
+    },
+    "sessionPolicy.compaction.enabled": {
+      "layer": "default"
+    },
+    "sessionPolicy.compaction.thresholdPercent": {
+      "layer": "default"
+    },
+    "sessionPolicy.modelProfiles": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.darkTheme": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.lightTheme": {
+      "layer": "default"
+    },
+    "clientPreferences.ansiTheme.pollIntervalMs": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.reviewFailure": {
+      "layer": "default"
+    },
+    "clientPreferences.notifications.agentCompletion": {
+      "layer": "default"
+    },
+    "clientPreferences.cmux.enabled": {
+      "layer": "user",
+      "path": "global.json",
+      "digest": "9e204b0c68f39755f81a3812a5cdf5a994331b81acebad7e0ced12811b7eb9cf"
+    }
+  },
+  "warnings": []
+}

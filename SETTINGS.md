@@ -1,223 +1,158 @@
-# Settings Reference
+# Pi-Tai settings
 
-This document lists every configuration value that the `pi-tai` distribution reads from or writes to `~/.pi/agent/settings.json`.
+This reference documents configuration supported by the released direct Pi extension. Host-managed sessions use the same session-policy schema, but the Host resolves and pins that policy when the session is created; the runtime worker does not reread configuration files.
 
----
+## Configuration sources and ownership
 
-## Settings written by this distribution
+The direct Pi extension reads configuration at session start from:
 
-### `permissionLevel`
+- user: `~/.pi/agent/pi-tai.json`;
+- project: `<project>/.pi/pi-tai.json`, only when Pi trusts the project.
 
-**Type:** `string`  
-**Values:** `"auto"` | `"plan"` | `"edit"` | `"read"`
+Valid project values override user values only for fields that projects are allowed to control. Invalid values, unknown fields, and prohibited project values are ignored with a warning.
 
-The active guardian mode. Persisted when you run `/mode` and choose **"Save globally"**.
+Configuration has three ownership planes:
 
-- `auto` — Full access with auto-review for dangerous/high-risk actions
-- `plan` — Planning-only; Markdown-only file edits; read-level bash
-- `edit` — Read and edit files; no dangerous bash
-- `read` — Read-only access
+| Plane | Fields | Authority |
+|---|---|---|
+| Session policy | `sessionTitle`, `compaction`, `modelProfiles` | Host-owned and pinned for Host-managed sessions |
+| Client preferences | `ansiTheme`, `notifications`, `cmux` | Local to each client |
+| Host machine configuration | Reserved for Guardian reviewer model and timeout | Not yet configurable |
 
-**Example:**
-```json
-{
-  "permissionLevel": "auto"
-}
-```
+Model-selecting fields are privileged. Project configuration cannot set any `sessionTitle` field or `modelProfiles`; those values may come only from defaults or user configuration. Project configuration may set `compaction`, `ansiTheme`, `notifications`, and `cmux` after project trust is established.
 
----
+## Session policy
 
-### `permissionMode`
+### `sessionTitle`
 
-**Type:** `string`  
-**Values:** `"ask"` | `"block"`
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `provider` | non-empty string | unset | Provider used only for title generation. |
+| `model` | non-empty string | unset | Model used only for title generation. |
+| `effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` | `minimal` | Independent title-model reasoning effort. |
+| `maxWords` | integer 1–20 | `6` | Maximum normalized title length. |
+| `fallback` | `heuristic` | `heuristic` | Local fallback when provider/model is absent or fails. |
 
-The review behavior when an action exceeds the current mode's permissions.
+Both `provider` and `model` must be present before Pi-Tai makes a title-model request. Pi-Tai never substitutes the active work model. Every field in this object is privileged and is ignored in project configuration.
 
-- `ask` — Prompt to upgrade to a higher mode (default)
-- `block` — Reject the action outright
+### `compaction`
 
-Persisted when you run `/review-mode`.
+Pi-Tai supplements Pi's native reserve-token-based automatic compaction with a context-window percentage threshold. The check runs after Pi's native retry and compaction flow settles. When current usage is known and reaches the threshold, Pi-Tai compacts before later settled handlers run. A session that Pi already compacted reports unknown usage until its next model response, preventing duplicate compaction.
 
-**Example:**
-```json
-{
-  "permissionMode": "ask"
-}
-```
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Enable Pi-Tai's percentage-based automatic compaction. |
+| `thresholdPercent` | number 1–100 | `90` | Compact when known context usage reaches or exceeds this percentage. |
 
----
+Pi's native `settings.json` compaction policy remains active independently and may compact earlier when its `reserveTokens` threshold is reached. To disable all automatic compaction, disable both policies.
 
-### `permissionConfig`
+### `modelProfiles`
 
-**Type:** `object`  
-**Optional**
-
-Fine-grained command classification overrides and prefix normalisation.
+`modelProfiles` is an ordered array of named model-and-effort pairs. It controls Shift+Tab profile cycling and `/profile`; it does not change agent prompts or tool permissions. A user array replaces packaged defaults. An empty array disables profile cycling. Project values are ignored because model selection is privileged.
 
 | Field | Type | Description |
-|-------|------|-------------|
-| `overrides` | `Record<string, string[]>` | Force specific permission levels for command patterns. Keys: `read`, `edit`, `auto`, `dangerous`. |
-| `prefixMappings` | `{ from: string, to: string }[]` | Strip/replace command prefixes before classification. |
+|---|---|---|
+| `name` | lowercase letters, numbers, hyphens | Stable profile name. |
+| `provider` | non-empty string | Pi model provider. |
+| `model` | non-empty string | Pi model ID. |
+| `effort` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` | Requested reasoning effort. |
 
-**Example:**
-```json
-{
-  "permissionConfig": {
-    "overrides": {
-      "read": ["tmux list-*", "tmux show-*"],
-      "auto": ["tmux *", "screen *"],
-      "dangerous": ["rm -rf *", "dd if=* of=/dev/*"]
-    },
-    "prefixMappings": [
-      { "from": "fvm flutter", "to": "flutter" },
-      { "from": "nvm exec", "to": "" }
-    ]
-  }
-}
-```
+Defaults are `sol-low`, `sol-medium`, and `sol-high`, in that cycling order; `sol-low` is the first/default profile. Pi-Tai reserves Shift+Tab for profile cycling and moves Pi's native thinking-level cycle to Ctrl+Alt+T. On load, it merges the native mapping into `~/.pi/agent/keybindings.json`, preserving unrelated bindings and additional keys assigned to thinking-level cycling. Invalid JSON is never overwritten and produces a warning. Use `/effort` to change effort independently and Pi's `/model` for unrestricted model selection.
 
-Access via `/mode config show` and `/mode config reset`.
-
----
-
-## Settings read by this distribution
-
-### `autoReviewModels`
-
-**Type:** `string[]`  
-**Optional**
-
-List of `"provider/model"` identifiers that trigger the guardian auto-review agent when running in non-interactive mode (`pi -p`, `pi -ne`, etc.).
-
-Each entry must contain a `/` separator.
-
-**Example:**
-```json
-{
-  "autoReviewModels": [
-    "openai-codex/gpt-5.4-mini",
-    "opencode-go/qwen3.5-plus"
-  ]
-}
-```
-
-If omitted or empty, auto-review is unavailable in non-interactive mode and dangerous actions are denied outright.
-
----
+## Client preferences
 
 ### `ansiTheme`
 
-**Type:** `object`  
-**Optional**
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `darkTheme` | non-empty string | `ansi-dark` | Theme selected for a dark terminal background. |
+| `lightTheme` | non-empty string | `ansi-light` | Theme selected for a light terminal background. |
+| `pollIntervalMs` | integer 250–60000 | `2000` | Delay between completed OSC 11 queries. |
 
-Configuration for the ANSI Theme Sync extension.
+ANSI querying runs only in interactive TUI mode.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `darkTheme` | `string` | Theme name to activate when terminal has a dark background. |
-| `lightTheme` | `string` | Theme name to activate when terminal has a light background. |
+### `notifications`
 
-When the terminal background changes (via OS dark/light mode), the extension switches between these themes automatically using OSC 11 queries.
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `reviewFailure` | boolean | `true` | Native terminal notification when automatic review fails or times out. |
+| `agentCompletion` | boolean | `true` | Native terminal notification when the agent settles ready for input. |
 
-**Example:**
+Notifications run only in interactive TUI mode and use Kitty OSC 99 when available, otherwise OSC 777.
+
+### `cmux`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Enable cmux sidebar status and cmux notifications when `CMUX_WORKSPACE_ID` is present. |
+
+Activation requires all three conditions:
+
+1. the session runs inside cmux and has a non-empty `CMUX_WORKSPACE_ID`;
+2. the `cmux` executable is available on `PATH`;
+3. `cmux.enabled` resolves to `true`.
+
+When active, Pi-Tai composes only `pi-cmux`'s sidebar and notification modules. Those modules present live status, progress, token totals, logs, and completion alerts. Native completion notifications stand down to prevent duplicates, while Guardian review-failure notifications remain on Pi-Tai's safety channel.
+
+When any activation condition is false, no cmux module is initialized and native completion notifications remain active. Changing `cmux.enabled` during configuration reload dynamically stops or restores cmux event delivery without registering duplicate handlers.
+
+Advanced behavior is configured with upstream environment variables rather than duplicated in `pi-tai.json`:
+
+| Variable | Upstream default | Purpose |
+|---|---:|---|
+| `PI_CMUX_NOTIFY_LEVEL` | `all` | Notification level: `all`, `medium`, `low`, or `disabled`. |
+| `PI_CMUX_NOTIFY_INCLUDE_RESPONSE` | `0` | Include a truncated final assistant response in non-error alerts. |
+| `PI_CMUX_NOTIFY_THRESHOLD_MS` | `15000` | Duration threshold used to distinguish completion from waiting. |
+| `PI_CMUX_SIDEBAR` | `1` | Set to `0` to disable sidebar reporting. |
+| `PI_CMUX_SIDEBAR_FLASH` | `all` | Surface flashing: `all`, `error`, or `disabled`. |
+| `PI_CMUX_SIDEBAR_PROGRESS` | `1` | Set to `0` to disable progress updates. |
+| `PI_CMUX_SIDEBAR_TOKENS` | `1` | Include cumulative token totals. |
+| `PI_CMUX_SIDEBAR_COST` | `0` | Include reported model cost. |
+| `PI_CMUX_SIDEBAR_LOG_TOOLS` | `0` | Set to `1` to log every tool result. |
+
+Pi-Tai passes these variables through unchanged. Other `pi-cmux` settings and commands are not part of Pi-Tai's reporting-only integration.
+
+If cmux presentation does not appear, verify `command -v cmux`, `CMUX_WORKSPACE_ID`, and the resolved `cmux.enabled` value. A missing CLI intentionally falls back to native notifications rather than suppressing all alerts.
+
+## Example
+
 ```json
 {
+  "sessionTitle": {
+    "provider": "provider-id",
+    "model": "luna-model-id",
+    "effort": "minimal",
+    "maxWords": 6,
+    "fallback": "heuristic"
+  },
   "ansiTheme": {
     "darkTheme": "ansi-dark",
-    "lightTheme": "ansi-light"
-  }
-}
-```
-
----
-
-### `quietStartup`
-
-**Type:** `boolean`  
-**Optional**
-
-If `true`, the modes extension suppresses the startup permission banner and sound notification.
-
-**Example:**
-```json
-{
-  "quietStartup": true
-}
-```
-
-> **Note:** This setting is not owned by `pi-tai`; it is a native Pi setting that this distribution respects.
-
----
-
-## Settings **not** touched by this distribution
-
-The following Pi-native settings are **unaffected** by `pi-tai`. They are listed here only to clarify scope.
-
-| Setting | Description |
-|---------|-------------|
-| `theme` | Managed dynamically by the ANSI Theme extension (no manual setting required). |
-| `defaultProvider` | Native Pi setting for the default LLM provider. |
-| `defaultModel` | Native Pi setting for the default model. |
-| `defaultThinkingLevel` | Native Pi setting for the default thinking level. |
-| `hideThinkingBlock` | Native Pi setting to hide the thinking block. |
-| `enabledModels` | Native Pi setting for the model picker whitelist. |
-| `packages` | Native Pi setting for installed distributions; should include this repo's URL. |
-
----
-
-## Package-level configuration
-
-These values live in this repo's `package.json`, not in `~/.pi/agent/settings.json`.
-
-### `pi.extensions`
-
-**Type:** `string[]`
-
-Paths to the TypeScript entry points for each bundled extension.
-
-```json
-{
-  "pi": {
-    "extensions": [
-      "./extensions/task-context/index.ts",
-      "./extensions/modes/index.ts",
-      "./extensions/ansi-theme/index.ts"
-    ]
-  }
-}
-```
-
----
-
-## Full example `settings.json`
-
-```json
-{
-  "lastChangelogVersion": "0.70.6",
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-4-6",
-  "defaultThinkingLevel": "medium",
-  "hideThinkingBlock": false,
-  "enabledModels": [
-    "gpt-5.4",
-    "claude-sonnet-4-6",
-    "kimi-k2.6"
-  ],
-  "permissionLevel": "auto",
-  "permissionMode": "ask",
-  "permissionConfig": {
-    "overrides": {
-      "read": ["tmux list-*"]
-    }
+    "lightTheme": "ansi-light",
+    "pollIntervalMs": 2000
   },
-  "autoReviewModels": [
-    "openai-codex/gpt-5.4-mini",
-    "opencode-go/qwen3.5-plus"
-  ],
-  "quietStartup": true,
-  "packages": [
-    "https://github.com/xavierchanth/pi-guardian"
+  "notifications": {
+    "reviewFailure": true,
+    "agentCompletion": true
+  },
+  "cmux": {
+    "enabled": true
+  },
+  "compaction": {
+    "enabled": true,
+    "thresholdPercent": 90
+  },
+  "modelProfiles": [
+    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
+    { "name": "sol-medium", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "medium" },
+    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" }
   ]
 }
 ```
+
+## Action Guardian
+
+Guardian currently has no settings. It reviews every agent-generated `bash` and `web_fetch` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second deadline.
+
+Low- and medium-risk related work may proceed. High- and critical-risk actions never execute through an agent: related actions are returned to the root user for direct human execution, while unrelated or unclear actions are denied without a runnable command. Destructive candidates fail closed when review is unavailable; ordinary actions proceed. Guardian never provides an interactive approval or persistent bypass path.
+
+Built-in file tools enforce canonical workspace boundaries. `web_fetch` remains public-only regardless of review: private, intranet, metadata, mixed-DNS, and non-routable targets are blocked deterministically.

@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 1,
+  "implementation": {
+    "name": "Pi-Tai Host Agent",
+    "version": "0.1.0"
+  },
+  "capabilities": [
+    "session.create",
+    "session.prompt",
+    "session.observe"
+  ]
+}

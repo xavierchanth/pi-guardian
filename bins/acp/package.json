@@ -1,0 +1,15 @@
+{
+  "name": "@pi-tai/acp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pi-tai-acp": "./src/main.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.3.0",
+    "@pi-tai/host-client": "0.1.0",
+    "@pi-tai/host-protocol": "0.1.0",
+    "zod": "4.4.3"
+  }
+}

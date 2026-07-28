@@ -1,0 +1,15 @@
+{
+  "code": "protocol_version_mismatch",
+  "message": "Client protocol 2-3 does not overlap Host protocol 1-1.",
+  "retryable": false,
+  "details": {
+    "client": {
+      "minVersion": 2,
+      "maxVersion": 3
+    },
+    "host": {
+      "minVersion": 1,
+      "maxVersion": 1
+    }
+  }
+}

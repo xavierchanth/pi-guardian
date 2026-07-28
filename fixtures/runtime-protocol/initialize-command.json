@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 2,
+  "kind": "command",
+  "id": "command-1",
+  "method": "runtime.initialize",
+  "params": {
+    "protocol": { "minVersion": 2, "maxVersion": 2 },
+    "workerId": "worker-1",
+    "runtimeGeneration": 7
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "protocolVersion": 2,
+  "kind": "event",
+  "workerSequence": 9007199254740992,
+  "runtimeGeneration": 1,
+  "event": "session.idle",
+  "data": {}
+}

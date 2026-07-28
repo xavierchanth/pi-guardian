@@ -1,0 +1,18 @@
+{
+  "protocolVersion": 2,
+  "kind": "response",
+  "id": "command-1",
+  "ok": true,
+  "result": {
+    "protocolVersion": 2,
+    "workerId": "worker-1",
+    "runtimeGeneration": 7,
+    "capabilities": {
+      "methods": ["runtime.initialize", "session.create"],
+      "tools": ["update_plan"],
+      "commands": ["continue", "plan-status"],
+      "sessionCapabilities": [],
+      "extensionErrors": []
+    }
+  }
+}

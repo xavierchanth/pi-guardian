@@ -1,0 +1,352 @@
+import { lstat, realpath } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { checkGitIgnored } from "./git-ignore.ts";
+
+export const FILE_TOOL_NAMES = new Set(["read", "write", "edit", "grep", "find", "ls"]);
+export const READ_ONLY_FILE_TOOL_NAMES = new Set(["read", "grep", "find", "ls"]);
+
+export type PathDecisionKind = "allow" | "review" | "deny";
+export type PathReviewTrigger =
+  | "gitignored"
+  | "git-status-unknown"
+  | "sensitive-path"
+  | "vcs-metadata"
+  | "pi-credential"
+  | "pi-session"
+  | "protected-descendant";
+
+export interface PathReviewEvidence {
+  canonicalPath: string;
+  requestedPath: string;
+  triggers: PathReviewTrigger[];
+  detail: string;
+}
+
+export interface PathDecision {
+  kind: PathDecisionKind;
+  canonicalPath?: string;
+  reason?: string;
+  evidence?: PathReviewEvidence;
+}
+
+interface CanonicalTarget {
+  canonicalPath: string;
+  lexicalPath: string;
+  existingAncestor: string;
+}
+
+export async function checkFileToolPath(
+  toolName: string,
+  input: Record<string, unknown>,
+  cwd: string,
+  tempCandidates: readonly string[] = [tmpdir(), "/tmp", "/var/tmp"],
+  readCandidates: readonly string[] = defaultReadCandidates(),
+  agentDirectory: string = getAgentDir(),
+): Promise<PathDecision> {
+  if (!FILE_TOOL_NAMES.has(toolName)) return { kind: "allow" };
+  const rawPath = typeof input.path === "string" ? input.path : ".";
+  const requestedPath = stripAtPrefix(rawPath);
+
+  try {
+    const workspace = await realpath(cwd);
+    const lexicalWorkspace = resolve(cwd);
+    const allowedRoots = await canonicalRoots([workspace, ...tempCandidates]);
+    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName)
+      ? await canonicalRoots(readCandidates)
+      : [];
+    const canonicalAgentDirectory = await canonicalRoot(agentDirectory);
+    const lexicalAgentDirectory = resolve(agentDirectory);
+    const target = await canonicalizeTarget(cwd, requestedPath);
+
+    if (contains(lexicalWorkspace, target.lexicalPath)
+      && !contains(workspace, target.canonicalPath)) {
+      return deny(
+        target.canonicalPath,
+        `File tool target escapes the workspace through a symlink: ${target.canonicalPath}.`,
+      );
+    }
+
+    const lexicallyInAgentDirectory = contains(lexicalAgentDirectory, target.lexicalPath);
+    if (canonicalAgentDirectory && lexicallyInAgentDirectory
+      && !contains(canonicalAgentDirectory, target.canonicalPath)) {
+      return deny(
+        target.canonicalPath,
+        `File tool target escapes Pi agent state through a symlink: ${target.canonicalPath}.`,
+      );
+    }
+    if (canonicalAgentDirectory
+      && (lexicallyInAgentDirectory || contains(canonicalAgentDirectory, target.canonicalPath))) {
+      const logicalPath = lexicallyInAgentDirectory
+        ? resolve(
+          canonicalAgentDirectory,
+          relative(lexicalAgentDirectory, target.lexicalPath),
+        )
+        : target.canonicalPath;
+      return classifyPiAgentPath(
+        toolName,
+        target,
+        requestedPath,
+        canonicalAgentDirectory,
+        logicalPath,
+      );
+    }
+
+    const withinWritableBoundary = allowedRoots.some((root) => contains(root, target.canonicalPath));
+    const withinReadBoundary = readRoots.some((root) => contains(root, target.canonicalPath));
+    if (!withinWritableBoundary && !withinReadBoundary) {
+      return deny(
+        target.canonicalPath,
+        `File tool target is outside allowed workspace, temporary, or read-only Pi/skill roots: ${target.canonicalPath}. Use reviewed bash only when an outside-boundary operation is explicitly authorized.`,
+      );
+    }
+
+    const sensitive = sensitiveTrigger(target, workspace);
+    if (sensitive) {
+      return review(target, requestedPath, sensitive.trigger, sensitive.detail);
+    }
+
+    const ignoreDecision = await classifyGitIgnore(target);
+    if (ignoreDecision) {
+      return review(target, requestedPath, ignoreDecision.trigger, ignoreDecision.detail);
+    }
+
+    return { kind: "allow", canonicalPath: target.canonicalPath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      kind: "deny",
+      reason: `File tool target could not be canonicalized safely: ${message}`,
+    };
+  }
+}
+
+export function defaultReadCandidates(): string[] {
+  const agentDir = getAgentDir();
+  const piPackageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const runtimePackageRoot = findPiPackageRoot(process.argv[1]);
+  return [
+    ...["skills", "extensions", "prompts", "themes", "npm", "git"]
+      .map((directory) => join(agentDir, directory)),
+    ...["AGENTS.md", "settings.json", "trust.json", "models-store.json"]
+      .map((file) => join(agentDir, file)),
+    join(homedir(), ".agents", "skills"),
+    resolve(dirname(piPackageEntry), ".."),
+    ...(runtimePackageRoot ? [runtimePackageRoot] : []),
+  ];
+}
+
+async function classifyPiAgentPath(
+  toolName: string,
+  target: CanonicalTarget,
+  requestedPath: string,
+  agentDirectory: string,
+  logicalPath: string,
+): Promise<PathDecision> {
+  if (!READ_ONLY_FILE_TOOL_NAMES.has(toolName)) {
+    return deny(
+      target.canonicalPath,
+      `Built-in file tools cannot modify Pi agent state: ${target.canonicalPath}. Use reviewed bash only when the change is explicitly authorized.`,
+    );
+  }
+
+  const authPath = join(agentDirectory, "auth.json");
+  const modelsPath = join(agentDirectory, "models.json");
+  const sessionsPath = join(agentDirectory, "sessions");
+  if (logicalPath === authPath || logicalPath === modelsPath) {
+    return review(
+      target,
+      requestedPath,
+      "pi-credential",
+      "The target is Pi authentication or model-provider state and may contain credentials.",
+    );
+  }
+  if (contains(sessionsPath, logicalPath)) {
+    return review(
+      target,
+      requestedPath,
+      "pi-session",
+      "The target is Pi session history and may contain unrelated private conversation or tool data.",
+    );
+  }
+  if ((toolName === "grep" || toolName === "find")
+    && [authPath, modelsPath, sessionsPath].some((protectedPath) =>
+      contains(logicalPath, protectedPath))) {
+    return review(
+      target,
+      requestedPath,
+      "protected-descendant",
+      "The aggregate search can traverse Pi credentials or session history.",
+    );
+  }
+
+  const sensitive = sensitiveTrigger(target, agentDirectory);
+  if (sensitive) {
+    return review(target, requestedPath, sensitive.trigger, sensitive.detail);
+  }
+  const ignoreDecision = await classifyGitIgnore(target);
+  if (ignoreDecision) {
+    return review(target, requestedPath, ignoreDecision.trigger, ignoreDecision.detail);
+  }
+  return { kind: "allow", canonicalPath: target.canonicalPath };
+}
+
+async function classifyGitIgnore(
+  target: CanonicalTarget,
+): Promise<{ trigger: PathReviewTrigger; detail: string } | undefined> {
+  const paths = [...new Set([target.lexicalPath, target.canonicalPath])];
+  for (const path of paths) {
+    const decision = await checkGitIgnored(path, target.existingAncestor);
+    if (decision.status === "ignored") {
+      return {
+        trigger: "gitignored",
+        detail: "Git ignores the requested target, so its contents require Guardian review.",
+      };
+    }
+    if (decision.status === "unknown") {
+      return {
+        trigger: "git-status-unknown",
+        detail: `Git ignore status could not be determined safely${decision.reason ? `: ${decision.reason}` : "."}`,
+      };
+    }
+  }
+  return undefined;
+}
+
+function sensitiveTrigger(
+  target: CanonicalTarget,
+  boundaryRoot: string,
+): { trigger: PathReviewTrigger; detail: string } | undefined {
+  const classifiedPaths = [...new Set([target.lexicalPath, target.canonicalPath])];
+  for (const path of classifiedPaths) {
+    const pathForClassification = contains(boundaryRoot, path)
+      ? relative(boundaryRoot, path)
+      : path;
+    const normalized = pathForClassification.replaceAll("\\", "/");
+    const segments = normalized.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
+    const name = basename(path).toLowerCase();
+
+    if (segments.includes(".git") || segments.includes(".jj")) {
+      return {
+        trigger: "vcs-metadata",
+        detail: "The target is version-control metadata and direct access requires review.",
+      };
+    }
+
+    const secretDirectories = new Set([
+      ".ssh", ".aws", ".gnupg", ".kube", ".docker", "secrets", "credentials",
+    ]);
+    const dotenvExemptions = new Set([".env.example", ".env.sample", ".env.template"]);
+    const exactSensitiveNames = new Set([
+      ".npmrc", ".pypirc", ".netrc", ".git-credentials", "auth.json",
+      "credentials", "credentials.json", "credentials.yaml", "credentials.yml",
+      "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    ]);
+    const privateKeyExtensions = [".key", ".pem", ".p12", ".pfx", ".jks"];
+    const isDotenv = (name === ".env" || name.startsWith(".env."))
+      && !dotenvExemptions.has(name);
+    if (segments.some((segment) => secretDirectories.has(segment))
+      || exactSensitiveNames.has(name)
+      || privateKeyExtensions.some((extension) => name.endsWith(extension))
+      || isDotenv) {
+      return {
+        trigger: "sensitive-path",
+        detail: "The target name or directory commonly contains secrets or credentials.",
+      };
+    }
+  }
+  return undefined;
+}
+
+function review(
+  target: CanonicalTarget,
+  requestedPath: string,
+  trigger: PathReviewTrigger,
+  detail: string,
+): PathDecision {
+  return {
+    kind: "review",
+    canonicalPath: target.canonicalPath,
+    reason: detail,
+    evidence: {
+      canonicalPath: target.canonicalPath,
+      requestedPath,
+      triggers: [trigger],
+      detail,
+    },
+  };
+}
+
+function deny(canonicalPath: string, reason: string): PathDecision {
+  return { kind: "deny", canonicalPath, reason };
+}
+
+function findPiPackageRoot(entry: string | undefined): string | undefined {
+  if (!entry) return undefined;
+  const marker = `${sep}@earendil-works${sep}pi-coding-agent${sep}`;
+  const absolute = resolve(entry);
+  const markerIndex = absolute.lastIndexOf(marker);
+  if (markerIndex === -1) return undefined;
+  return absolute.slice(0, markerIndex + marker.length - 1);
+}
+
+export async function canonicalizeCwd(cwd: string): Promise<string> {
+  return realpath(cwd);
+}
+
+async function canonicalizeTarget(cwd: string, path: string): Promise<CanonicalTarget> {
+  const lexicalPath = resolve(cwd, path);
+  let existing = lexicalPath;
+
+  while (!(await pathExists(existing))) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error(`no existing parent for ${lexicalPath}`);
+    existing = parent;
+  }
+
+  const canonicalExisting = await realpath(existing);
+  return {
+    lexicalPath,
+    existingAncestor: existing,
+    canonicalPath: resolve(canonicalExisting, relative(existing, lexicalPath)),
+  };
+}
+
+async function canonicalRoot(candidate: string): Promise<string | undefined> {
+  try {
+    return await realpath(candidate);
+  } catch {
+    return undefined;
+  }
+}
+
+async function canonicalRoots(candidates: readonly string[]): Promise<string[]> {
+  const roots = await Promise.all(candidates.map(canonicalRoot));
+  return [...new Set(roots.filter((root): root is string => root !== undefined))];
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function contains(root: string, target: string): boolean {
+  const remainder = relative(root, target);
+  return remainder === ""
+    || (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder));
+}
+
+function stripAtPrefix(path: string): string {
+  return path.startsWith("@") ? path.slice(1) : path;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}

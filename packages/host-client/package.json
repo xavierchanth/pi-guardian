@@ -1,0 +1,11 @@
+{
+  "name": "@pi-tai/host-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@pi-tai/host-protocol": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "exports": "./src/index.ts"
+}

@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "requestId": "req-0001",
+  "operationId": "op-0001",
+  "clientId": "zed-client-1",
+  "sessionId": "session-1",
+  "expectedRevision": 7,
+  "kind": "session.prompt",
+  "payload": {
+    "text": "Continue the implementation",
+    "streamingBehavior": null
+  }
+}

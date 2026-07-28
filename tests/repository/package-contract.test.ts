@@ -1,0 +1,199 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+import test from "node:test";
+
+const root = resolve(import.meta.dirname, "../..");
+const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+  keywords?: string[];
+  pi?: { extensions?: string[]; prompts?: string[]; themes?: string[]; skills?: string[] };
+  dependencies?: Record<string, string>;
+  files?: string[];
+};
+
+test("root manifest is a discoverable Pi package", () => {
+  assert.ok(manifest.keywords?.includes("pi-package"));
+  assert.deepEqual(manifest.pi?.extensions, ["./packages/pi-tai/pi-tai.ts"]);
+  assert.deepEqual(manifest.pi?.themes, ["./packages/pi-tai/themes"]);
+  assert.deepEqual(manifest.pi?.prompts, ["./packages/pi-tai/prompts"]);
+  assert.deepEqual(manifest.pi?.skills, ["./packages/pi-tai/skills"]);
+
+  for (const resource of [
+    ...(manifest.pi?.extensions ?? []),
+    ...(manifest.pi?.themes ?? []),
+    ...(manifest.pi?.prompts ?? []),
+    ...(manifest.pi?.skills ?? []),
+  ]) {
+    assert.ok(readFileOrDirectoryExists(join(root, resource)), resource);
+  }
+});
+
+test("source uses the current Pi distribution imports", () => {
+  const files = walkSource(join(root, "packages"));
+  const legacy = files.filter((file) =>
+    readFileSync(file, "utf8").includes("@mariozechner/"),
+  );
+  assert.deepEqual(legacy, []);
+});
+
+test("Pi-Tai packages a global instruction layer and declarative agent definitions", () => {
+  const system = join(root, "packages/pi-tai/instructions/system.md");
+  assert.ok(existsSync(system), system);
+  for (const name of ["orchestrator", "implementation-lead", "documenter", "worker", "reviewer", "scout", "researcher"]) {
+    const path = join(root, "packages/pi-tai/agents", `${name}.md`);
+    const content = readFileSync(path, "utf8");
+    assert.match(content, new RegExp(`name: ${name}`));
+    assert.match(content, /model: openai-codex\/gpt-5\.6-/);
+    assert.match(content, /effort:/);
+    assert.match(content, /tools:/);
+  }
+});
+
+test("grounded DPIC guidance is integrated into the Orchestrator", () => {
+  const orchestrator = readFileSync(join(root, "packages/pi-tai/agents/orchestrator.md"), "utf8");
+  assert.match(orchestrator, /Design–Plan–Implement–Closure/);
+  assert.match(orchestrator, /Move to Plan only when/);
+  assert.match(orchestrator, /intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria/);
+  assert.match(orchestrator, /without requesting ceremonial approval/);
+  assert.equal(existsSync(join(root, "packages/pi-tai/skills/design")), false);
+  assert.equal(existsSync(join(root, "packages/pi-tai/skills/workspace")), false);
+});
+
+test("checkpoint prompt accepts additional instructions", () => {
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/checkpoint.md"), "utf8");
+  assert.match(prompt, /argument-hint: "\[additional instructions\]"/);
+  assert.match(prompt, /## Additional instructions/);
+  assert.match(prompt, /\$\{ARGUMENTS:-No additional instructions were provided\.\}/);
+  assert.match(prompt, /without weakening the safety requirements above/);
+});
+
+test("DPIC and task prompts activate proportionate work-order workflows", () => {
+  assert.equal(existsSync(join(root, "packages/pi-tai/prompts/implement.md")), false);
+  const dpic = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
+  const task = readFileSync(join(root, "packages/pi-tai/prompts/task.md"), "utf8");
+  assert.match(dpic, /argument-hint: "\[work description\]"/);
+  assert.match(dpic, /Design–Plan–Implement–Closure/);
+  assert.match(dpic, /`large-product` work order/);
+  assert.match(task, /`small-product` work order/);
+  assert.match(task, /`small-product` class selects the Worker/i);
+  const source = readFileSync(join(root, "packages/pi-tai/src/subagents/register.ts"), "utf8");
+  assert.match(source, /\/dpic/);
+  assert.match(source, /\/task/);
+  assert.match(source, /enableRootSubagents/);
+  assert.match(source, /executionClass: StringEnum\(WORK_ORDER_EXECUTION_CLASSES\)/);
+  assert.match(source, /workOrderId: Type\.String/);
+  assert.doesNotMatch(source.match(/name: "workspace_subagent"[\s\S]*?name: "integrate_workspace"/)?.[0] ?? "", /task: taskPacketSchema|agent: StringEnum/);
+});
+
+test("version-control and invariant modeling skills are packaged", () => {
+  const skills = join(root, "packages/pi-tai/skills");
+  const jj = readFileSync(join(skills, "jj-guidelines/SKILL.md"), "utf8");
+  assert.match(jj, /name: jj-guidelines/);
+  assert.match(jj, /Prefer jj over git whenever a \.jj directory is present/);
+  assert.match(jj, /Use Conventional Commits/);
+
+  const invariants = readFileSync(join(skills, "invariants/SKILL.md"), "utf8");
+  assert.match(invariants, /name: invariants/);
+  assert.doesNotMatch(invariants, /name: model-invariants/);
+  assert.match(invariants, /make invalid states unrepresentable/);
+  assert.match(invariants, /Keep one representation per fact/);
+});
+
+test("legacy task blocks and permission modes are absent", () => {
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/modes")), false);
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/task-context")), false);
+  const source = walkSource(join(root, "packages"))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  assert.doesNotMatch(source, /```task-context|@mariozechner\/|guardian-prompt\.md/);
+  assert.doesNotMatch(source, /registerCommand\(["'](?:mode|review-mode|implement)/);
+});
+
+test("runtime protocol ships Rust-first DTOs and checked-in TypeScript bindings", () => {
+  assert.ok(existsSync(join(root, "crates/runtime-protocol/src/lib.rs")));
+  const generated = readFileSync(join(root, "packages/runtime-protocol/src/generated.ts"), "utf8");
+  assert.match(generated, /@generated by pi-tai-runtime-protocol/);
+  assert.match(generated, /export type RuntimeCommand/);
+  assert.ok(existsSync(join(root, "packages/runtime-protocol/src/schemas.ts")));
+});
+
+test("portable Host crates remain independent of Tauri", () => {
+  for (const crate of [
+    "broker",
+    "event-store",
+    "host-kernel",
+    "host-lifecycle",
+    "host-platform",
+    "host-protocol",
+    "host-server",
+    "local-ipc",
+    "runtime-supervisor",
+  ]) {
+    const cargo = readFileSync(join(root, `crates/${crate}/Cargo.toml`), "utf8");
+    assert.doesNotMatch(cargo, /tauri/i, crate);
+  }
+  const shellCargo = readFileSync(join(root, "apps/host/src-tauri/Cargo.toml"), "utf8");
+  assert.match(shellCargo, /tauri/);
+  assert.ok(existsSync(join(root, "packages/host-protocol/src/index.ts")));
+  assert.ok(existsSync(join(root, "fixtures/host-protocol/command-prompt.json")));
+});
+
+test("desktop manager uses Tauri 2, Vite, React Compiler, and Tailwind", () => {
+  const desktop = JSON.parse(readFileSync(join(root, "apps/host/package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const vite = readFileSync(join(root, "apps/host/vite.config.ts"), "utf8");
+  const tauri = readFileSync(join(root, "apps/host/src-tauri/Cargo.toml"), "utf8");
+
+  assert.equal(desktop.dependencies?.react, "19.2.8");
+  assert.ok(desktop.devDependencies?.["babel-plugin-react-compiler"]);
+  assert.ok(desktop.devDependencies?.tailwindcss);
+  assert.match(vite, /reactCompilerPreset/);
+  assert.match(vite, /tailwindcss\(\)/);
+  assert.match(tauri, /tauri = \{ version = "2"/);
+});
+
+test("package ships standalone Guardian and required support files", () => {
+  assert.equal(manifest.dependencies?.["pi-approval-guardian"], undefined);
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/guardian/reviewer.ts")));
+  assert.ok(manifest.files?.includes("justfile"));
+  assert.ok(existsSync(join(root, "justfile")));
+  assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
+});
+
+test("package composes only the reporting-only pi-cmux modules", () => {
+  assert.equal(manifest.dependencies?.["pi-cmux"], "^0.1.16");
+  assert.equal(manifest.dependencies?.jiti, "^2.7.0");
+  const source = walkSource(join(root, "packages/pi-tai"))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  const imports = [...source.matchAll(/pi-cmux\/extensions\/([^"']+)/g)]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(imports, ["cmux-notify.ts", "cmux-sidebar.ts", "i18n.ts"]);
+  for (const excluded of ["index", "cmux-review", "cmux-continue", "cmux-split", "cmux-open", "cmux-zoxide"]) {
+    assert.doesNotMatch(source, new RegExp(`pi-cmux/extensions/${excluded}(?:\\.ts)?["']`));
+  }
+});
+
+test("package ships web tools and their child-runtime dependencies", () => {
+  assert.ok(manifest.dependencies?.["html-to-text"]);
+  assert.ok(manifest.dependencies?.["ipaddr.js"]);
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/web/register.ts")));
+  const childRuntime = readFileSync(join(root, "packages/pi-tai/subagent.ts"), "utf8");
+  assert.match(childRuntime, /registerWebTools\(pi\)/);
+  assert.ok(childRuntime.indexOf("registerWebTools(pi)") < childRuntime.indexOf("registerSubagents(pi"));
+});
+
+function readFileOrDirectoryExists(path: string): boolean {
+  return existsSync(path);
+}
+
+function walkSource(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return walkSource(path);
+    return entry.name.endsWith(".ts") ? [path] : [];
+  });
+}

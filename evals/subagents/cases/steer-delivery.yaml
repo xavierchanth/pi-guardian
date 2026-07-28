@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: steer-delivery
+title: "Steer changes active child work immediately"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: running }
+interaction: { kind: rpc-delivery, delivery: steer, message: "Stop exploration and validate the current patch." }
+assertions:
+  - { kind: protocol-invariant, invariant: delivery-semantics }

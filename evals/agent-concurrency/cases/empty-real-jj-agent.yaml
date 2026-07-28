@@ -1,0 +1,19 @@
+version: 1
+suite: agent-concurrency
+id: empty-real-jj-agent
+title: Empty Real-JJ repository remains independently inspectable
+mode: real-jj
+prompt: >-
+  Inspect this empty JJ repository and report whether it is ready for managed
+  concurrent work. Do not mutate repository history or configuration.
+expectedTools:
+  - jj_concurrency_status
+forbiddenTools:
+  - bash:jj
+  - ensure_wip_change
+  - insert_change
+  - checkpoint_change
+  - workspace_checkpoint
+expectedReportFields:
+  - repository status
+  - readiness

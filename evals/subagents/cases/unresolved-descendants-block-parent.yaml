@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: unresolved-descendants-block-parent
+title: "Parent cannot complete while descendants remain unresolved"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: running }
+interaction: { kind: parent-completion, unresolvedDescendants: 2 }
+assertions:
+  - { kind: protocol-invariant, invariant: block-unresolved-parent }

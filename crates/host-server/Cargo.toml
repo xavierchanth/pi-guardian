@@ -1,0 +1,21 @@
+[package]
+name = "pi-tai-host-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pi-tai-broker = { path = "../broker" }
+pi-tai-host-kernel = { path = "../host-kernel" }
+pi-tai-host-protocol = { path = "../host-protocol" }
+pi-tai-local-ipc = { path = "../local-ipc" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+pi-tai-runtime-supervisor = { path = "../runtime-supervisor" }
+tempfile.workspace = true

@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: wait-any-repeated-collection
+title: "Wait-any is repeated until every child is collected"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: completed }
+interaction: { kind: wait-any-collection, childCount: 3 }
+assertions:
+  - { kind: protocol-invariant, invariant: collect-every-child }

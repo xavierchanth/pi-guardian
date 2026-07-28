@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "bins/**/*.ts", "evals/**/*.ts", "extensions/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "services/**/*.ts", "tests/**/*.ts"]
+}

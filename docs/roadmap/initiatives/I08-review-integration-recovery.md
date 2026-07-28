@@ -1,0 +1,72 @@
+# I08 — Review, integration, and recovery
+
+**Status:** Complete  
+**Depends on:** I06, I07
+
+## Outcome
+
+Every nonempty isolated range is bound to a durable Orchestrator plan, checked by an independent Reviewer against frozen evidence, integrated deterministically into the active source working change, verified, and recoverable across known interruption boundaries.
+
+## Delivered
+
+1. State-owned durable task trees with immutable Orchestrator goals, sourced user directions, child execution bindings, effective plans backed by append-only revisions, role-scoped execution projections, and full-history content-addressed review snapshots.
+2. Plan-bound assignments capture the current Orchestrator plan revision, digest, and direction count without user approval. Changed plans or directions stale frozen review snapshots, while queued workspace custody remains available for redirection, repair, and re-review.
+3. The enforced responsibility graph is Orchestrator → Implementation Lead/Documenter/Reviewer/Scout/Researcher and Implementation Lead → Worker/Scout/Researcher. The Orchestrator cannot implement or launch a Worker directly; a Documenter cannot delegate and may change only explicitly assigned documentation paths.
+4. Read-only Reviewer role and structured immutable findings using canonical `p0`–`p4` severity and introduced/in-scope/out-of-scope relation.
+5. Immutable review bundles and clearance receipts bind the current task snapshot, task snapshot, root/head/content tip, ordered Change IDs, normalized patches, conflicts, findings, and Orchestrator dispositions.
+6. Deterministic policy blocks every `p0`/`p1`, requires a disposition for `p2`, and permits one repair plus focused re-review cycle.
+7. Receipt-gated integration before the source working change with persisted detach, empty removal, insertion, graph verification, and directory cleanup boundaries.
+8. Exact conflict ownership, deterministic resolution squash contracts, and mandatory focused re-review before conflicted integration can become integrated.
+9. Deterministically constrained `rebind_tracked_change`, `resume_workspace_operation`, and `retry_workspace_cleanup` boundaries.
+10. Separate JJ/product verification and explicit closed, closed-no-changes, cleanup-pending, conflict-resolution, and attention-required custody.
+11. Production task/review/integration tools and canonical Orchestrator, Implementation Lead, Documenter, Worker, Reviewer, Scout, and Researcher policies; packaged roles no longer use `update_plan`.
+
+## Required proofs
+
+- no Implementation Lead or Documenter assignment launches without a persisted current plan binding;
+- plan or user-direction changes stale review snapshots without introducing user-approval gates;
+- stale or mismatched review cannot integrate;
+- commit-ID-only rewrite does not spuriously invalidate review;
+- source working-change bytes/Change ID survive integration;
+- only the clean reviewed inclusive range and empties integrate;
+- owned unique conflicts repair; foreign/ambiguous conflicts stop;
+- one automatic repair/re-review cycle is enforced;
+- crash at every phase resumes only next proved idempotent boundary;
+- deterministic recovery tools cannot discard work, while ambiguous choices require user direction.
+
+## Open defects in delivered work
+
+Found reviewing the workspace-recovery commits rebased onto the current line on 2026-07-25. The initiative is otherwise complete; these must land before further recovery work builds on it.
+
+| # | Severity | Item |
+|---|---|---|
+| F1 | **High — resolved** | **Swallowed inspection failures inverted fail-closed.** `WorkspaceRecoveryInspector.inspect` now records `custody_uninspectable` when tracked-range or foreign-descendant inspection fails. Classification prioritizes that discrepancy over every automatic disposition, including `cleanup_pending`, and focused tests prove both failures produce nonautomatic `attention_required` incident preservation. |
+| F2 | Medium | **Unreachable dispositions.** `review_stale` and `breached` are in the union, in `actionsFor`, and in the docs, but `classifyWorkspaceRecovery` never returns either. `review_stale` matters most: the snapshot carries no review fields, yet `RECOVERY.md:84` claims the snapshot covers "review". Either wire them or mark them reserved. |
+| F3 | Low | **`as any` in the evidence path.** `workspace-recovery.ts` `inspect` casts `identity.rootChangeId as any` and `identity.expectedHeadChangeId as any`. Branded-type escape hatches in the one file whose job is trustworthy evidence; the `changeId()` brand constructor is already imported and used correctly elsewhere. |
+| F4 | Low | **Density.** `jj/workspace-file-checkpoint.ts` packs roughly 200 lines of logic into 69; `checkpoint` is one ~30-statement function. Subsumed by the formatter work in I00. |
+
+## Patterns to generalize
+
+**Snapshot-bound plans with digest revalidation.** `reconcile_workspace` re-inspects, re-plans, and refuses if the plan digest has changed:
+
+```ts
+if (plan.planId !== params.planId) throw new Error("Recovery plan is stale; inspect and plan the workspace again.");
+```
+
+Since `planId` is a digest of the snapshot, this is a compare-and-swap on evidence — the model cannot act on a stale view. **This is the template for every state-mutating tool.** It maps onto I13 D4: `session.set_policy` wants the same guarantee, and `HostCommand.expectedRevision` already exists to carry it.
+
+**Pure classification.** `classifyWorkspaceRecovery` is a pure function from a snapshot to one disposition — no filesystem, no jj, no model. It is the shape I13 D9 requires for configuration resolution, and would port to Rust cleanly if recovery classification ever moves into the Host.
+
+**Non-automatic actions are an ACP affordance.** `WorkspaceRecoveryAction.automatic: false` is what `session/request_permission` or a client attention state should render. Shape the type with that in mind rather than retrofitting.
+
+## Exit criteria
+
+- No nonempty isolated work integrates without clean reviewer evidence.
+- Integration completion is distinct from product verification.
+- Unknown partial mutation enters attention-required with last-safe evidence.
+- Conflict resolution is always reported to the user.
+- Task plans refresh Orchestrator context without importing child history.
+- Product implementation passes directly to a Worker for small work orders or through an Implementation Lead for large work orders; standalone roadmap/documentation work may pass through a Documenter.
+- Every nonempty delegated implementation or documentation range receives independent review before integration.
+- No recovery evidence path converts a query failure into an absence of evidence.
+- Every disposition in the recovery union is either reachable or explicitly marked reserved.

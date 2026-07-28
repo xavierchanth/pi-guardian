@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 2,
+  "kind": "event",
+  "workerSequence": 4,
+  "runtimeGeneration": 7,
+  "event": "assistant.text_delta",
+  "commandId": "command-2",
+  "sessionId": "session-1",
+  "turnId": "turn-1",
+  "data": { "delta": "Hello" }
+}

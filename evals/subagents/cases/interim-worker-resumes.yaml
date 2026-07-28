@@ -1,0 +1,12 @@
+version: 1
+suite: subagents
+id: interim-worker-resumes
+title: "Worker emits bounded interim status and automatically resumes"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: running }
+interaction: { kind: interim-status-resume, role: worker, parentMessage: "Steer: report current validation, then continue implementation." }
+assertions:
+  - kind: transcript-sequence
+    events: [parent-steer, visible-bounded-status, subsequent-work, tool-activity, terminal-report]
+  - { kind: report-count, phase: interim, count: 0 }
+  - { kind: report-count, phase: terminal, count: 1 }

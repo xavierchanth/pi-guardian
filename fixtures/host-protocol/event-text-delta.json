@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "sessionId": "session-1",
+  "sequence": 42,
+  "revision": 8,
+  "runtimeGeneration": 3,
+  "timestamp": "2026-01-15T12:00:00.000Z",
+  "type": "assistant.text_delta",
+  "payload": {
+    "messageId": "message-1",
+    "delta": "Implemented"
+  }
+}

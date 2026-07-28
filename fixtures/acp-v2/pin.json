@@ -1,0 +1,9 @@
+{
+  "sdkPackage": "@agentclientprotocol/sdk",
+  "sdkVersion": "1.3.0",
+  "sdkIntegrity": "sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==",
+  "sdkSourceRevision": "fa32570936b42bf4f3aef175c6e926860914b638",
+  "schemaRelease": "schema-v2.0.0-alpha.2",
+  "schemaPath": "node_modules/@agentclientprotocol/sdk/schema/v2/schema.unstable.json",
+  "schemaSha256": "e1ef10a309878485fc3be76e64334ba638c6da4517ed585987368f7f8012bc03"
+}
