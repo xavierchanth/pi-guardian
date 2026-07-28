@@ -1,5 +1,6 @@
 .pi-docs
 .tmp-*/
+/tmp/
 .DS_Store
 node_modules/
 coverage/
