@@ -70,7 +70,7 @@ Provides:
 - immutable content-addressed Markdown snapshots included in child and reviewer packets;
 - projections consumable by any client.
 
-Packaged roles use scoped task tools rather than `update_plan`: the Orchestrator owns immutable goals, sourced user directions, and explicit plan approvals, while Implementation Leads replace their effective execution plans through append-only revisions, and child contexts execute bound task nodes using role-scoped task projections. Production no longer exposes `update_plan`; Host-backed task records are authoritative.
+Packaged roles use scoped task tools rather than `update_plan`: the Orchestrator owns immutable goals, sourced user directions, and effective plans; Implementation Lead and Documenter assignments bind a persisted plan without user approval; Implementation Leads replace their effective execution plans through append-only revisions; and child contexts execute bound task nodes using role-scoped task projections. Production no longer exposes `update_plan`; Host-backed task records are authoritative.
 
 ### Guardian
 

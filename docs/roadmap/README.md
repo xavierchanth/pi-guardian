@@ -10,7 +10,7 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 
 [I13](initiatives/I13-host-configuration-authority.md) is the active initiative and the forcing function for I01. Checkpoints 1–7 are complete: Host-managed sessions now resolve, persist, replay, and require pinned policy. **Checkpoint 8 (revision-guarded policy mutation) is next.** Host-owned project trust and Guardian machine configuration remain separate security-sensitive checkpoints. I13 also reshapes the scope of I01, I02, I03, I04, and I10 — read it before planning against those. The start gates for I14, I15, and I16 are satisfied.
 
-The latest accepted concurrency checkpoint completes the collaborative responsibility model within I07–I09: the Orchestrator obtains explicit user approval of a durable plan, delegates product work to an isolated Implementation Lead or standalone documentation work to an isolated Documenter, requires independent review of the frozen range, and integrates only matching approved evidence. Legacy `thinker` and `planner` role identifiers remain read-only migration inputs.
+The latest concurrency model completes Design–Plan–Implement–Confirm within I07–I09: the Orchestrator resolves consequential design decisions with the user, persists a durable plan, queues product work to an isolated Implementation Lead or standalone documentation work to an isolated Documenter without a plan-approval gate, requires independent review of the frozen range, and integrates only matching clean review evidence. Legacy `thinker` and `planner` role identifiers remain read-only migration inputs.
 
 ## Status legend
 

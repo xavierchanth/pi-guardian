@@ -34,18 +34,13 @@ test("task plans expose effective revisions to executors and full history to orc
       markdown: "Implement with a reviewed isolated workspace",
       rationale: "Initial collaborative design",
     });
-    await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("Implement M4") }), /distinct subsequent user message/);
-    await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I have another question", "user-question-1") }), /does not explicitly approve/);
-    for (const [content, messageId] of [["Can you proceed with this plan?", "user-question-2"], ["Should we implement this plan?", "user-question-3"], ["Do you approve this plan?", "user-question-4"], ["I do not approve this plan", "user-rejection-1"], ["I approved the previous plan, but this one needs changes", "user-rejection-2"], ["This looks good, but wait before proceeding", "user-rejection-3"]] as const) await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user(content, messageId) }), /does not explicitly approve/);
-    await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I approve this plan: plan-stale.", "user-stale-approval-1") }), /different plan revision/);
     const currentRevisionId = (await service.get(task.taskId))!.planRevisions.at(-1)!.revisionId;
-    const approval = await service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user(`I approve this plan: ${currentRevisionId}.`, "user-approval-1") });
-    assert.equal((await service.currentApproval(task.taskId))?.approvalId, approval.approvalId);
     const implementationLead = await service.assign(task.taskId, {
       ownerRole: "implementation-lead",
       creatorContextId: "orchestrator-1",
       objective: "Design integration",
     });
+    assert.equal(implementationLead.assignment?.planBinding?.planRevisionId, currentRevisionId);
     await service.bind(implementationLead.taskId, "implementation-lead-1");
     await service.appendPlan(implementationLead.taskId, {
       authorContextId: "implementation-lead-1",
@@ -53,21 +48,27 @@ test("task plans expose effective revisions to executors and full history to orc
       markdown: "1. Use the invalid approach",
       rationale: "Initial decomposition",
     });
+    const worker = await service.assign(implementationLead.taskId, {
+      ownerRole: "worker",
+      creatorContextId: "implementation-lead-1",
+      objective: "Implement integration",
+    });
+    await service.bind(worker.taskId, "worker-1");
+    assert.equal((await service.requireImplementationPlan(worker.taskId))?.planRevisionId, currentRevisionId);
+
     const redirected = await service.recordDirection(task.taskId, {
       orchestratorContextId: "orchestrator-1",
       evidence: user("Use the safe review path instead", "user-2"),
       summary: "Replace the unsafe plan",
     });
     const directionId = redirected.directions.at(-1)!.directionId;
-    assert.equal(await service.currentApproval(task.taskId), undefined);
-    assert.equal((await service.status(task.taskId, "orchestrator")).tasks.find((item) => item.taskId === task.taskId)?.currentApproval, undefined);
-    await assert.rejects(service.requireCurrentImplementationApproval(implementationLead.taskId), /explicit user approval/);
-    await assert.rejects(service.assign(task.taskId, { ownerRole: "documenter", creatorContextId: "orchestrator-1", objective: "Record redirected design" }), /explicit user approval/);
+    assert.equal((await service.requireImplementationPlan(implementationLead.taskId))?.planRevisionId, currentRevisionId);
+    await assert.rejects(service.assign(task.taskId, { ownerRole: "documenter", creatorContextId: "orchestrator-1", objective: "Record redirected design" }), /latest user direction/);
     await service.appendPlan(task.taskId, { authorContextId: "orchestrator-1", authorRole: "orchestrator", authorityMessageId: "user-2", markdown: "Use the redirected safe review path", rationale: "Applied user direction", directionIds: [directionId] });
-    await assert.rejects(service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("I approve this plan", "user-approval-1") }), /distinct subsequent user message/);
-    const redirectedApproval = await service.approvePlan(task.taskId, { orchestratorContextId: "orchestrator-1", evidence: user("Approved, go ahead", "user-approval-2") });
-    assert.equal((await service.requireCurrentImplementationApproval(implementationLead.taskId))?.approvalId, redirectedApproval.approvalId);
-    await assert.rejects(service.requireAssignmentApproval(implementationLead.taskId), /approval is stale/);
+    assert.equal((await service.requireImplementationPlan(implementationLead.taskId))?.planRevisionId, currentRevisionId);
+    assert.equal((await service.requireAssignmentPlan(implementationLead.taskId)).planRevisionId, currentRevisionId);
+    const documenter = await service.assign(task.taskId, { ownerRole: "documenter", creatorContextId: "orchestrator-1", objective: "Record redirected design" });
+    assert.equal(documenter.assignment?.planBinding?.directionCount, 1);
     await service.appendPlan(implementationLead.taskId, {
       authorContextId: "implementation-lead-1",
       authorRole: "implementation-lead",
@@ -75,13 +76,6 @@ test("task plans expose effective revisions to executors and full history to orc
       rationale: "Applied user redirection",
       directionIds: [directionId],
     });
-    const worker = await service.assign(implementationLead.taskId, {
-      ownerRole: "worker",
-      creatorContextId: "implementation-lead-1",
-      objective: "Implement integration",
-    });
-    await service.bind(worker.taskId, "worker-1");
-
     const plannerStatus = await service.status(implementationLead.taskId, "implementation-lead");
     assert.deepEqual(plannerStatus.tasks.map((item) => item.taskId), [implementationLead.taskId, worker.taskId]);
     assert.equal(JSON.stringify(plannerStatus).includes("invalid approach"), false);

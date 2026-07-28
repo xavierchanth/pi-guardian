@@ -9,9 +9,9 @@ Completed in the I14 shared consolidation: the shared lane now records distinct 
 
 The main workspace is free to be used. `@-` is the stable identity that delegated work branches from
 and rebases back onto; `@` is the user's live working change and is never described, relabelled, or
-rewritten by Pi-Tai. The Orchestrator has no source-editing authority: after explicit plan approval it
-may allocate an isolated Implementation Lead or Documenter workspace from `@-`, then integrate only
-independently reviewed work before the preserved user change. `ensure_wip_change` is removed.
+rewritten by Pi-Tai. The Orchestrator has no source-editing authority: after persisting a clear plan it
+may allocate an isolated Implementation Lead or Documenter workspace from `@-` without user approval,
+then integrate only independently reviewed work before the preserved user change. `ensure_wip_change` is removed.
 
 ## The rule the rest of the system already follows
 
@@ -110,7 +110,7 @@ context and explicitly marks those invariants as superseded by I14.
 
 ## Exit criteria
 
-- The Orchestrator can allocate approved Implementation Lead or Documenter work against a source workspace whose `@` holds arbitrary nonempty user work with a user-authored description; nothing runs `describe` on it, and the `@` Change ID, description, and bytes are unchanged afterwards.
+- The Orchestrator can allocate plan-bound Implementation Lead or Documenter work against a source workspace whose `@` holds arbitrary nonempty user work with a user-authored description; nothing runs `describe` on it, and the `@` Change ID, description, and bytes are unchanged afterwards.
 - Amending or re-describing `@` mid-flight does not invalidate an outstanding target or claim.
 - A merge `@` blocks with `decision_required` rather than choosing a parent.
 - The managed source-WIP operation and tool are absent; the production-tree verification command documented for I14 is empty.

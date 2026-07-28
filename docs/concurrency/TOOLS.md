@@ -27,7 +27,7 @@ Legend: **yes**, **owned** (only with injected authority), **read**, or **no**.
 | Inspect exact range/conflicts | yes | owned | bounded | bounded | read | no | no |
 | Review exact range | disposition | self-check | self-check | self-check | yes | no | evidence |
 | Web research | yes | yes | no | no | yes | no | yes |
-| Recovery rebind/resume | user-authorized | no | no | no | no | no | no |
+| Recovery rebind/resume | deterministic | no | no | no | no | no | no |
 
 ## Parent/child tools
 
@@ -37,7 +37,7 @@ Creates a private read-only evidence child or a same-workspace child allowed by 
 
 ### `spawn_workspace_child`
 
-Atomic Orchestrator-only operation: require a task bound to the current approved-plan receipt, resolve source `@-` when allocation executes, capture only the managed workspace range identities and custody, then start an Implementation Lead or Documenter. Startup failure preserves custody. No fallback to shared execution.
+Atomic Orchestrator-only operation: require a task bound to a persisted Orchestrator plan, resolve source `@-` when allocation executes, capture only the managed workspace range identities and custody, then start an Implementation Lead or Documenter. Startup failure preserves custody. No fallback to shared execution.
 
 ### `message_child` / `message_parent`
 
@@ -113,7 +113,7 @@ Removes exact safe interior empties and applies supplied semantic descriptions w
 
 ### `integrate_workspace`
 
-Orchestrator-only and review-receipt-gated. Revalidates under mutex, inserts the approved range immediately before source `@` as resolved by the integration operation, and returns a durable integration, conflict, or cleanup receipt.
+Orchestrator-only and clean-review-receipt-gated. Revalidates under mutex, inserts the reviewed range immediately before source `@` as resolved by the integration operation, and returns a durable integration, conflict, or cleanup receipt.
 
 ### `squash_resolution`
 
@@ -129,16 +129,15 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 
 ## Recovery and accounting
 
-- `rebind_tracked_change`: explicit user-authorized adoption of unique verified replacement.
-- `resume_workspace_operation`: continue next proved idempotent phase.
-- `retry_workspace_cleanup`: repeat exact cleanup only.
+- `rebind_tracked_change`: deterministic adoption of one unique verified connected replacement.
+- `resume_workspace_operation`: deterministically continue the next proved idempotent phase.
+- `retry_workspace_cleanup`: deterministically repeat exact managed cleanup only.
 - `workspace_custody_status`: inspect expected and observed JJ custody facts in every phase.
 - `workspace_recovery_plan`: classify one snapshot into a complete fact-driven disposition and bounded actions.
 - `reconcile_workspace`: revalidate a snapshot-bound plan and execute one exact recovery action.
 - `task_create`: Orchestrator-owned immutable root goal from sourced user intent.
-- `task_assign`: immutable child assignment bound to one execution context; Implementation Lead and Documenter assignments require current approval.
+- `task_assign`: immutable child assignment bound to one execution context; Implementation Lead and Documenter assignments bind the current Orchestrator plan without user approval.
 - `task_plan`: Orchestrator/Implementation Lead replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.
-- `task_approve_plan`: Orchestrator-only immutable approval receipt binding the current plan revision and digest to explicit user-message evidence.
 - `task_record_user_direction`: orchestrator-only sourced user clarification.
 - `task_status`: role-scoped projection—full history for orchestrator, effective owned subtree for implementation-lead, and effective authority lineage for worker.
 - deterministic review snapshot: full task-tree history with current and superseded revisions clearly distinguished in immutable content-addressed Markdown evidence.

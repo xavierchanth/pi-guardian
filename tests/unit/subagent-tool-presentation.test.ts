@@ -4,7 +4,7 @@ import { ROLE_TOOL_NAMES } from "../../packages/pi-tai/src/subagents/domain.ts";
 import { formatSubagentToolCall } from "../../packages/pi-tai/src/subagents/tool-presentation.ts";
 
 test("every production subagent tool has a bounded semantic call presentation", () => {
-  assert.equal(new Set(ROLE_TOOL_NAMES).size, 51);
+  assert.equal(new Set(ROLE_TOOL_NAMES).size, 49);
   for (const name of ROLE_TOOL_NAMES) {
     const rendered = formatSubagentToolCall(name, name, {}, false);
     assert.ok(rendered.startsWith(name), name);
@@ -29,10 +29,6 @@ test("task assignment calls surface the issued role and objective", () => {
   }, true);
   assert.match(expanded, /Acceptance Criteria:\n  • Fail closed/);
   assert.match(expanded, /Constraints:\n  • Keep the patch focused/);
-});
-
-test("task approval calls remain concise and explicit", () => {
-  assert.equal(formatSubagentToolCall("task_approve_plan", "Approve Task Plan", {}, false), "Approve Task Plan");
 });
 
 test("task plan calls surface the replacement plan and rationale", () => {

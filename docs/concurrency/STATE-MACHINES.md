@@ -7,11 +7,11 @@ This document is normative. Boundary DTOs may be migration-tolerant; conversion 
 - One Host-owned root session has one Orchestrator and one isolated runtime coordinator.
 - Every child has exactly one direct parent and one immutable role/task authority snapshot.
 - Child contexts are private Pi SDK contexts, not user-selectable sessions.
-- Task goals, assignments, directions, plan revisions, and plan approvals are append-only; the latest plan revision is the sole effective plan.
-- An Implementation Lead or Documenter assignment requires an approval receipt matching the current root plan revision, digest, and user-direction count.
-- A new root plan revision or user direction makes prior approval stale for new implementation.
+- Task goals, assignments, directions, and plan revisions are append-only; the latest plan revision is the sole effective plan.
+- An Implementation Lead or Documenter assignment requires a current Orchestrator plan and immutably binds its revision, digest, and user-direction count.
+- A new root plan revision or user direction makes frozen review snapshots stale, but does not require user reapproval or erase queued workspace custody.
 - Implementation Lead projections expose only their owned subtree's effective plans; Worker and Documenter projections expose only effective plans on their authority lineage.
-- Orchestrator projections and immutable Reviewer snapshots expose full plan and approval history with superseded revisions explicitly non-authoritative.
+- Orchestrator projections and immutable Reviewer snapshots expose full plan history with superseded revisions explicitly non-authoritative.
 - Parent/child protocol uses hidden typed custom messages, never user-role impersonation.
 - Parents receive bounded child-authored reports, never histories.
 - Questions and terminal reports push; awaiting is optional.
@@ -141,7 +141,7 @@ closed|closed_no_changes → cleanup_pending when only cleanup remains
 
 - `reported` requires frozen exact root/head/content tip and no live writer.
 - `acknowledged` requires parent event acknowledgement.
-- `approved` binds task-plan hash, exact expected head, inclusive range, and normalized patches.
+- `approved` is review clearance binding the task snapshot, exact expected head, inclusive range, and normalized patches.
 - Commit-ID-only rewriting does not invalidate approval.
 - Patch change requires review.
 - `integrating` holds repository mutation authority.
@@ -153,7 +153,7 @@ closed|closed_no_changes → cleanup_pending when only cleanup remains
 
 - Managed backend is JJ only.
 - Managed workspace creation resolves source `@-` only when the JJ operation executes and does not persist it as durable identity.
-- Source `@` and `@-` may move freely between workspace operations; no workspace custody or approval binds either source Change ID.
+- Source `@` and `@-` may move freely between workspace operations; no workspace custody or review receipt binds either source Change ID.
 - Isolated custody tracks only the workspace root, expected head, content tip, and ordered feature range Change IDs.
 - Source-parent rebase resolves the then-current source `@-`; integration inserts the approved range immediately before the then-current source `@`.
 - Workspace rebase preserves tracked range identity and order.
@@ -179,12 +179,12 @@ Implementation must make these unrepresentable or reject them:
 - isolated write without writer token;
 - token release before new head receipt persists;
 - Orchestrator with direct file-write authority;
-- Implementation Lead or Documenter launch without current user-evidenced plan approval;
+- Implementation Lead or Documenter launch without a persisted Orchestrator plan binding;
 - Documenter mutation outside assigned documentation paths;
 - Reviewer with write/integration authority;
 - frozen report without root/head/content tip;
-- approval without task plan and normalized-patch receipt;
-- integration without approval;
+- review clearance without task snapshot and normalized-patch receipt;
+- integration without clean review clearance;
 - conflict resolved without squash and focused-review evidence;
 - closed workspace without verification;
 - no-change closure containing nonempty changes;

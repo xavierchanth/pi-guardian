@@ -5,34 +5,34 @@
 
 ## Outcome
 
-Every nonempty isolated range is bound to an explicitly user-approved durable plan, checked by an independent Reviewer against frozen evidence, integrated deterministically into the active source working change, verified, and recoverable across known interruption boundaries.
+Every nonempty isolated range is bound to a durable Orchestrator plan, checked by an independent Reviewer against frozen evidence, integrated deterministically into the active source working change, verified, and recoverable across known interruption boundaries.
 
 ## Delivered
 
 1. State-owned durable task trees with immutable Orchestrator goals, sourced user directions, child execution bindings, effective plans backed by append-only revisions, role-scoped execution projections, and full-history content-addressed review snapshots.
-2. Immutable user-evidenced plan approvals bind the current Orchestrator plan revision and digest. A changed plan or user direction invalidates approval, and Implementation Lead or Documenter assignment, mutation, Worker launch, review, repair, integration, and integration resume all require the current approval.
+2. Plan-bound assignments capture the current Orchestrator plan revision, digest, and direction count without user approval. Changed plans or directions stale frozen review snapshots, while queued workspace custody remains available for redirection, repair, and re-review.
 3. The enforced responsibility graph is Orchestrator → Implementation Lead/Documenter/Reviewer/Scout/Researcher and Implementation Lead → Worker/Scout/Researcher. The Orchestrator cannot implement or launch a Worker directly; a Documenter cannot delegate and may change only explicitly assigned documentation paths.
 4. Read-only Reviewer role and structured immutable findings using canonical `p0`–`p4` severity and introduced/in-scope/out-of-scope relation.
-5. Immutable review bundles and approval receipts bind the approved plan, task snapshot, root/head/content tip, ordered Change IDs, normalized patches, conflicts, findings, and Orchestrator dispositions.
+5. Immutable review bundles and clearance receipts bind the current task snapshot, task snapshot, root/head/content tip, ordered Change IDs, normalized patches, conflicts, findings, and Orchestrator dispositions.
 6. Deterministic policy blocks every `p0`/`p1`, requires a disposition for `p2`, and permits one repair plus focused re-review cycle.
 7. Receipt-gated integration before the source working change with persisted detach, empty removal, insertion, graph verification, and directory cleanup boundaries.
 8. Exact conflict ownership, deterministic resolution squash contracts, and mandatory focused re-review before conflicted integration can become integrated.
-9. Sourced-user-authority `rebind_tracked_change`, `resume_workspace_operation`, and `retry_workspace_cleanup` boundaries.
+9. Deterministically constrained `rebind_tracked_change`, `resume_workspace_operation`, and `retry_workspace_cleanup` boundaries.
 10. Separate JJ/product verification and explicit closed, closed-no-changes, cleanup-pending, conflict-resolution, and attention-required custody.
 11. Production task/review/integration tools and canonical Orchestrator, Implementation Lead, Documenter, Worker, Reviewer, Scout, and Researcher policies; packaged roles no longer use `update_plan`.
 
 ## Required proofs
 
-- no Implementation Lead or Documenter assignment launches without current user-evidenced plan approval;
-- plan or user-direction changes invalidate execution and review authority until reapproved;
+- no Implementation Lead or Documenter assignment launches without a persisted current plan binding;
+- plan or user-direction changes stale review snapshots without introducing user-approval gates;
 - stale or mismatched review cannot integrate;
 - commit-ID-only rewrite does not spuriously invalidate review;
 - source working-change bytes/Change ID survive integration;
-- only approved inclusive range and empties integrate;
+- only the clean reviewed inclusive range and empties integrate;
 - owned unique conflicts repair; foreign/ambiguous conflicts stop;
 - one automatic repair/re-review cycle is enforced;
 - crash at every phase resumes only next proved idempotent boundary;
-- recovery tools require explicit authority and cannot discard work.
+- deterministic recovery tools cannot discard work, while ambiguous choices require user direction.
 
 ## Open defects in delivered work
 
@@ -61,7 +61,7 @@ Since `planId` is a digest of the snapshot, this is a compare-and-swap on eviden
 
 ## Exit criteria
 
-- No nonempty isolated work integrates without accepted reviewer evidence.
+- No nonempty isolated work integrates without clean reviewer evidence.
 - Integration completion is distinct from product verification.
 - Unknown partial mutation enters attention-required with last-safe evidence.
 - Conflict resolution is always reported to the user.

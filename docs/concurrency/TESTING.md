@@ -81,7 +81,7 @@ Normalized equality excludes commit IDs unless rewrite itself is under test.
 
 ### Recovery
 
-- explicit rebind requires user authorization and unique owned replacement;
+- rebind requires a unique connected owned replacement;
 - resume cannot repeat completed boundary;
 - cleanup retry cannot mutate graph or discard changes;
 - unknown partial state remains mutation-stopped.
@@ -132,7 +132,7 @@ Representative opt-in cases:
 6. owned conflict is repaired, squashed, reviewed, and reported;
 7. foreign conflict stops and asks;
 8. root restart resumes children with reacquired claims;
-9. unexpected head stops until user-authorized rebind;
+9. unexpected head stops until deterministic unique connected rebind;
 10. compacted child completes without leaking history.
 
 The harness independently asserts final filesystem, graph, receipts, events, bounded messages, forbidden tools, and usage regression budgets.

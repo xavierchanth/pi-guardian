@@ -49,15 +49,13 @@ test("Pi-Tai packages a global instruction layer and declarative agent definitio
   }
 });
 
-test("design is packaged as a codebase-grounded skill", () => {
-  const directory = join(root, "packages/pi-tai/skills/design");
-  const skill = readFileSync(join(directory, "SKILL.md"), "utf8");
-  assert.match(skill, /name: design/);
-  assert.match(skill, /Stay in design rather than implementation/);
-  assert.match(skill, /Inspect the relevant source code, tests, configuration/);
-  assert.match(skill, /Discover and read relevant repository guidance/);
-  assert.match(skill, /Check important claims against the code/);
-  assert.match(skill, /implementation and validation plan/);
+test("grounded DPIC guidance is integrated into the Orchestrator", () => {
+  const orchestrator = readFileSync(join(root, "packages/pi-tai/agents/orchestrator.md"), "utf8");
+  assert.match(orchestrator, /Follow Design–Plan–Implement–Confirm/);
+  assert.match(orchestrator, /Move to Plan only when/);
+  assert.match(orchestrator, /intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria/);
+  assert.match(orchestrator, /without requesting ceremonial approval/);
+  assert.equal(existsSync(join(root, "packages/pi-tai/skills/design")), false);
   assert.equal(existsSync(join(root, "packages/pi-tai/skills/workspace")), false);
 });
 
@@ -69,14 +67,15 @@ test("checkpoint prompt accepts additional instructions", () => {
   assert.match(prompt, /without weakening the safety requirements above/);
 });
 
-test("implement prompt integrates feedback before approved-plan execution", () => {
-  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/implement.md"), "utf8");
-  assert.match(prompt, /argument-hint: "\[plan feedback or additional notes\]"/);
-  assert.match(prompt, /## Plan feedback and additional notes/);
-  assert.match(prompt, /\$\{ARGUMENTS:-No additional feedback or notes were provided\.\}/);
-  assert.match(prompt, /integrate them into the current effective plan/);
-  assert.match(prompt, /immediately implement and validate/);
-  assert.match(prompt, /Do not stop merely to present the revised plan/);
+test("DPIC prompt activates subagents before prompt-template expansion", () => {
+  assert.equal(existsSync(join(root, "packages/pi-tai/prompts/implement.md")), false);
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
+  assert.match(prompt, /argument-hint: "\[work description\]"/);
+  assert.match(prompt, /Design–Plan–Implement–Confirm/);
+  assert.match(prompt, /Move to Plan only when/);
+  const source = readFileSync(join(root, "packages/pi-tai/src/subagents/register.ts"), "utf8");
+  assert.match(source, /\/dpic/);
+  assert.match(source, /enableRootSubagents/);
 });
 
 test("version-control and invariant modeling skills are packaged", () => {

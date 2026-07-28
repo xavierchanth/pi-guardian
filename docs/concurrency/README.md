@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The concurrency subsystem coordinates collaborative design, approved execution, private child contexts, isolated JJ workspaces, parent/child messages, independent review, integration, recovery, and recursive accounting.
+The concurrency subsystem coordinates Design–Plan–Implement–Confirm, private child contexts, isolated JJ workspaces, parent/child messages, independent review, integration, recovery, and recursive accounting.
 
 Its output is one of:
 
-- an approved design or roadmap decision;
+- a resolved design or roadmap decision;
 - reviewed, integrated, and verified repository changes;
 - a proved no-change result;
 - a bounded user decision request;
@@ -21,10 +21,10 @@ flowchart TD
   Request[User request] --> Ground[Orchestrator grounds request]
   Ground --> Evidence[Direct inspection · Scout · Researcher]
   Evidence --> Design[Orchestrator and user iterate on design]
-  Design --> Decision{User approves current plan?}
-  Decision -->|revise| Design
-  Decision -->|yes| Approval[Immutable approved-plan receipt]
-  Approval --> Route{Approved work type}
+  Design --> Clarity{Consequential decisions resolved?}
+  Clarity -->|no| Design
+  Clarity -->|yes| Plan[Persist implementation plan]
+  Plan --> Route{Planned work type}
   Route -->|product implementation| Lead[Implementation Lead workspace]
   Route -->|standalone docs or roadmap| Documenter[Documenter workspace]
   Lead --> Direct[Implement directly]
@@ -35,35 +35,29 @@ flowchart TD
   Freeze --> Review[Independent Reviewer in same workspace]
   Review -->|blocking findings| Repair[Original role repair cycle]
   Repair --> Review
-  Review -->|approved| Integrate[Orchestrator integrates exact range]
+  Review -->|clean| Integrate[Orchestrator integrates exact range]
   Integrate --> Verify[Verify product state and close custody]
 ```
 
-The Orchestrator follows the codebase-grounded design workflow for implementation requests. It gathers evidence, presents material decisions and tradeoffs, asks the user to resolve consequential ambiguity, and revises the complete effective plan. Implementation cannot begin until explicit user approval is recorded against the current plan revision and digest.
+The Orchestrator follows the codebase-grounded Design phase for implementation requests. It gathers evidence, presents material decisions and tradeoffs, and asks the user to resolve consequential ambiguity. It moves to Plan only when the intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria are clear enough that implementation will not need to invent product or architectural intent. It then persists the complete effective plan and proceeds without a separate approval ceremony.
 
 ## Roles
 
 | Role | Owns | May delegate | Workspace authority |
 |---|---|---|---|
-| **Orchestrator** | User collaboration, grounded design, effective plan, approval boundary, routing, review disposition, integration, final verification | Implementation Lead, Documenter, Reviewer, Scout, Researcher | Exclusive main orchestration workspace; create, review, integrate, close child workspaces |
-| **Implementation Lead** | One approved product task and its complete delivery | Worker, Scout, Researcher | Implement or coordinate within one dedicated workspace; never create or integrate workspaces |
+| **Orchestrator** | User collaboration, grounded design, effective plan, routing, review disposition, integration, final verification | Implementation Lead, Documenter, Reviewer, Scout, Researcher | Exclusive main orchestration workspace; create, review, integrate, close child workspaces |
+| **Implementation Lead** | One plan-bound product task and its complete delivery | Worker, Scout, Researcher | Implement or coordinate within one dedicated workspace; never create or integrate workspaces |
 | **Worker** | One bounded implementation assignment | Scout, Researcher | Assigned target and file set in the Implementation Lead workspace |
-| **Documenter** | One approved standalone architecture, design, documentation, or roadmap update | None | Explicit Markdown documentation paths in one dedicated workspace |
-| **Reviewer** | Independent verification against approved intent and exact frozen range | Scout, Researcher | Read-only in the implementation workspace |
+| **Documenter** | One plan-bound standalone architecture, design, documentation, or roadmap update | None | Explicit Markdown documentation paths in one dedicated workspace |
+| **Reviewer** | Independent verification against current intent and exact frozen range | Scout, Researcher | Read-only in the implementation workspace |
 | **Scout** | Repository evidence | None | Read-only view of caller workspace |
 | **Researcher** | Current external and repository evidence | None | Read-only view of caller workspace |
 
 The Orchestrator never launches a generic Worker. Small product work still goes to an Implementation Lead, which may implement directly. Documentation accompanying product code remains in that Implementation Lead workspace; Documenter is for standalone documentation changes.
 
-## Task and approval authority
+## Task and plan authority
 
-Every substantial request has one durable root task. Design plans are append-only revisions with one current effective revision. Explicit user approval creates an immutable receipt containing:
-
-- current plan revision ID and content digest;
-- approving user-message evidence;
-- Orchestrator context and timestamp.
-
-Implementation Lead and Documenter assignments require a receipt matching the current root plan. A later plan revision makes prior approval stale. Children receive a self-contained task packet and immutable task snapshot rather than parent conversation history.
+Every substantial request has one durable root task. Plans are append-only revisions with one current effective revision. Implementation Lead and Documenter assignments bind the current plan revision, digest, and user-direction count when queued; no user-approval receipt is required. Later plan revisions remain visible as provenance and make existing review snapshots stale, while already queued work remains in custody for the Orchestrator to redirect, repair, or re-review. Children receive a self-contained task packet and immutable task snapshot rather than parent conversation history.
 
 ## Workspace invariants
 
@@ -92,11 +86,11 @@ See [Runtime](RUNTIME.md).
 |---|---|
 | Scout/researcher | Terminal evidence report acknowledged |
 | Worker | Assigned paths checkpointed, validation reported, terminal event acknowledged |
-| Implementation Lead | Descendants acknowledged, complete approved task validated, history curated and frozen; still review-pending |
+| Implementation Lead | Descendants acknowledged, complete assigned task validated, history curated and frozen; still review-pending |
 | Documenter | Assigned documentation validated and frozen; still review-pending |
 | Reviewer | Structured findings delivered and acknowledged |
 | Delegated workspace | Reviewed, integrated, verified, and custody closed or proved no-change |
-| Orchestrator | User-approved intent delivered; every child acknowledged and every workspace closed or honestly mutation-stopped |
+| Orchestrator | Current intent delivered; every child acknowledged and every workspace closed or honestly mutation-stopped |
 
 ## Normative documents
 

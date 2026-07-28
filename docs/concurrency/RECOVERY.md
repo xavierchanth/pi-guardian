@@ -95,23 +95,23 @@ Recovery first builds one bounded expected/observed snapshot covering attachment
 - attention-required;
 - cleanup-pending.
 
-Exact no-choice transitions affecting only managed state may run automatically after snapshot revalidation. Foreign, unowned, destructive, divergent, and ambiguous states preserve evidence and require user direction. No classified state may fail only because the selected tool has an incompatible hidden phase precondition.
+Exact no-choice transitions affecting only managed state may run automatically after snapshot revalidation. Foreign, unowned, destructive, divergent, and ambiguous states preserve evidence and require a semantic user decision. No classified state may fail only because the selected tool has an incompatible hidden phase precondition.
 
 `workspace_custody_status` inspects every phase, `workspace_recovery_plan` returns snapshot-bound actions, and `reconcile_workspace` executes one still-valid action with a complete receipt.
 
-## Explicit user-directed recovery
+## Deterministic and user-directed recovery
 
 ### Rebind tracked change
 
-May adopt one unique verified replacement Change ID only after explicit user authorization. Receipt records old/new identity and authorizing event. Divergent, disconnected, or foreign replacements remain unavailable.
+May deterministically adopt one unique verified connected replacement Change ID. Receipt records old and new identity. Divergent, disconnected, foreign, or multiply-resolved replacements remain unavailable and require a semantic user decision rather than tool approval.
 
 ### Resume operation
 
-Continues only the next idempotent phase of one interrupted operation. It cannot skip, repeat an unproved phase, or guess rollback.
+Runs without user approval and continues only the next idempotent phase of one interrupted operation. It cannot skip, repeat an unproved phase, or guess rollback.
 
 ### Retry cleanup
 
-Retries an exact recorded filesystem/runtime cleanup. It cannot alter history or discard nonempty work.
+Runs without user approval and retries an exact recorded managed filesystem/runtime cleanup. It cannot alter history or discard nonempty work.
 
 ## Review loop budget
 

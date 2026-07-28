@@ -43,7 +43,7 @@ Concurrency has complete custody/closure semantics, bounded multi-client project
 - Cleanup is receipt/custody gated and refuses to discard a nonempty session orchestration change.
 - One-way migration imports only quiescent identity-proved v3 records and quarantines subprocess state, unproved writers, terminal records without exact cycle identity, ambiguous workspaces, and conflicting mirrors.
 - Canonical role projections expose only Orchestrator, Implementation Lead, Documenter, Worker, Reviewer, Scout, and Researcher. Persisted `thinker` and `planner` identifiers are accepted only as legacy migration inputs and normalize to canonical roles.
-- UI and accounting report canonical role names, explicit approved-plan state, isolated workspace custody, and review/integration status.
+- UI and accounting report canonical role names, explicit plan-bound assignment state, isolated workspace custody, and review/integration status.
 
 ## Validation
 

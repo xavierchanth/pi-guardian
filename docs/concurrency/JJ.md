@@ -40,7 +40,7 @@ For substantial work, the orchestrator maintains a durable state-owned task tree
 - review/integration state;
 - deferred findings.
 
-The Orchestrator goal and sourced user directions are immutable. Explicit user approval binds the current Orchestrator plan revision and digest before an Implementation Lead or Documenter workspace can launch. Implementation Lead and Worker projections omit superseded plan text. Reviewers receive an immutable full-history snapshot with current and superseded revisions clearly labeled. Child contexts execute bound task nodes without importing parent conversation history.
+The Orchestrator goal and sourced user directions are immutable. An Implementation Lead or Documenter assignment binds the current Orchestrator plan revision, digest, and user-direction count when its workspace is queued; no user approval is required. Implementation Lead and Worker projections omit superseded plan text. Reviewers receive an immutable full-history snapshot with current and superseded revisions clearly labeled. Child contexts execute bound task nodes without importing parent conversation history.
 
 ## Shared-source lane
 
@@ -166,7 +166,7 @@ Every nonempty isolated range receives a read-only reviewer. The reviewer gets:
 
 Findings have relation (`introduced`, `in_scope_existing`, `out_of_scope_existing`) and canonical severity (`p0`, `p1`, `p2`, `p3`, `p4`). Every p0/p1 must be fixed and removed by focused re-review; p2 requires a orchestrator repair/defer disposition; p3 may defer and p4 records information. Automatic repair is limited to one implementation cycle and one focused re-review unless the user supplies new direction.
 
-Approval is an immutable receipt binding plan hash, exact identities, ordered Change IDs, normalized patch hashes, conflicts, and findings. Commit-ID-only rewrite does not stale it; patch changes do.
+Review clearance is an immutable receipt binding the task snapshot, exact identities, ordered Change IDs, normalized patch hashes, conflicts, and findings. Commit-ID-only rewrite does not stale it; patch changes do.
 
 ## Integration
 
@@ -178,8 +178,8 @@ Deterministic integration:
 2. revalidate identities, patches, conflicts, and range under lock;
 3. capture recovery identities;
 4. forget workspace only at the documented mutation boundary;
-5. remove only approved empty changes/expected empty head;
-6. insert the approved nonempty range immediately before source `@` as resolved when insertion executes;
+5. remove only reviewed empty changes/expected empty head;
+6. insert the reviewed nonempty range immediately before source `@` as resolved when insertion executes;
 7. preserve the then-current source working-copy content;
 8. verify ancestry, order, names, conflicts, and patches;
 9. remove managed directory only after graph independence;
