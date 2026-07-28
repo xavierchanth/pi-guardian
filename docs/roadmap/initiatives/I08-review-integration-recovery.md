@@ -9,9 +9,9 @@ Every nonempty isolated range is checked against durable intent, integrated dete
 
 ## Delivered
 
-1. State-owned durable task trees with immutable thinker goals, sourced user directions, child execution bindings, effective plans backed by append-only revisions, role-scoped execution projections, and full-history content-addressed review snapshots.
+1. State-owned durable task trees with immutable orchestrator goals, sourced user directions, child execution bindings, effective plans backed by append-only revisions, role-scoped execution projections, and full-history content-addressed review snapshots.
 2. Read-only reviewer role and structured immutable findings using canonical `p0`–`p4` severity and introduced/in-scope/out-of-scope relation.
-3. Immutable review bundles and approval receipts binding task snapshot, root/head/content tip, ordered Change IDs, normalized patches, conflicts, findings, and thinker dispositions.
+3. Immutable review bundles and approval receipts binding task snapshot, root/head/content tip, ordered Change IDs, normalized patches, conflicts, findings, and orchestrator dispositions.
 4. Deterministic policy blocks every `p0`/`p1`, requires a disposition for `p2`, and permits one repair plus focused re-review cycle.
 5. Receipt-gated integration before source WIP with persisted detach, empty removal, insertion, graph verification, and directory cleanup boundaries.
 6. Exact conflict ownership, deterministic resolution squash contracts, and mandatory focused re-review before conflicted integration can become integrated.
@@ -61,6 +61,6 @@ Since `planId` is a digest of the snapshot, this is a compare-and-swap on eviden
 - Integration completion is distinct from product verification.
 - Unknown partial mutation enters attention-required with last-safe evidence.
 - Conflict resolution is always reported to the user.
-- Task plans refresh thinker context without importing child history.
+- Task plans refresh orchestrator context without importing child history.
 - No recovery evidence path converts a query failure into an absence of evidence.
 - Every disposition in the recovery union is either reachable or explicitly marked reserved.

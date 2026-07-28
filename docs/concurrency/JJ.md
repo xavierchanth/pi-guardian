@@ -31,7 +31,7 @@ The managed session change receives integrated task work. Pi-Tai records its wor
 
 ## Task-plan artifact
 
-For substantial work, the thinker maintains a durable state-owned task tree rendered into immutable content-addressed Markdown snapshots containing:
+For substantial work, the orchestrator maintains a durable state-owned task tree rendered into immutable content-addressed Markdown snapshots containing:
 
 - objective and acceptance criteria;
 - decisions and constraints;
@@ -40,7 +40,7 @@ For substantial work, the thinker maintains a durable state-owned task tree rend
 - review/integration state;
 - deferred findings.
 
-The thinker goal and sourced user directions are immutable; planners replace their current effective implementation plan through append-only revisions. Planner and worker projections omit superseded plan text. Reviewers receive an immutable full-history snapshot with current and superseded revisions clearly labeled. Child contexts execute bound task nodes without importing parent conversation history.
+The Orchestrator goal and sourced user directions are immutable. Explicit user approval binds the current Orchestrator plan revision and digest before an Implementation Lead or Documenter workspace can launch. Implementation Lead and Worker projections omit superseded plan text. Reviewers receive an immutable full-history snapshot with current and superseded revisions clearly labeled. Child contexts execute bound task nodes without importing parent conversation history.
 
 ## Shared-source lane
 
@@ -87,7 +87,7 @@ acquire complete set
 
 ### Workspace allocation
 
-The thinker allocates from source `@-`, preserving source `@` bytes, description, and Change ID:
+The Orchestrator allocates from source `@-`, preserving source `@` bytes, description, and Change ID:
 
 ```text
 recorded source @-
@@ -137,7 +137,7 @@ An entirely empty range closes as no-change without creating synthetic history.
 
 ## Manual workspace rebase
 
-Fetching is separate. The thinker may explicitly rebase the verified root and all owned descendants onto source `@-` or one exact local Change ID.
+Fetching is separate. The orchestrator may explicitly rebase the verified root and all owned descendants onto source `@-` or one exact local Change ID.
 
 The operation holds workspace token and repository mutex and preserves:
 
@@ -162,9 +162,9 @@ Every nonempty isolated range receives a read-only reviewer. The reviewer gets:
 - task-plan snapshot and acceptance criteria;
 - root/content-tip boundaries and expected workspace head;
 - deterministic range/conflict bundle;
-- planner validation and changed-path summary.
+- implementation-lead validation and changed-path summary.
 
-Findings have relation (`introduced`, `in_scope_existing`, `out_of_scope_existing`) and canonical severity (`p0`, `p1`, `p2`, `p3`, `p4`). Every p0/p1 must be fixed and removed by focused re-review; p2 requires a thinker repair/defer disposition; p3 may defer and p4 records information. Automatic repair is limited to one implementation cycle and one focused re-review unless the user supplies new direction.
+Findings have relation (`introduced`, `in_scope_existing`, `out_of_scope_existing`) and canonical severity (`p0`, `p1`, `p2`, `p3`, `p4`). Every p0/p1 must be fixed and removed by focused re-review; p2 requires a orchestrator repair/defer disposition; p3 may defer and p4 records information. Automatic repair is limited to one implementation cycle and one focused re-review unless the user supplies new direction.
 
 Approval is an immutable receipt binding plan hash, exact identities, ordered Change IDs, normalized patch hashes, conflicts, and findings. Commit-ID-only rewrite does not stale it; patch changes do.
 
@@ -194,7 +194,7 @@ Owned unique conflicts are repair states:
 ```text
 inspect exact conflict and owning targets
 → reviewer explains spec impact
-→ thinker assigns bounded worker
+→ orchestrator assigns bounded worker
 → acquire conflict file set
 → resolve and validate
 → deterministically squash each resolution into owning change

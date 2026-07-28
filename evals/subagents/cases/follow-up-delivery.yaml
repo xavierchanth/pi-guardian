@@ -3,7 +3,7 @@ suite: subagents
 id: follow-up-delivery
 title: "Follow-up is queued after active child work"
 execution: specification-only
-setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: running }
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: running }
 interaction: { kind: rpc-delivery, delivery: followUp, message: "After validation, summarize changed paths." }
 assertions:
   - { kind: protocol-invariant, invariant: delivery-semantics }

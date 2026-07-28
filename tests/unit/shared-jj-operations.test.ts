@@ -32,7 +32,7 @@ test("Real-JJ ensures an empty source WIP without changing its Change ID", async
     const after = await fixture.snapshot();
     assert.equal(after.workingCopies[0]?.changeId, before.workingCopies[0]?.changeId);
     const wip = after.changes.find((change) => change.changeId === current);
-    assert.equal(wip?.description, "wip: thinker workspace");
+    assert.equal(wip?.description, "wip: orchestrator workspace");
     assert.equal(wip?.empty, true);
   } catch (error) {
     const retained = await fixture.retainOnFailure(t.name);

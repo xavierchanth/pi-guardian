@@ -24,6 +24,9 @@ import {
 } from "../../packages/pi-tai/src/subagents/launcher.ts";
 import { SubagentOrchestrator } from "../../packages/pi-tai/src/subagents/orchestrator.ts";
 import {
+  canonicalNormalChildren,
+  isAssignedDocumentationPath,
+  isDocumentationPath,
   registerSubagents,
   usesPrivateSdkSubagentContexts,
 } from "../../packages/pi-tai/src/subagents/register.ts";
@@ -51,6 +54,25 @@ const TOOL_NAMES = [
   "read", "write", "edit", "grep", "find", "ls", "bash", "update_plan",
   ...PARENT_TOOL_NAMES, "report_to_parent", "ask_parent",
 ];
+
+test("canonical child policy cannot be broadened by agent overrides", () => {
+  assert.deepEqual([...canonicalNormalChildren("orchestrator")], ["scout", "researcher"]);
+  assert.deepEqual([...canonicalNormalChildren("implementation-lead")], ["worker", "scout", "researcher"]);
+  assert.deepEqual([...canonicalNormalChildren("worker")], ["scout", "researcher"]);
+  assert.deepEqual([...canonicalNormalChildren("custom")], []);
+});
+
+test("documenter path policy permits only explicitly assigned repository docs", () => {
+  assert.equal(isDocumentationPath("/repo", "docs/concurrency/README.md"), true);
+  assert.equal(isDocumentationPath("/repo", "README.md"), true);
+  assert.equal(isDocumentationPath("/repo", "packages/example/README.md"), true);
+  assert.equal(isDocumentationPath("/repo", "src/index.ts"), false);
+  assert.equal(isDocumentationPath("/repo", "packages/pi-tai/agents/orchestrator.md"), false);
+  assert.equal(isDocumentationPath("/repo", "../outside.md"), false);
+  const resources = [{ type: "file", value: "docs/concurrency/README.md" }];
+  assert.equal(isAssignedDocumentationPath("/repo", "docs/concurrency/README.md", resources), true);
+  assert.equal(isAssignedDocumentationPath("/repo", "docs/GLOSSARY.md", resources), false);
+});
 
 test("runtime mode explicitly selects private SDK or legacy child-process composition", () => {
   assert.equal(usesPrivateSdkSubagentContexts("pi-cli"), true);
@@ -83,12 +105,12 @@ test("instruction composition describes sparse shared-cwd delegation without wor
   const prompt = composePiTaiInstructions({
     basePrompt: "base",
     mode: "root",
-    agentName: "thinker",
+    agentName: "orchestrator",
     systemInstructions: "system",
     roleInstructions: "think carefully",
     availableChildren: [{ name: "worker", description: "implements" }],
   });
-  assert.match(prompt, /agent="thinker"/);
+  assert.match(prompt, /agent="orchestrator"/);
   assert.match(prompt, /conversation_history="none"/);
   assert.match(prompt, /cwd="shared"/);
   assert.match(prompt, /allowed_child name="worker"/);
@@ -185,7 +207,7 @@ test("orchestrator launches in the parent cwd and enforces the caller child allo
 });
 
 test("workspace integration is explicit and includes deterministic cleanup", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-implementation-lead-workspace-"));
   const store = new FileDelegationStore(root);
   const orchestrator = new SubagentOrchestrator({
     store,
@@ -195,12 +217,12 @@ test("workspace integration is explicit and includes deterministic cleanup", asy
       cleanup: async () => undefined,
     },
   });
-  const thinker = {
-    ...agent("thinker", ["planner"], true),
+  const orchestratorAgent = {
+    ...agent("orchestrator", ["implementation-lead"], true),
     root: true,
     tools: ["read", "subagent", "workspace_subagent"],
   };
-  const planner = agent("planner", ["worker", "scout", "researcher"], true);
+  const implementationLead = agent("implementation-lead", ["worker", "scout", "researcher"], true);
   const attachment = {
     backend: "jj" as const,
     purpose: "delegation" as const,
@@ -214,8 +236,8 @@ test("workspace integration is explicit and includes deterministic cleanup", asy
   };
   const child = await orchestrator.spawnChild({
     task: { objective: "Plan the subsystem" },
-    agent: planner,
-    caller: thinker,
+    agent: implementationLead,
+    caller: orchestratorAgent,
     parentCwd: attachment.path,
     parentSessionId: "parent",
     workspace: attachment,
@@ -240,7 +262,7 @@ test("workspace integration is explicit and includes deterministic cleanup", asy
 });
 
 test("workspace integration failure enters a non-retryable attention state", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-tai-planner-workspace-stop-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-tai-implementation-lead-workspace-stop-"));
   const store = new FileDelegationStore(root);
   const orchestrator = new SubagentOrchestrator({
     store,
@@ -250,12 +272,12 @@ test("workspace integration failure enters a non-retryable attention state", asy
       cleanup: async () => undefined,
     },
   });
-  const thinker = {
-    ...agent("thinker", ["planner"], true),
+  const orchestratorAgent = {
+    ...agent("orchestrator", ["implementation-lead"], true),
     root: true,
     tools: ["read", "subagent", "workspace_subagent"],
   };
-  const planner = agent("planner", ["worker"], true);
+  const implementationLead = agent("implementation-lead", ["worker"], true);
   const attachment = {
     backend: "jj" as const,
     purpose: "delegation" as const,
@@ -269,8 +291,8 @@ test("workspace integration failure enters a non-retryable attention state", asy
   };
   const child = await orchestrator.spawnChild({
     task: { objective: "Plan the subsystem" },
-    agent: planner,
-    caller: thinker,
+    agent: implementationLead,
+    caller: orchestratorAgent,
     parentCwd: attachment.path,
     parentSessionId: "parent",
     workspace: attachment,
@@ -544,18 +566,18 @@ test("child activity uses only the latest visible assistant text", async () => {
 
 test("tree projection and usage include every descendant exactly once", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-tree-usage-"));
-  const plannerLog = join(root, "planner.jsonl");
+  const plannerLog = join(root, "implementationLead.jsonl");
   const workerLog = join(root, "worker.jsonl");
   const usage = (input: number, output: number, cost: number) => ({ input, output, cacheRead: 0, cacheWrite: 0, totalTokens: input + output, cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost } });
   await writeFile(plannerLog, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(10, 2, .01) } })}\n`);
   await writeFile(workerLog, `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], usage: usage(20, 3, .02) } })}\n`);
-  const planner = { ...record("planner", "completed"), childLogPath: plannerLog, createdAt: new Date(0).toISOString() };
-  const worker = { ...record("worker", "completed"), parentSessionId: "planner-session", parentDelegationId: "planner", childLogPath: workerLog, createdAt: new Date(1).toISOString() };
+  const implementationLead = { ...record("implementation-lead", "completed"), childLogPath: plannerLog, createdAt: new Date(0).toISOString() };
+  const worker = { ...record("worker", "completed"), parentSessionId: "implementation-lead-session", parentDelegationId: "implementation-lead", childLogPath: workerLog, createdAt: new Date(1).toISOString() };
   const scout = { ...record("scout", "completed"), parentSessionId: "worker-session", parentDelegationId: "worker", createdAt: new Date(2).toISOString() };
-  const researcher = { ...record("researcher", "completed"), parentSessionId: "planner-session", parentDelegationId: "planner", createdAt: new Date(3).toISOString() };
-  const records = [researcher, scout, worker, planner];
+  const researcher = { ...record("researcher", "completed"), parentSessionId: "implementation-lead-session", parentDelegationId: "implementation-lead", createdAt: new Date(3).toISOString() };
+  const records = [researcher, scout, worker, implementationLead];
   const tree = delegationTree(records, "parent");
-  assert.deepEqual(tree.map((item) => item.id), ["planner", "worker", "scout", "researcher"]);
+  assert.deepEqual(tree.map((item) => item.id), ["implementation-lead", "worker", "scout", "researcher"]);
   assert.equal(delegationDepth(scout, records), 2);
   assert.deepEqual(tree.map((item) => delegationTreePrefix(item, records)), ["", "├── ", "│   └── ", "└── "]);
   assert.deepEqual(
@@ -563,7 +585,7 @@ test("tree projection and usage include every descendant exactly once", async ()
     ["", "└── ", "    └── "],
   );
   assert.equal((await intrinsicUsage(plannerLog)).input, 10);
-  const total = await treeUsage(planner, records);
+  const total = await treeUsage(implementationLead, records);
   assert.equal(total.input, 30);
   assert.equal(total.output, 5);
   assert.equal(total.cost.total, .03);
@@ -652,7 +674,7 @@ test("abandon_child reports pending cancellation instead of hanging the public t
     modelRegistry: { find: () => ({ provider: "openai-codex", id: "model" }) }, isProjectTrusted: () => true,
     sessionManager: {
       getSessionId: () => "parent", getSessionFile: () => "/session.jsonl",
-      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "thinker" } }],
+      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "orchestrator" } }],
     },
     ui: { notify() {}, setWidget() {} },
   };
@@ -698,7 +720,7 @@ test("acknowledging a terminal child attributes its full tree usage exactly once
     cwd: "/repo", mode: "print", model: undefined, modelRegistry: { find: () => ({ provider: "openai-codex", id: "model" }) }, isProjectTrusted: () => true,
     sessionManager: {
       getSessionId: () => "parent", getSessionFile: () => "/session.jsonl",
-      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "thinker" } }],
+      getEntries: () => [{ type: "custom", customType: "pi-tai-subagent-role", data: { mode: "root", agentName: "orchestrator" } }],
     },
     ui: { notify() {}, setWidget() {} },
   };
@@ -713,7 +735,7 @@ test("acknowledging a terminal child attributes its full tree usage exactly once
   assert.equal(second.usage, undefined);
 });
 
-test("subagents toggles the thinker definition without pausing concurrent parent work", async () => {
+test("subagents toggles the orchestrator definition without pausing concurrent parent work", async () => {
   const handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
   const commands = new Map<string, (args: string, ctx: any) => Promise<void>>();
   const tools = new Map<string, any>();
@@ -746,11 +768,11 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   let workspaceCreate: Record<string, any> | undefined;
   let childRecords: DelegationRecord[] = [{
     ...record("visible", "running"),
-    agent: { ...record("visible", "running").agent, name: "planner" },
+    agent: { ...record("visible", "running").agent, name: "implementation-lead" },
     task: { objective: `task ${"overflow ".repeat(30)}`, uncertaintyHandling: "best-effort" as const },
   }, {
     ...record("active-worker", "running"),
-    parentSessionId: "planner-session",
+    parentSessionId: "implementation-lead-session",
     parentDelegationId: "visible",
     agent: { ...record("active-worker", "running").agent, name: "worker" },
   }, {
@@ -760,7 +782,7 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     task: { objective: `nested ${"overflow ".repeat(30)}`, uncertaintyHandling: "best-effort" },
   }, {
     ...record("finished-descendant", "completed"),
-    parentSessionId: "planner-session",
+    parentSessionId: "implementation-lead-session",
     parentDelegationId: "visible",
     task: { objective: "completed descendant", uncertaintyHandling: "best-effort" },
   }];
@@ -882,14 +904,20 @@ test("subagents toggles the thinker definition without pausing concurrent parent
     capabilities.snapshot().capabilities.map((capability) => capability.id),
     ["subagents"],
   );
-  assert.match(notifications.at(-1) ?? "", /thinker/);
+  assert.match(notifications.at(-1) ?? "", /orchestrator/);
+  const rootGuard = handlers.get("tool_call")?.[0];
+  assert.match((await rootGuard?.({ toolName: "write", toolCallId: "write-1", input: { path: "README.md", content: "mutate" } }, ctx))?.reason ?? "", /Orchestrator is read-only/);
+  assert.match((await rootGuard?.({ toolName: "bash", toolCallId: "bash-1", input: { command: "rm README.md" } }, ctx))?.reason ?? "", /no shell execution authority/);
+  await assert.rejects(tools.get("subagent")?.execute("direct-worker", { agent: "worker", task: { objective: "Bypass Implementation Lead" } }, undefined, undefined, ctx), /cannot launch Workers directly/);
+  await assert.rejects(tools.get("subagent")?.execute("direct-lead", { agent: "implementation-lead", task: { objective: "Bypass workspace" } }, undefined, undefined, ctx), /workspace_subagent/);
+  await assert.rejects(tools.get("subagent")?.execute("direct-review", { agent: "reviewer", task: { objective: "Review without range" } }, undefined, undefined, ctx), /prepare_workspace_review/);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(widgetFactory, undefined);
 
   await commands.get("subagents")?.("list", ctx);
   assert.equal(customViews[0]?.options, undefined);
   assert.match(customViews[0]?.before.join("\n") ?? "", /\[Active \(3\)\]/);
-  assert.match(customViews[0]?.before.join("\n") ?? "", /planner · running[\s\S]*└── worker · running[\s\S]*    └── scout · running/);
+  assert.match(customViews[0]?.before.join("\n") ?? "", /implementation-lead · running[\s\S]*└── worker · running[\s\S]*    └── scout · running/);
   assert.doesNotMatch(customViews[0]?.before.join("\n") ?? "", /completed descendant/);
   assert.match(customViews[0]?.afterRight.join("\n") ?? "", /\[Inactive \(1\)\]/);
   assert.match(customViews[0]?.afterRight.join("\n") ?? "", /completed descendant/);
@@ -897,10 +925,10 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   assert.match(nestedLine.replace(/\u001b\[[0-9;]*m/g, ""), /…$/);
   assert.ok(customViews[0]?.before.every((line) => line.replace(/\u001b\[[0-9;]*m/g, "").length <= 100));
   await commands.get("subagents")?.("inspect", ctx);
-  assert.match(inspectChoices.join("\n"), /visible · planner[\s\S]*├── active-worker · worker[\s\S]*│   └── active-scout · scout[\s\S]*└── finished-descendant · scout/);
+  assert.match(inspectChoices.join("\n"), /visible · implementation-lead[\s\S]*├── active-worker · worker[\s\S]*│   └── active-scout · scout[\s\S]*└── finished-descendant · scout/);
   await commands.get("subagents")?.("inspect visible", ctx);
   assert.equal(customViews[1]?.options, undefined);
-  assert.match(customViews[1]?.before.join("\n") ?? "", /\[Inspect · planner · visible\]/);
+  assert.match(customViews[1]?.before.join("\n") ?? "", /\[Inspect · implementation-lead · visible\]/);
   assert.notDeepEqual(customViews[1]?.before, customViews[1]?.afterG);
   assert.deepEqual(customViews[1]?.before, customViews[1]?.afterg);
   assert.notDeepEqual(customViews[1]?.before, customViews[1]?.afterEnd);
@@ -911,27 +939,15 @@ test("subagents toggles the thinker definition without pausing concurrent parent
   await handlers.get("agent_settled")?.[0]({}, ctx);
   assert.match(injectedMessages.at(-1) ?? "", /^custom:false:.*unresolved or unacknowledged/);
 
-  await tools.get("workspace_subagent")?.execute(
+  await assert.rejects(tools.get("workspace_subagent")?.execute(
     "tool",
-    { agent: "planner", name: "planned", task: { objective: "Plan isolated work" } },
+    { agent: "implementation-lead", taskId: "task-unapproved", name: "planned", task: { objective: "Implement unapproved work" } },
     undefined,
     undefined,
     ctx,
-  );
-  assert.deepEqual(workspaceCreate, { cwd: "/repo", name: "planned", purpose: "delegation" });
-  assert.equal(plannerSpawn?.agent.name, "planner");
-  assert.equal(plannerSpawn?.parentCwd, "/repo/.jj/workspaces/planned");
-  assert.equal(plannerSpawn?.workspace.backend, "jj");
-
-  await tools.get("workspace_subagent")?.execute(
-    "tool",
-    { agent: "worker", name: "bounded", task: { objective: "Implement bounded work" } },
-    undefined,
-    undefined,
-    ctx,
-  );
-  assert.equal(plannerSpawn?.agent.name, "worker");
-  assert.equal(plannerSpawn?.parentCwd, "/repo/.jj/workspaces/bounded");
+  ), /matching durable task assignment/);
+  assert.equal(workspaceCreate, undefined);
+  assert.equal(plannerSpawn, undefined);
 
   childRecords = [];
   await commands.get("subagents")?.("", ctx);
@@ -953,7 +969,7 @@ function agent(name: string, children: string[], canSpawn: boolean): AgentDefini
   return {
     name,
     description: `${name} role`,
-    root: name === "thinker",
+    root: name === "orchestrator",
     provider: "openai-codex",
     model: `model-${name}`,
     effort: "low",
@@ -968,18 +984,20 @@ function agent(name: string, children: string[], canSpawn: boolean): AgentDefini
 }
 
 function agentCatalog(): AgentCatalog {
-  const thinker: AgentDefinition = {
-    ...agent("thinker", ["planner", "worker", "scout", "researcher"], true),
+  const orchestrator: AgentDefinition = {
+    ...agent("orchestrator", ["implementation-lead", "documenter", "worker", "reviewer", "scout", "researcher"], true),
     tools: TOOL_NAMES.filter((name) => name !== "report_to_parent" && name !== "ask_parent"),
     effort: "high",
     model: "gpt-5.6-sol",
   };
-  const planner = agent("planner", ["worker", "scout", "researcher"], true);
+  const implementationLead = agent("implementation-lead", ["worker", "scout", "researcher"], true);
+  const documenter = agent("documenter", [], false);
+  const reviewer = agent("reviewer", ["scout", "researcher"], true);
   const worker = agent("worker", ["scout", "researcher"], true);
   const scout = agent("scout", [], false);
   const researcher = agent("researcher", [], false);
-  const agents = [thinker, planner, worker, scout, researcher];
-  return { root: thinker, agents, byName: new Map(agents.map((value) => [value.name, value])) };
+  const agents = [orchestrator, implementationLead, documenter, reviewer, worker, scout, researcher];
+  return { root: orchestrator, agents, byName: new Map(agents.map((value) => [value.name, value])) };
 }
 
 function record(

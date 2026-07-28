@@ -12,7 +12,7 @@ Each child has independent messages, tools, model, effort, cwd, compaction, jour
 Host-owned root session
 └── root runtime worker / Pi SDK context
     └── root-scoped ConcurrencyCoordinator
-        ├── child context: planner
+        ├── child context: implementation-lead
         │   ├── worker
         │   └── scout
         ├── child context: researcher

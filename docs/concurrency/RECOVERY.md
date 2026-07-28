@@ -116,7 +116,7 @@ Retries an exact recorded filesystem/runtime cleanup. It cannot alter history or
 ## Review loop budget
 
 - `p0`/`p1`: repair when owned and within budget; approval is impossible while either remains.
-- `p2`: thinker must repair or durably defer with rationale.
+- `p2`: orchestrator must repair or durably defer with rationale.
 - `p3`: surface and optionally defer.
 - `p4`: record as information.
 - out-of-scope existing findings do not trigger automatic repair unless they pose immediate safety risk.

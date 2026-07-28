@@ -34,10 +34,12 @@ export const PARENT_TOOL_NAMES = [
   "task_create",
   "task_assign",
   "task_plan",
+  "task_approve_plan",
   "task_record_user_direction",
   "task_status",
   "prepare_workspace_review",
   "workspace_review_status",
+  "inspect_workspace_review",
   "submit_workspace_review",
   "accept_workspace_review",
   "begin_workspace_repair",
@@ -101,7 +103,8 @@ export function reconstructSubagentState(entries: readonly SessionEntry[]): Pers
     if (entry.type !== "custom" || entry.customType !== "pi-tai-subagent-role") continue;
     const data = entry.data as Record<string, unknown> | undefined;
     if (data?.mode === "standalone" || data?.mode === "root" || data?.mode === "child") {
-      return data as unknown as PersistedSubagentState;
+      const state = data as unknown as PersistedSubagentState;
+      return { ...state, ...(state.agentName ? { agentName: canonicalAgentName(state.agentName) } : {}) };
     }
     // Version-2 compatibility.
     if (data?.role === "standalone" || data?.role === "parent" || data?.role === "child") {
@@ -168,6 +171,12 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
     sections.push(facts.join("\n"));
   }
   return sections.join("\n\n");
+}
+
+function canonicalAgentName(name: string): string {
+  if (name === "thinker") return "orchestrator";
+  if (name === "planner") return "implementation-lead";
+  return name;
 }
 
 function escapeAttribute(value: string): string {

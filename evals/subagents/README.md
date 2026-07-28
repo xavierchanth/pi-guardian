@@ -22,7 +22,7 @@ title: "Wait-any is repeated until every child is collected"
 execution: specification-only
 setup:
   kind: subagent-harness
-  parentRole: planner
+  parentRole: implementation-lead
   childRole: worker
   childOutcome: completed
 interaction:
@@ -33,7 +33,7 @@ assertions:
     invariant: collect-every-child
 ```
 
-Interaction kinds encode one bounded Given–When scenario; assertion kinds encode expected Then observations. Interim planner and worker cases explicitly require the observable sequence `parent-steer`, visible bounded status, subsequent work/tool activity, and one later terminal report, with zero interim reports.
+Interaction kinds encode one bounded Given–When scenario; assertion kinds encode expected Then observations. Interim implementation-lead and worker cases explicitly require the observable sequence `parent-steer`, visible bounded status, subsequent work/tool activity, and one later terminal report, with zero interim reports.
 
 ## Add a case
 

@@ -107,7 +107,7 @@ Normalized equality excludes commit IDs unless rewrite itself is under test.
 Score whether the model:
 
 - selects inline/shared/isolated correctly;
-- creates planner only through isolated workspace spawn;
+- creates implementation-lead only through isolated workspace spawn;
 - uses reviewer for every nonempty isolated range;
 - requests bounded summary rather than history;
 - waits only when no independent work remains;
@@ -126,7 +126,7 @@ Representative opt-in cases:
 
 1. small shared change inserts a target after source `@-` and checkpoints one file without rewriting source `@`;
 2. two shared workers serialize on one file;
-3. planner creates several coherent checkpoints and expected empty head;
+3. implementation-lead creates several coherent checkpoints and expected empty head;
 4. manual rebase onto newer local base preserves range identities;
 5. normalization fixes unnamed/empty history before review;
 6. owned conflict is repaired, squashed, reviewed, and reported;

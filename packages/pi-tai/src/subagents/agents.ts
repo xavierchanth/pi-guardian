@@ -56,8 +56,7 @@ const FRONTMATTER_KEYS = new Set([
 ]);
 const NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 const TOOL_PATTERN = /^[a-zA-Z][a-zA-Z0-9_.:-]{0,127}$/;
-const ORCHESTRATION_TOOLS = new Set([
-  "subagent",
+const DELEGATION_CONTROL_TOOLS = new Set([
   "message_child",
   "await_child_event",
   "ack_child_event",
@@ -67,41 +66,7 @@ const ORCHESTRATION_TOOLS = new Set([
   "respond_to_child",
   "abandon_child",
   "workspace_subagent",
-  "integrate_workspace",
-  "describe_integrated_changes",
-  "jj_concurrency_status",
-  "ensure_wip_change",
-  "insert_change",
-  "acquire_file_set",
-  "release_file_set",
-  "checkpoint_change",
-  "workspace_checkpoint",
   "assign_workspace_change",
-  "acquire_workspace_file_set",
-  "release_workspace_file_set",
-  "checkpoint_workspace_file_set",
-  "normalize_change_range",
-  "prepare_workspace_report",
-  "rebase_workspace",
-  "task_create",
-  "task_assign",
-  "task_plan",
-  "task_record_user_direction",
-  "task_status",
-  "prepare_workspace_review",
-  "workspace_review_status",
-  "submit_workspace_review",
-  "accept_workspace_review",
-  "begin_workspace_repair",
-  "verify_integrated_range",
-  "close_workspace",
-  "resume_workspace_operation",
-  "rebind_tracked_change",
-  "retry_workspace_cleanup",
-  "workspace_custody_status",
-  "workspace_recovery_plan",
-  "reconcile_workspace",
-  "squash_resolution",
 ]);
 const CHILD_PROTOCOL_TOOLS = new Set(["report_to_parent", "report_status", "ask_parent"]);
 
@@ -212,8 +177,8 @@ function parseDefinition(
   if (tools.some((tool) => CHILD_PROTOCOL_TOOLS.has(tool))) {
     throw new Error(`Agent definitions must not declare injected child protocol tools in ${filePath}.`);
   }
-  if (!hasSubagent && tools.some((tool) => ORCHESTRATION_TOOLS.has(tool))) {
-    throw new Error(`Agent orchestration controls require the subagent tool in ${filePath}.`);
+  if (!hasSubagent && tools.some((tool) => DELEGATION_CONTROL_TOOLS.has(tool))) {
+    throw new Error(`Agent delegation controls require the subagent tool in ${filePath}.`);
   }
   if (hasSubagent !== (allowedChildren.length > 0)) {
     throw new Error(

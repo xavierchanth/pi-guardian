@@ -151,8 +151,8 @@ for (const failingInspection of ["range", "foreignDescendants"] as const) {
 }
 
 test("workspace recovery plans deterministic automatic actions", () => {
-  const planner = new WorkspaceRecoveryPlanner();
-  const plan = planner.plan(snapshot({ attachment: { directory: "missing", path: base.attachment.path } }));
+  const implementationLead = new WorkspaceRecoveryPlanner();
+  const plan = implementationLead.plan(snapshot({ attachment: { directory: "missing", path: base.attachment.path } }));
   assert.equal(plan.disposition, "reconstructable");
   assert.equal(plan.actions[0]?.automatic, true);
   assert.match(plan.planId, /^recovery-[a-f0-9]{64}$/);

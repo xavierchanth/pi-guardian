@@ -3,7 +3,7 @@ suite: subagents
 id: interim-worker-resumes
 title: "Worker emits bounded interim status and automatically resumes"
 execution: specification-only
-setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: running }
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: running }
 interaction: { kind: interim-status-resume, role: worker, parentMessage: "Steer: report current validation, then continue implementation." }
 assertions:
   - kind: transcript-sequence

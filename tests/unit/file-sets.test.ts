@@ -29,7 +29,7 @@ async function fixture() {
     repositoryRoot: join(workspace, ".jj", "repo"),
     workspacePath: workspace,
     workspaceName: "default",
-    wip: { changeId: WIP, description: "wip: thinker workspace", ensuredOperationId: "operation-1" },
+    wip: { changeId: WIP, description: "wip: orchestrator workspace", ensuredOperationId: "operation-1" },
     targets: TARGETS.map((changeId, index) => ({
       changeId,
       wipChangeId: WIP,

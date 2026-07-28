@@ -25,7 +25,7 @@ Real-JJ tests cover dirty-source allocation, repeated identity tracking, checkpo
 
 ## Outcome
 
-The thinker can allocate tracked isolated JJ workspaces; planners/workers checkpoint coherent units under one writer token; workspaces can rebase explicitly, freeze exact review boundaries, and prove no-effect work.
+The Orchestrator can allocate tracked isolated JJ workspaces; Implementation Leads, Documenters, and Workers checkpoint coherent units under scoped ownership; workspaces can rebase explicitly, freeze exact review boundaries, and prove no-effect work.
 
 ## Work slices
 
@@ -49,7 +49,7 @@ The thinker can allocate tracked isolated JJ workspaces; planners/workers checkp
 
 ## Exit criteria
 
-- Planner/worker cannot create nested workspaces or use arbitrary JJ mutation.
+- Implementation Leads, Documenters, and Workers cannot create nested workspaces or use arbitrary JJ mutation.
 - Every frozen report has exact root/head/content-tip and no live writer.
 - One workspace has at most one writable context.
 - Workspace rebase never fetches or publishes.

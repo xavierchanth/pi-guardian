@@ -5,7 +5,7 @@
 
 ## Outcome
 
-Bounded workers safely edit a shared source workspace through atomic whole-file ownership and deterministic feature checkpoints while preserving the thinker's private WIP change.
+Bounded workers safely edit a shared source workspace through atomic whole-file ownership and deterministic feature checkpoints while preserving the orchestrator's private WIP change.
 
 The complete supported path is:
 
@@ -74,7 +74,7 @@ inspect or ensure source WIP
 
 ### Production cutover and proof
 
-- Bounded model tools, thinker/worker role policy, task instructions, source-tool guards, and runtime reconciliation use the shared path.
+- Bounded model tools, orchestrator/worker role policy, task instructions, source-tool guards, and runtime reconciliation use the shared path.
 - Model schemas omit cwd, revsets, JJ argv, WIP/target Change IDs, and operation IDs.
 - Real-JJ tests prove one-path extraction, unrelated WIP preservation, wrong-scope/owner denial, all-path extraction, interruption classification, and two contending writers producing `edit→checkpoint→edit→checkpoint`.
 - Typecheck, full test suites, isolated package smoke, documentation links, and diff checks passed at milestone completion.

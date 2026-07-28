@@ -39,7 +39,7 @@ test("source uses the current Pi distribution imports", () => {
 test("Pi-Tai packages a global instruction layer and declarative agent definitions", () => {
   const system = join(root, "packages/pi-tai/instructions/system.md");
   assert.ok(existsSync(system), system);
-  for (const name of ["thinker", "planner", "worker", "scout", "researcher"]) {
+  for (const name of ["orchestrator", "implementation-lead", "documenter", "worker", "reviewer", "scout", "researcher"]) {
     const path = join(root, "packages/pi-tai/agents", `${name}.md`);
     const content = readFileSync(path, "utf8");
     assert.match(content, new RegExp(`name: ${name}`));

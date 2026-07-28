@@ -328,7 +328,7 @@ export class SubagentOrchestrator {
     const record = await this.child(id);
     const state = requireWorkspacePhase(record, "active");
     if (record.execution.phase !== "completed") {
-      throw new Error(`Planner workspace integration requires a completed child; current phase is ${record.execution.phase}.`);
+      throw new Error(`Implementation Lead workspace integration requires a completed child; current phase is ${record.execution.phase}.`);
     }
     const tip = await workspace.captureTip(state.attachment);
     try {

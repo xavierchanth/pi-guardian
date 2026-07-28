@@ -4,12 +4,14 @@ This document is normative. Boundary DTOs may be migration-tolerant; conversion 
 
 ## Runtime invariants
 
-- One Host-owned root session has one thinker and one isolated coordinator.
+- One Host-owned root session has one Orchestrator and one isolated runtime coordinator.
 - Every child has exactly one direct parent and one immutable role/task authority snapshot.
 - Child contexts are private Pi SDK contexts, not user-selectable sessions.
-- Task goals, assignments, directions, and plan revisions are append-only; the latest plan revision is the sole effective plan.
-- Planner projections expose only their owned subtree's effective plans; worker projections expose only effective plans on their authority lineage.
-- Thinker projections and immutable reviewer snapshots expose full plan history with superseded revisions explicitly non-authoritative.
+- Task goals, assignments, directions, plan revisions, and plan approvals are append-only; the latest plan revision is the sole effective plan.
+- An Implementation Lead or Documenter assignment requires an approval receipt matching the current root plan revision, digest, and user-direction count.
+- A new root plan revision or user direction makes prior approval stale for new implementation.
+- Implementation Lead projections expose only their owned subtree's effective plans; Worker and Documenter projections expose only effective plans on their authority lineage.
+- Orchestrator projections and immutable Reviewer snapshots expose full plan and approval history with superseded revisions explicitly non-authoritative.
 - Parent/child protocol uses hidden typed custom messages, never user-role impersonation.
 - Parents receive bounded child-authored reports, never histories.
 - Questions and terminal reports push; awaiting is optional.
@@ -174,7 +176,10 @@ Implementation must make these unrepresentable or reject them:
 - checkpoint into unassigned Change ID;
 - isolated write without writer token;
 - token release before new head receipt persists;
-- reviewer with write/integration authority;
+- Orchestrator with direct file-write authority;
+- Implementation Lead or Documenter launch without current user-evidenced plan approval;
+- Documenter mutation outside assigned documentation paths;
+- Reviewer with write/integration authority;
 - frozen report without root/head/content tip;
 - approval without task plan and normalized-patch receipt;
 - integration without approval;

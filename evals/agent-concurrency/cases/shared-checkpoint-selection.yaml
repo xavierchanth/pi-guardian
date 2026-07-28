@@ -5,7 +5,7 @@ title: Shared source work selects semantic checkpoint capabilities
 mode: policy
 prompt: >-
   Implement a bounded change to src/example.ts in the shared source workspace.
-  Preserve unrelated thinker work and checkpoint the result safely.
+  Preserve unrelated orchestrator work and checkpoint the result safely.
 expectedTools:
   - acquire_file_set
   - insert_change

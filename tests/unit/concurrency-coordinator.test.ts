@@ -15,7 +15,7 @@ import type { AgentDefinitionSnapshot } from "../../packages/pi-tai/src/subagent
 
 function snapshot(name: string, allowedChildren: string[] = []): AgentDefinitionSnapshot {
   return {
-    name, description: name, root: name === "thinker", provider: "faux", model: "scripted", effort: "low",
+    name, description: name, root: name === "orchestrator", provider: "faux", model: "scripted", effort: "low",
     tools: [], allowedChildren, uncertaintyHandling: "best-effort", systemPrompt: name,
     source: "packaged", filePath: `${name}.md`, contentHash: "hash",
   };
@@ -79,11 +79,11 @@ test("root-scoped coordinator persists intent before starting private contexts",
   const registry = {} as ExtensionContext["modelRegistry"];
   const first = await coordinator.spawn({
     rootSessionId: "root-a", cwd: "/repo", task: { objective: "first", uncertaintyHandling: "best-effort" },
-    caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"), modelRegistry: registry,
+    caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"), modelRegistry: registry,
   });
   const second = await coordinator.spawn({
     rootSessionId: "root-b", cwd: "/repo", task: { objective: "second", uncertaintyHandling: "best-effort" },
-    caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"), modelRegistry: registry,
+    caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"), modelRegistry: registry,
   });
   assert.equal(first.execution.phase, "running");
   assert.equal(second.execution.phase, "running");
@@ -107,7 +107,7 @@ test("explicit cancellation terminates one cycle and preserves sibling runtime",
     stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
   });
   const request = {
-    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
     modelRegistry: {} as ExtensionContext["modelRegistry"],
   };
   await coordinator.spawn({ ...request, task: { objective: "one", uncertaintyHandling: "best-effort" } });
@@ -131,7 +131,7 @@ test("cancellation returns pending instead of hanging on a non-cooperative child
     cancellationGraceMs: 1,
   });
   await coordinator.spawn({
-    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
     modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
   });
 
@@ -163,7 +163,7 @@ test("root disposal is bounded when a child ignores abort", async () => {
     cancellationGraceMs: 1,
   });
   await coordinator.spawn({
-    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
     modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
   });
 
@@ -186,7 +186,7 @@ test("cancellation settles descendants before their parent and leaves siblings l
     stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
   });
   const request = {
-    rootSessionId: "root", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    rootSessionId: "root", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
     modelRegistry: {} as ExtensionContext["modelRegistry"],
   };
   await coordinator.spawn({ ...request, contextId: "parent", task: { objective: "parent", uncertaintyHandling: "best-effort" } });
@@ -212,7 +212,7 @@ test("cancellation never rewrites an already terminal context", async () => {
     store, sessionFactory: factory, stateRoot: root, agentDir: root, id: () => ids.shift()!, now: () => "2026-01-01T00:00:00Z",
   });
   await coordinator.spawn({
-    rootSessionId: "root", contextId: "child-1", cwd: "/repo", caller: snapshot("thinker", ["worker"]), agent: snapshot("worker"),
+    rootSessionId: "root", contextId: "child-1", cwd: "/repo", caller: snapshot("orchestrator", ["worker"]), agent: snapshot("worker"),
     modelRegistry: {} as ExtensionContext["modelRegistry"], task: { objective: "one", uncertaintyHandling: "best-effort" },
   });
   await store.update("child-1", (current) => ({

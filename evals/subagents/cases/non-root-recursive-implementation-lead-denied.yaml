@@ -1,0 +1,9 @@
+version: 1
+suite: subagents
+id: non-root-recursive-implementation-lead-denied
+title: "Non-root child cannot recursively create a implementation-lead workspace"
+execution: specification-only
+setup: { kind: subagent-harness, parentRole: root, childRole: implementation-lead, childOutcome: running }
+interaction: { kind: recursive-implementation-lead-workspace, requesterRole: implementation-lead }
+assertions:
+  - { kind: protocol-invariant, invariant: deny-recursive-implementation-lead-workspace }

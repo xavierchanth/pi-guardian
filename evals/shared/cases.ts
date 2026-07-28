@@ -2,22 +2,22 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
 
-export type SubagentParentRole = "root" | "planner";
+export type SubagentParentRole = "root" | "implementation-lead";
 export type ChildOutcome = "running" | "completed" | "failed" | "cancelled";
-export type SubagentSetup = { kind: "subagent-harness"; parentRole: SubagentParentRole; childRole: "planner" | "worker"; childOutcome: ChildOutcome };
+export type SubagentSetup = { kind: "subagent-harness"; parentRole: SubagentParentRole; childRole: "implementation-lead" | "worker"; childOutcome: ChildOutcome };
 export type SubagentInteraction =
   | { kind: "launch-without-collection"; childCount: number }
   | { kind: "wait-any-collection"; childCount: number }
   | { kind: "question-response-resume"; question: string; response: string }
   | { kind: "rpc-delivery"; delivery: "steer" | "followUp"; message: string }
-  | { kind: "interim-status-resume"; role: "planner" | "worker"; parentMessage: string }
+  | { kind: "interim-status-resume"; role: "implementation-lead" | "worker"; parentMessage: string }
   | { kind: "terminal-report"; attemptedReports: number }
   | { kind: "parent-completion"; unresolvedDescendants: number }
-  | { kind: "recursive-planner-workspace"; requesterRole: "planner" | "worker" }
+  | { kind: "recursive-implementation-lead-workspace"; requesterRole: "implementation-lead" | "worker" }
   | { kind: "inspect-child-record"; outcome: "failed" | "cancelled" };
 export type TranscriptEvent = "parent-steer" | "visible-bounded-status" | "subsequent-work" | "tool-activity" | "terminal-report";
 export type SubagentAssertion =
-  | { kind: "protocol-invariant"; invariant: "launch-not-completion" | "collect-every-child" | "question-resumes-child" | "delivery-semantics" | "single-terminal-report" | "block-unresolved-parent" | "deny-recursive-planner-workspace" | "terminal-record-inspectable" }
+  | { kind: "protocol-invariant"; invariant: "launch-not-completion" | "collect-every-child" | "question-resumes-child" | "delivery-semantics" | "single-terminal-report" | "block-unresolved-parent" | "deny-recursive-implementation-lead-workspace" | "terminal-record-inspectable" }
   | { kind: "transcript-sequence"; events: TranscriptEvent[] }
   | { kind: "report-count"; phase: "interim" | "terminal"; count: number };
 export type SubagentCase = { version: 1; suite: "subagents"; id: string; title: string; execution: "specification-only"; setup: SubagentSetup; interaction: SubagentInteraction; assertions: SubagentAssertion[] };
@@ -33,9 +33,9 @@ function subagentSetup(raw: unknown, source: string): SubagentSetup {
   const value = mapping(raw, source, "setup");
   exact(value, ["kind", "parentRole", "childRole", "childOutcome"], source, "setup");
   if (value.kind !== "subagent-harness") fail(source, "setup.kind", "expected subagent-harness");
-  const parentRole = oneOf(value.parentRole, ["root", "planner"] as const, source, "setup.parentRole");
-  const childRole = oneOf(value.childRole, ["planner", "worker"] as const, source, "setup.childRole");
-  if ((parentRole === "root" && childRole !== "planner") || (parentRole === "planner" && childRole !== "worker")) {
+  const parentRole = oneOf(value.parentRole, ["root", "implementation-lead"] as const, source, "setup.parentRole");
+  const childRole = oneOf(value.childRole, ["implementation-lead", "worker"] as const, source, "setup.childRole");
+  if ((parentRole === "root" && childRole !== "implementation-lead") || (parentRole === "implementation-lead" && childRole !== "worker")) {
     fail(source, "setup.childRole", `${parentRole} cannot directly launch ${childRole} in the packaged hierarchy`);
   }
   return {
@@ -48,7 +48,7 @@ function subagentSetup(raw: unknown, source: string): SubagentSetup {
 
 function subagentInteraction(raw: unknown, source: string): SubagentInteraction {
   const value = mapping(raw, source, "interaction");
-  const kind = oneOf(value.kind, ["launch-without-collection", "wait-any-collection", "question-response-resume", "rpc-delivery", "interim-status-resume", "terminal-report", "parent-completion", "recursive-planner-workspace", "inspect-child-record"] as const, source, "interaction.kind");
+  const kind = oneOf(value.kind, ["launch-without-collection", "wait-any-collection", "question-response-resume", "rpc-delivery", "interim-status-resume", "terminal-report", "parent-completion", "recursive-implementation-lead-workspace", "inspect-child-record"] as const, source, "interaction.kind");
   const path = "interaction";
   switch (kind) {
     case "launch-without-collection":
@@ -63,16 +63,16 @@ function subagentInteraction(raw: unknown, source: string): SubagentInteraction 
       return { kind, delivery: oneOf(value.delivery, ["steer", "followUp"] as const, source, `${path}.delivery`), message: str(value.message, source, `${path}.message`) };
     case "interim-status-resume":
       exact(value, ["kind", "role", "parentMessage"], source, path);
-      return { kind, role: oneOf(value.role, ["planner", "worker"] as const, source, `${path}.role`), parentMessage: str(value.parentMessage, source, `${path}.parentMessage`) };
+      return { kind, role: oneOf(value.role, ["implementation-lead", "worker"] as const, source, `${path}.role`), parentMessage: str(value.parentMessage, source, `${path}.parentMessage`) };
     case "terminal-report":
       exact(value, ["kind", "attemptedReports"], source, path);
       return { kind, attemptedReports: integer(value.attemptedReports, source, `${path}.attemptedReports`) };
     case "parent-completion":
       exact(value, ["kind", "unresolvedDescendants"], source, path);
       return { kind, unresolvedDescendants: integer(value.unresolvedDescendants, source, `${path}.unresolvedDescendants`) };
-    case "recursive-planner-workspace":
+    case "recursive-implementation-lead-workspace":
       exact(value, ["kind", "requesterRole"], source, path);
-      return { kind, requesterRole: oneOf(value.requesterRole, ["planner", "worker"] as const, source, `${path}.requesterRole`) };
+      return { kind, requesterRole: oneOf(value.requesterRole, ["implementation-lead", "worker"] as const, source, `${path}.requesterRole`) };
     case "inspect-child-record":
       exact(value, ["kind", "outcome"], source, path);
       return { kind, outcome: oneOf(value.outcome, ["failed", "cancelled"] as const, source, `${path}.outcome`) };
@@ -85,7 +85,7 @@ function subagentAssertion(raw: unknown, source: string, index: number): Subagen
   const kind = oneOf(value.kind, ["protocol-invariant", "transcript-sequence", "report-count"] as const, source, `${path}.kind`);
   if (kind === "protocol-invariant") {
     exact(value, ["kind", "invariant"], source, path);
-    return { kind, invariant: oneOf(value.invariant, ["launch-not-completion", "collect-every-child", "question-resumes-child", "delivery-semantics", "single-terminal-report", "block-unresolved-parent", "deny-recursive-planner-workspace", "terminal-record-inspectable"] as const, source, `${path}.invariant`) };
+    return { kind, invariant: oneOf(value.invariant, ["launch-not-completion", "collect-every-child", "question-resumes-child", "delivery-semantics", "single-terminal-report", "block-unresolved-parent", "deny-recursive-implementation-lead-workspace", "terminal-record-inspectable"] as const, source, `${path}.invariant`) };
   }
   if (kind === "report-count") {
     exact(value, ["kind", "phase", "count"], source, path);

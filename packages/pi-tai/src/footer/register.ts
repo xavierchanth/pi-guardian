@@ -70,7 +70,7 @@ function createSnapshot(
         - (rightIndex < 0 ? capabilityOrder.length : rightIndex);
     })
     .map((capability) => {
-      if (capability.id === "subagents") return subagentState.agentName ?? "thinker";
+      if (capability.id === "subagents") return subagentState.agentName ?? "orchestrator";
       return capability.label;
     });
   return {

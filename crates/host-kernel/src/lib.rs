@@ -1010,7 +1010,7 @@ fn record_runtime_usage(
         message_id: message_id.expect("checked").into(),
         provider: provider.expect("checked").into(),
         model: model.expect("checked").into(),
-        role: "thinker".into(),
+        role: "orchestrator".into(),
         input: amount("input"),
         output: amount("output"),
         cache_read: amount("cacheRead"),

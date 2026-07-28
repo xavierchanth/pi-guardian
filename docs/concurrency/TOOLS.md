@@ -14,29 +14,30 @@
 
 Legend: **yes**, **owned** (only with injected authority), **read**, or **no**.
 
-| Capability | Thinker | Planner | Worker | Reviewer | Scout | Researcher |
-|---|---:|---:|---:|---:|---:|---:|
-| Implement | yes | yes | yes | no | no | no |
-| Create normal children | yes | worker/scout/researcher | scout/researcher | scout/researcher | no | no |
-| Create isolated workspace child | yes | no | no | no | no | no |
-| Message/status/await/ack direct child | yes | yes | yes | yes | no | no |
-| Shared file claim/checkpoint | owned | no | owned | no | no | no |
-| Isolated checkpoint/report | no | owned | owned | no | no | no |
-| Rebase/integrate/close workspace | yes | no | no | no | no | no |
-| Inspect exact range/conflicts | yes | owned | bounded | read | no | no |
-| Review exact range | decision | self-check | self-check | yes | no | evidence |
-| Web research | yes | yes | no | yes | no | yes |
-| Recovery rebind/resume | user-authorized | no | no | no | no | no |
+| Capability | Orchestrator | Implementation Lead | Worker | Documenter | Reviewer | Scout | Researcher |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Collaborate with user on design/plan | yes | no | no | no | no | evidence | evidence |
+| Implement product work | no | yes | owned | no | no | no | no |
+| Modify standalone documentation | no | yes | owned | owned | no | no | no |
+| Create normal children | lead/documenter/reviewer/scout/researcher | worker/scout/researcher | scout/researcher | no | scout/researcher | no | no |
+| Create isolated workspace child | yes | no | no | no | no | no | no |
+| Message/status/await/ack direct child | yes | yes | yes | no | yes | no | no |
+| Isolated file claim/checkpoint | no | owned | owned | owned docs | no | no | no |
+| Rebase/integrate/close workspace | yes | no | no | no | no | no | no |
+| Inspect exact range/conflicts | yes | owned | bounded | bounded | read | no | no |
+| Review exact range | disposition | self-check | self-check | self-check | yes | no | evidence |
+| Web research | yes | yes | no | no | yes | no | yes |
+| Recovery rebind/resume | user-authorized | no | no | no | no | no | no |
 
 ## Parent/child tools
 
 ### `spawn_child`
 
-Creates a private child in caller cwd from a role and task packet. Returns launch identity immediately; completion arrives by event. Planner is excluded because planners require isolated workspace allocation.
+Creates a private read-only evidence child or a same-workspace child allowed by the role graph. Returns launch identity immediately; completion arrives by event. Implementation Leads and Documenters require isolated workspace allocation.
 
 ### `spawn_workspace_child`
 
-Atomic thinker-only operation: validate the source base and working change, allocate a managed JJ workspace from source `@-`, capture exact identities and custody, then start a planner or isolated worker. Startup failure preserves custody. No fallback to shared execution.
+Atomic Orchestrator-only operation: require a task bound to the current approved-plan receipt, validate the source base and working change, allocate a managed JJ workspace from source `@-`, capture exact identities and custody, then start an Implementation Lead or Documenter. Startup failure preserves custody. No fallback to shared execution.
 
 ### `message_child` / `message_parent`
 
@@ -96,7 +97,7 @@ Injected workspace, claim, owner, target, and stable-WIP evidence constrain the 
 
 ### `rebase_workspace`
 
-Thinker-only manual operation onto source parent or one exact local Change ID. Moves exact root plus owned descendants under token/mutex and returns range-equivalent, range-changed, or conflicted receipt.
+Orchestrator-only manual operation onto source parent or one exact local Change ID. Moves exact root plus owned descendants under token/mutex and returns range-equivalent, range-changed, or conflicted receipt.
 
 ### `prepare_workspace_report`
 
@@ -112,7 +113,7 @@ Removes exact safe interior empties and applies supplied semantic descriptions w
 
 ### `integrate_workspace`
 
-Thinker-only and review-receipt-gated. Revalidates under mutex, performs documented phases, preserves the source working change, and returns a durable integration, conflict, or cleanup receipt.
+Orchestrator-only and review-receipt-gated. Revalidates under mutex, performs documented phases, preserves the source working change, and returns a durable integration, conflict, or cleanup receipt.
 
 ### `squash_resolution`
 
@@ -134,11 +135,12 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 - `workspace_custody_status`: inspect expected and observed JJ custody facts in every phase.
 - `workspace_recovery_plan`: classify one snapshot into a complete fact-driven disposition and bounded actions.
 - `reconcile_workspace`: revalidate a snapshot-bound plan and execute one exact recovery action.
-- `task_create`: thinker-owned immutable root goal from sourced user intent.
-- `task_assign`: immutable child assignment bound to one execution context.
-- `task_plan`: thinker/planner replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.
-- `task_record_user_direction`: thinker-only sourced user clarification.
-- `task_status`: role-scoped projection—full history for thinker, effective owned subtree for planner, and effective authority lineage for worker.
+- `task_create`: Orchestrator-owned immutable root goal from sourced user intent.
+- `task_assign`: immutable child assignment bound to one execution context; Implementation Lead and Documenter assignments require current approval.
+- `task_plan`: Orchestrator/Implementation Lead replacement of the caller-owned effective plan, backed by append-only revisions and optional sourced direction IDs.
+- `task_approve_plan`: Orchestrator-only immutable approval receipt binding the current plan revision and digest to explicit user-message evidence.
+- `task_record_user_direction`: orchestrator-only sourced user clarification.
+- `task_status`: role-scoped projection—full history for orchestrator, effective owned subtree for implementation-lead, and effective authority lineage for worker.
 - deterministic review snapshot: full task-tree history with current and superseded revisions clearly distinguished in immutable content-addressed Markdown evidence.
 - `concurrency_usage`: exact bounded totals by model, role, context, and cycle.
 
@@ -163,7 +165,7 @@ Transitions custody to closed, closed-no-changes, cleanup-pending, or explicit p
 
 - arbitrary mutating JJ command tool;
 - enter/read-child-session tool;
-- planner/worker nested workspace creation;
+- Implementation Lead/Worker/Documenter nested workspace creation;
 - automatic push/bookmark/config tool;
 - generic rollback or force-remove tool;
 - reviewer-to-repair-worker delegation;

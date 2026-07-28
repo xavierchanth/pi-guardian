@@ -43,7 +43,7 @@ test("Host child store keeps private state out of bounded client projection", as
   const hostState = new HostConcurrencyState({ repository: new HostConcurrencyRepository(host), rootSessionId: "root-1", runtimeGeneration: 1 });
   const tasks = new TaskService(new HostTaskStore(hostState), "/tmp/task-artifacts", () => "now");
   const content = "Implement durable work";
-  const task = await tasks.createRoot({ rootSessionId: "root-1", thinkerContextId: "thinker-1", objective: content, userRequest: { messageId: "user-1", content, contentHash: createHash("sha256").update(content).digest("hex"), observedAt: "now" } });
+  const task = await tasks.createRoot({ rootSessionId: "root-1", orchestratorContextId: "orchestrator-1", objective: content, userRequest: { messageId: "user-1", content, contentHash: createHash("sha256").update(content).digest("hex"), observedAt: "now" } });
   assert.equal((await tasks.get(task.taskId))?.goal.objective, content);
   assert.equal((await store.get("child-1"))?.execution.phase, "running");
   assert.equal((host.aggregate.projection as any).tasks[0].objective, content);

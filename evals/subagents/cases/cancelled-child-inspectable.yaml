@@ -3,7 +3,7 @@ suite: subagents
 id: cancelled-child-inspectable
 title: "Cancelled child retains an inspectable record"
 execution: specification-only
-setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: cancelled }
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: cancelled }
 interaction: { kind: inspect-child-record, outcome: cancelled }
 assertions:
   - { kind: protocol-invariant, invariant: terminal-record-inspectable }

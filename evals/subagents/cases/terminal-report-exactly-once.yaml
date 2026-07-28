@@ -3,7 +3,7 @@ suite: subagents
 id: terminal-report-exactly-once
 title: "A child reports terminal outcome exactly once"
 execution: specification-only
-setup: { kind: subagent-harness, parentRole: planner, childRole: worker, childOutcome: completed }
+setup: { kind: subagent-harness, parentRole: implementation-lead, childRole: worker, childOutcome: completed }
 interaction: { kind: terminal-report, attemptedReports: 2 }
 assertions:
   - { kind: protocol-invariant, invariant: single-terminal-report }

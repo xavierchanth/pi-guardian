@@ -34,8 +34,8 @@ test("usage ledger deduplicates intrinsic messages and aggregates descendants ex
   await store.create(context("parent"));
   await store.create(context("child", "parent"));
   const ledger = new ChildUsageLedger(store, () => "time");
-  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "planner", provider: "faux", model: "one", message: assistant("m1", 10) });
-  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "planner", provider: "faux", model: "one", message: assistant("m1", 10) });
+  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "implementation-lead", provider: "faux", model: "one", message: assistant("m1", 10) });
+  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "implementation-lead", provider: "faux", model: "one", message: assistant("m1", 10) });
   await ledger.recordAssistant({ contextId: "child", cycleId: "cycle-child", role: "worker", provider: "faux", model: "two", message: assistant("m2", 20) });
   const totals = await ledger.totals("root", "parent");
   assert.equal(totals.total.input, 30);
@@ -44,7 +44,7 @@ test("usage ledger deduplicates intrinsic messages and aggregates descendants ex
   assert.equal(totals.byContext.child.input, 20);
   assert.equal(totals.byModel["faux/one"].cost, .03);
   const withoutUsage = { ...assistant("m3", 1), usage: undefined } as unknown as AssistantMessage;
-  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "planner", provider: "faux", model: "one", message: withoutUsage });
+  await ledger.recordAssistant({ contextId: "parent", cycleId: "cycle-parent", role: "implementation-lead", provider: "faux", model: "one", message: withoutUsage });
   assert.deepEqual((await store.get("parent"))?.telemetryGaps.map((gap) => gap.reason), ["missing_message_usage"]);
 });
 

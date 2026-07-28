@@ -86,7 +86,7 @@ test("restart interrupts live claims and workspace writers without preserving ow
   const rebasing: WorkspaceWriterToken = {
     phase: "rebasing",
     workspaceId: workspaceId("workspace-1"),
-    owner: childContextId("thinker-1"),
+    owner: childContextId("orchestrator-1"),
     rootChangeId: changeId("b".repeat(32)),
     expectedHeadChangeId: changeId("c".repeat(32)),
     operationId: jjOperationId("operation-3"),

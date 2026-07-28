@@ -14,7 +14,7 @@ import type { PersistedSharedTargetV1, SharedSourceStore } from "./persistence.t
 import { exactChange, JjCommandError, JjRepositoryKernel } from "./repository.ts";
 import { childContextId, jjOperationId } from "../concurrency/ids.ts";
 
-export const DEFAULT_WIP_DESCRIPTION = "wip: thinker workspace";
+export const DEFAULT_WIP_DESCRIPTION = "wip: orchestrator workspace";
 
 export class SharedJjOperations implements JjStatusReader, WipEnsurer, ChangeInserter {
   private readonly kernel: JjRepositoryKernel;

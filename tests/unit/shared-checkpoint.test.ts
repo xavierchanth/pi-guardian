@@ -47,7 +47,7 @@ test("Real-JJ checkpoints only locked paths and preserves unrelated WIP", async 
     await mkdir(join(fixture.repoPath, "src"), { recursive: true });
     await writeFile(join(fixture.repoPath, "src", "owned.ts"), "export const owned = true;\n");
     await r.fileSets.recordOwnedMutation(r.source, "child-1", "src/owned.ts");
-    await writeFile(join(fixture.repoPath, "notes.md"), "unrelated thinker WIP\n");
+    await writeFile(join(fixture.repoPath, "notes.md"), "unrelated orchestrator WIP\n");
     const wipBefore = await fixture.currentChangeId(fixture.repoPath);
     const result = await r.checkpointer.checkpointChange(claim);
     assert.equal(result.kind, "completed");
@@ -73,7 +73,7 @@ test("Real-JJ rejects a claim over pre-existing unowned WIP paths", async (t) =>
   const fixture = await RealJjFixture.create("pi-tai-shared-baseline-");
   try {
     const r = await setupTarget(fixture, "child-1", "feat(shared): unsafe target");
-    await writeFile(join(fixture.repoPath, "existing.txt"), "thinker work\n");
+    await writeFile(join(fixture.repoPath, "existing.txt"), "orchestrator work\n");
     await assert.rejects(() => r.fileSets.acquire(r.source, {
       rootSessionId: "root-1", ownerContextId: "child-1", paths: ["existing.txt"],
     }), /pre-existing unowned WIP changes/);

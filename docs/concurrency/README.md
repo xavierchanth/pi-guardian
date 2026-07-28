@@ -2,106 +2,87 @@
 
 ## Purpose
 
-The concurrency subsystem coordinates concurrent agents and the work they produce. It owns role selection, task ownership, private child contexts, shared-file coordination, isolated JJ workspaces, parent/child messages, review, integration, recovery, and recursive accounting.
+The concurrency subsystem coordinates collaborative design, approved execution, private child contexts, isolated JJ workspaces, parent/child messages, independent review, integration, recovery, and recursive accounting.
 
 Its output is one of:
 
-- a verified inline result;
-- reviewed, integrated, and verified feature changes;
+- an approved design or roadmap decision;
+- reviewed, integrated, and verified repository changes;
 - a proved no-change result;
 - a bounded user decision request;
 - an `attention_required` handoff with preserved evidence.
 
 It does not own publication, remote bookmarks, user JJ configuration, destructive recovery, or Host/client session arbitration.
 
-## Execution lanes
+## Workflow
 
-| Lane | Use when | Writer model | JJ shape |
-|---|---|---|---|
-| **Inline** | Small, sequential work cheaper to perform directly | Thinker | Main private orchestration change; material work checkpointed deterministically |
-| **Shared** | Bounded implementation with a known complete file set | Queued thinker/worker | Assigned inserted feature Change ID; atomic edit→validate→checkpoint critical section |
-| **Isolated** | Substantial, parallel, overlap-prone, uncertain, or explicitly isolated work | One planner/worker at a time | Separate JJ workspace from source `@-`; reviewed exact Change-ID range |
+```mermaid
+flowchart TD
+  Request[User request] --> Ground[Orchestrator grounds request]
+  Ground --> Evidence[Direct inspection · Scout · Researcher]
+  Evidence --> Design[Orchestrator and user iterate on design]
+  Design --> Decision{User approves current plan?}
+  Decision -->|revise| Design
+  Decision -->|yes| Approval[Immutable approved-plan receipt]
+  Approval --> Route{Approved work type}
+  Route -->|product implementation| Lead[Implementation Lead workspace]
+  Route -->|standalone docs or roadmap| Documenter[Documenter workspace]
+  Lead --> Direct[Implement directly]
+  Lead --> Workers[Coordinate bounded Workers]
+  Direct --> Freeze[Validate and freeze exact range]
+  Workers --> Freeze
+  Documenter --> Freeze
+  Freeze --> Review[Independent Reviewer in same workspace]
+  Review -->|blocking findings| Repair[Original role repair cycle]
+  Repair --> Review
+  Review -->|approved| Integrate[Orchestrator integrates exact range]
+  Integrate --> Verify[Verify product state and close custody]
+```
 
-Read-only scouts, researchers, and reviewers may run concurrently without write claims.
-
-### Routing
-
-1. Read-only repository evidence → scout.
-2. Current external evidence → researcher.
-3. Small direct work → thinker inline.
-4. Bounded work with known files → shared worker.
-5. Substantial decomposition → isolated planner.
-6. Bounded but uncertain/explicitly isolated → isolated worker.
-7. Independent slices → separate isolated workspaces.
-8. Related slices sharing evolving code → one sequential owner.
-9. Every nonempty isolated range → independent reviewer before integration.
-10. Scope expansion → checkpoint/release current ownership, then acquire a wider set or reroute.
+The Orchestrator follows the codebase-grounded design workflow for implementation requests. It gathers evidence, presents material decisions and tradeoffs, asks the user to resolve consequential ambiguity, and revises the complete effective plan. Implementation cannot begin until explicit user approval is recorded against the current plan revision and digest.
 
 ## Roles
 
 | Role | Owns | May delegate | Workspace authority |
 |---|---|---|---|
-| **Thinker** | User intent, routing, task plan, final verification | Planner, worker, reviewer, scout, researcher | Create, review, integrate, close |
-| **Planner** | One substantial isolated slice and its internal decomposition | Worker, scout, researcher | Checkpoint/freeze own workspace; never create/integrate |
-| **Worker** | One bounded implementation | Scout, researcher | Assigned shared target or bounded isolated write; no lifecycle authority |
-| **Reviewer** | Spec/task-plan verification against exact range | Scout, researcher | Read-only |
-| **Scout** | Repository evidence | None | None |
-| **Researcher** | External and repository evidence | None | None |
+| **Orchestrator** | User collaboration, grounded design, effective plan, approval boundary, routing, review disposition, integration, final verification | Implementation Lead, Documenter, Reviewer, Scout, Researcher | Exclusive main orchestration workspace; create, review, integrate, close child workspaces |
+| **Implementation Lead** | One approved product task and its complete delivery | Worker, Scout, Researcher | Implement or coordinate within one dedicated workspace; never create or integrate workspaces |
+| **Worker** | One bounded implementation assignment | Scout, Researcher | Assigned target and file set in the Implementation Lead workspace |
+| **Documenter** | One approved standalone architecture, design, documentation, or roadmap update | None | Explicit Markdown documentation paths in one dedicated workspace |
+| **Reviewer** | Independent verification against approved intent and exact frozen range | Scout, Researcher | Read-only in the implementation workspace |
+| **Scout** | Repository evidence | None | Read-only view of caller workspace |
+| **Researcher** | Current external and repository evidence | None | Read-only view of caller workspace |
 
-A planner is not a generic second thinker. A worker is not an open-ended planner. A reviewer reports findings but never launches a repair worker.
+The Orchestrator never launches a generic Worker. Small product work still goes to an Implementation Lead, which may implement directly. Documentation accompanying product code remains in that Implementation Lead workspace; Documenter is for standalone documentation changes.
 
-## Task ownership
+## Task and approval authority
 
-Every child receives a self-contained packet:
+Every substantial request has one durable root task. Design plans are append-only revisions with one current effective revision. Explicit user approval creates an immutable receipt containing:
 
-- objective and relevant decisions;
-- exact resources and cwd/workspace identity;
-- writable scope or explicit read-only status;
-- constraints and forbidden operations;
-- acceptance criteria;
-- expected report shape;
-- uncertainty/question behavior;
-- task-plan snapshot when relevant.
+- current plan revision ID and content digest;
+- approving user-message evidence;
+- Orchestrator context and timestamp.
 
-Children do not inherit parent conversation history. Authority derives from the packet, immutable role snapshot, tracked change/workspace assignment, and active coordination token.
+Implementation Lead and Documenter assignments require a receipt matching the current root plan. A later plan revision makes prior approval stale. Children receive a self-contained task packet and immutable task snapshot rather than parent conversation history.
 
-## Core workflow
+## Workspace invariants
 
-```mermaid
-flowchart TD
-  Objective[User objective] --> Route{Route slice}
-  Route -->|small| Inline[Thinker inline]
-  Route -->|bounded known files| Shared[Shared worker]
-  Route -->|substantial/uncertain| Isolated[Isolated planner or worker]
-  Route -->|read-only| Evidence[Scout/researcher]
-
-  Shared --> Claim[Acquire complete file set]
-  Claim --> SharedEdit[Read · edit · validate]
-  SharedEdit --> Checkpoint[Checkpoint assigned Change ID]
-  Checkpoint --> Ack[Report and acknowledge]
-
-  Isolated --> Work[Checkpoint coherent units]
-  Work --> Freeze[Freeze root/head/content tip]
-  Freeze --> Review[Independent reviewer]
-  Review -->|approved| Integrate[Integrate exact range]
-  Review -->|goal-blocking/high| Repair[One bounded repair cycle]
-  Repair --> Review
-  Integrate --> Verify[Verify integrated product state]
-  Verify --> Close[Close custody]
-
-  Inline --> VerifyInline[Validate/checkpoint]
-  Evidence --> Collect[Bounded report]
-```
+1. The main workspace is reserved for Orchestrator lifecycle operations and integration.
+2. The Orchestrator cannot edit files or use shell mutation.
+3. Every writable child starts in a dedicated managed JJ workspace.
+4. Workers share their Implementation Lead's workspace under disjoint file-set ownership; nested workspaces are forbidden.
+5. Documenters can modify only assigned documentation paths.
+6. Every nonempty delegated range receives independent review in that same workspace before integration.
+7. Repair resumes through the original workspace role, followed by focused re-review.
+8. Integration, verification, and closure remain Orchestrator-only deterministic operations.
 
 ## Parent/child communication
 
 - Children push typed questions, terminal results, status responses, and incidents.
-- Messages are hidden custom Pi messages, never impersonated user messages.
 - Parents receive bounded reports, never transcripts or raw tool streams.
 - `await_child_event` is an optional token-free barrier, not polling.
-- Every terminal report is delivered and explicitly acknowledged exactly once.
+- Every terminal report is delivered and acknowledged exactly once.
 - Delegation is not completion: a parent cannot settle with unresolved or unacknowledged direct children.
-- A user message interrupts only an active await; it does not cancel children.
 
 See [Runtime](RUNTIME.md).
 
@@ -110,11 +91,12 @@ See [Runtime](RUNTIME.md).
 | Actor/artifact | Complete means |
 |---|---|
 | Scout/researcher | Terminal evidence report acknowledged |
-| Shared worker | Report acknowledged, claim released, checkpoint receipt accepted, caller validated |
-| Planner | Descendants acknowledged, validation passed, history curated and frozen, report delivered; still review-pending |
+| Worker | Assigned paths checkpointed, validation reported, terminal event acknowledged |
+| Implementation Lead | Descendants acknowledged, complete approved task validated, history curated and frozen; still review-pending |
+| Documenter | Assigned documentation validated and frozen; still review-pending |
 | Reviewer | Structured findings delivered and acknowledged |
-| Isolated slice | Reviewed, integrated, verified, and custody closed or proved no-change |
-| Thinker | Every child acknowledged; every workspace closed, intentionally preserved, or honestly mutation-stopped; acceptance criteria verified |
+| Delegated workspace | Reviewed, integrated, verified, and custody closed or proved no-change |
+| Orchestrator | User-approved intent delivered; every child acknowledged and every workspace closed or honestly mutation-stopped |
 
 ## Normative documents
 

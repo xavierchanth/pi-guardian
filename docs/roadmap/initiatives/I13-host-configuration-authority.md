@@ -154,7 +154,7 @@ repositories routinely, and the CLI's "you `cd`'d here deliberately" assumption 
 
 **Project agent definitions may only narrow.** Trusted nearest-project `.pi/agents` definitions
 currently have *highest* precedence, and agent front matter carries an explicit `tools:` list
-(`packages/pi-tai/agents/thinker.md:8-30`), so a cloned repository can redefine `worker` with a
+(`packages/pi-tai/agents/orchestrator.md:8-30`), so a cloned repository can redefine `worker` with a
 wider tool set. Guardian reviews `bash` and `web_fetch` but not the composition, and not
 `write`/`edit`. The resolver must enforce that a project-layer agent definition is a subset of the
 same-named user or packaged definition's tools — never a superset — and may never set `root: true`.

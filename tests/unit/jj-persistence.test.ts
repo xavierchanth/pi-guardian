@@ -20,7 +20,7 @@ function source(root: string): PersistedSharedSourceV1 {
     repositoryRoot: root,
     workspacePath: join(root, "workspace"),
     workspaceName: "default",
-    wip: { changeId: CHANGE_A, description: "wip: thinker workspace", ensuredOperationId: "operation-1" },
+    wip: { changeId: CHANGE_A, description: "wip: orchestrator workspace", ensuredOperationId: "operation-1" },
     targets: [{
       changeId: CHANGE_B,
       wipChangeId: CHANGE_A,
