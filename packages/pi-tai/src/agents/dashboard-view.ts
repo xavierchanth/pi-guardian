@@ -9,7 +9,7 @@
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type TUI } from "@earendil-works/pi-tui";
-import { clampSelection, renderDashboard, type DashboardTone } from "./dashboard.ts";
+import { clampSelection, renderDashboard, renderSubagentDetail, scrollDetail, type DashboardTone } from "./dashboard.ts";
 import type { SubagentSnapshot } from "./domain.ts";
 
 /**
@@ -40,6 +40,9 @@ class SubagentDashboard {
   private snapshots: readonly SubagentSnapshot[];
   private selected = 0;
   private notice: string | undefined;
+  private detailId: string | undefined;
+  private detailScroll = 0;
+  private detailMaxScroll = 0;
 
   constructor(options: {
     agents: DashboardAgents | undefined;
@@ -55,34 +58,56 @@ class SubagentDashboard {
     this.unsubscribe = this.agents?.subscribe(() => {
       this.snapshots = this.agents?.list() ?? [];
       this.selected = clampSelection(this.snapshots.length, this.selected);
+      if (this.detailId && !this.snapshots.some((snapshot) => snapshot.id === this.detailId)) {
+        const id = this.detailId;
+        this.detailId = undefined;
+        this.detailScroll = 0;
+        this.notice = `${id} is no longer available.`;
+      }
       this.tui.requestRender();
     }) ?? (() => {});
   }
 
   handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "q") || matchesKey(data, "ctrl+c")) {
-      this.close();
+    if (matchesKey(data, "escape")) {
+      if (this.detailId) {
+        this.detailId = undefined;
+        this.detailScroll = 0;
+        this.tui.requestRender();
+      } else this.close();
       return;
     }
-    if (matchesKey(data, "j") || matchesKey(data, "down")) {
-      this.move(1);
+    if (matchesKey(data, "q") || matchesKey(data, "ctrl+c")) { this.close(); return; }
+    if (matchesKey(data, "x")) { this.abort(); return; }
+    if (this.detailId) {
+      if (matchesKey(data, "j") || matchesKey(data, "down")) this.scroll("down");
+      else if (matchesKey(data, "k") || matchesKey(data, "up")) this.scroll("up");
+      else if (matchesKey(data, "ctrl+d")) this.scroll("pageDown");
+      else if (matchesKey(data, "ctrl+u")) this.scroll("pageUp");
+      else if (matchesKey(data, "g")) this.scroll("top");
+      else if (matchesKey(data, "shift+g") || data === "G") this.scroll("bottom");
       return;
     }
-    if (matchesKey(data, "k") || matchesKey(data, "up")) {
-      this.move(-1);
+    if (matchesKey(data, "enter")) {
+      const target = this.snapshots[this.selected];
+      if (target) { this.detailId = target.id; this.detailScroll = 0; this.notice = undefined; this.tui.requestRender(); }
       return;
     }
-    if (matchesKey(data, "x")) this.abort();
+    if (matchesKey(data, "j") || matchesKey(data, "down")) this.move(1);
+    else if (matchesKey(data, "k") || matchesKey(data, "up")) this.move(-1);
   }
 
   render(width: number): string[] {
-    return renderDashboard({
-      snapshots: this.snapshots,
-      selected: this.selected,
-      width,
-      now: Date.now(),
+    const detail = this.detailId ? this.snapshots.find((snapshot) => snapshot.id === this.detailId) : undefined;
+    const rows = detail ? renderSubagentDetail({
+      snapshot: detail, width, now: Date.now(), scroll: this.detailScroll,
       ...(this.notice ? { notice: this.notice } : {}),
-    }).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+    }) : undefined;
+    if (rows) { this.detailScroll = rows.scroll; this.detailMaxScroll = rows.maxScroll; }
+    return (rows?.rows ?? renderDashboard({
+      snapshots: this.snapshots, selected: this.selected, width, now: Date.now(),
+      ...(this.notice ? { notice: this.notice } : {}),
+    })).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
   }
 
   invalidate(): void {}
@@ -96,8 +121,15 @@ class SubagentDashboard {
     this.tui.requestRender();
   }
 
+  private scroll(command: "down" | "up" | "pageDown" | "pageUp" | "top" | "bottom"): void {
+    this.detailScroll = scrollDetail(this.detailScroll, command, this.detailMaxScroll);
+    this.tui.requestRender();
+  }
+
   private abort(): void {
-    const target = this.snapshots[this.selected];
+    const target = this.detailId
+      ? this.snapshots.find((snapshot) => snapshot.id === this.detailId)
+      : this.snapshots[this.selected];
     if (!target || !this.agents) return;
     if (target.status !== "running") {
       this.setNotice(`${target.id} has already finished.`);

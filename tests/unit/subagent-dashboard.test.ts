@@ -8,6 +8,8 @@ import {
   dashboardText,
   formatElapsed,
   renderDashboard,
+  renderSubagentDetail,
+  scrollDetail,
   type DashboardRow,
 } from "../../packages/pi-tai/src/agents/dashboard.ts";
 import { emptySnapshot, type SubagentSnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
@@ -110,6 +112,39 @@ test("renders a notice above the key hint and tones failures as errors", () => {
 
   assert.equal(notice?.tone, "error");
   assert.ok(notice?.text.includes("Unknown subagent sa-9."));
+});
+
+test("detail renders all snapshot metadata, live tools, error, and labels output as non-durable", () => {
+  const detail = renderSubagentDetail({
+    snapshot: snapshot({
+      id: "sa-detail", status: "error", settledAt: "2026-01-01T00:01:00.000Z",
+      model: "model-x", capability: "researcher", workspaceId: "ws-1", turns: 3,
+      finalText: "final answer", latestText: "stale live text", errorText: "boom",
+      usage: { inputTokens: 10, outputTokens: 5, contextWindow: 100 },
+      liveTools: [{ name: "read", state: "error", preview: "file.ts" }],
+    }), width: WIDTH, now: NOW, scroll: 0,
+  });
+  const text = dashboardText(detail.rows).join("\n");
+  for (const value of ["sa-detail", "model-x", "researcher", "ws-1", "/repo", "15%", "read", "file.ts", "boom", "final answer", "not a durable full transcript"]) {
+    assert.ok(text.includes(value), value);
+  }
+  assert.ok(!text.includes("stale live text"));
+});
+
+test("detail windows current running output and scrolling commands clamp safely", () => {
+  const live = snapshot({ id: "sa-live", latestText: Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"), finalText: "old" });
+  const detail = renderSubagentDetail({ snapshot: live, width: WIDTH, now: NOW, scroll: 99, bodyHeight: 3 });
+  const text = dashboardText(detail.rows).join("\n");
+  assert.equal(detail.scroll, 17);
+  assert.equal(detail.maxScroll, 17);
+  assert.ok(text.includes("line 17"));
+  assert.ok(text.includes("live/latest"));
+  assert.ok(!text.includes("old"));
+  assert.equal(scrollDetail(0, "up", 17), 0);
+  assert.equal(scrollDetail(0, "pageDown", 17, 5), 5);
+  assert.equal(scrollDetail(5, "top", 17), 0);
+  assert.equal(scrollDetail(5, "bottom", 17), 17);
+  assert.equal(scrollDetail(17, "down", 17), 17);
 });
 
 test("formats elapsed time across second, minute, and hour scales", () => {
