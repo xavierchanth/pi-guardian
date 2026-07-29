@@ -140,17 +140,31 @@ Defaults resolve from three sources, narrowest first: what the caller wrote, wha
 alias implies, what the harness defaults to. The global default is
 `pi` / `gpt-5.6-sol` / `low`.
 
-| Alias | Model | Effort | Harness | For |
+| Alias | Provider/model | Effort | Allowed harnesses | For |
 |---|---|---|---|---|
-| `sol` | gpt-5.6-sol | low | pi | implementation, and the global default |
-| `opus` | claude-opus-5 | medium | claude | design, planning, review |
-| `fable` | claude-fable-5 | medium | claude | only when asked for by name |
+| `sol` | `openai-codex/gpt-5.6-sol` | low | pi, codex | implementation, and the global default |
+| `terra` | `openai-codex/gpt-5.6-terra` | low | pi, codex | balanced OpenAI model |
+| `luna` | `openai-codex/gpt-5.6-luna` | low | pi, codex | fast OpenAI model |
+| `glm` | `opencode-go/glm-5.2` | low | pi | GLM 5.2 through OpenCode Go |
+| `kimi` | `opencode-go/kimi-k3` | low | pi | Kimi K3 through OpenCode Go |
+| `opus` | `anthropic/claude-opus-5` | medium | claude | design, planning, review |
+| `sonnet` | `anthropic/claude-sonnet-5` | medium | claude | general Claude Code work |
+| `fable` | `anthropic/claude-fable-5` | medium | claude | only when asked for by name |
 
-Each alias carries the harness it belongs on, so asking for `opus` reaches the
-Claude harness without also naming it — while naming a harness explicitly still
-wins, which is what makes "sol on codex" a request the system can honour rather
-than a contradiction. `fable` is never a default: it is stronger than `opus` and
-priced accordingly, so it is reached for only on request.
+This is a compatibility table, not just a preference table. Claude aliases can run
+only through the Claude Code backend; explicitly pairing `fable`, `opus`, or
+`sonnet` with `pi` or `codex` is rejected. The OpenCode Go aliases run only inside
+Pi, while `sol` may explicitly use Codex. Explicit `anthropic/*` and
+`opencode-go/*` model IDs obey the same restrictions. `fable` is never a default:
+it is stronger than `opus` and priced accordingly, so it is reached for only on
+request.
+
+The OpenCode Go aliases require OpenCode credentials configured in Pi under the
+`opencode-go` provider (`OPENCODE_API_KEY` or `/login`). The versioned source of
+truth for every alias, provider/model ID, default effort, compatible harness, and
+purpose is [`src/agents/models.json`](../../packages/pi-tai/src/agents/models.json).
+Pi-Tai validates that catalog when it loads and refuses malformed or incompatible
+entries.
 
 The session you talk to is a separate matter: it runs whatever model you launched pi
 with. Designing on a strong model while implementing on a cheaper one needs no

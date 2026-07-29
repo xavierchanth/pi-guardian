@@ -78,6 +78,17 @@ test("the subagent tool surface is the nine-tool set", () => {
     "the retired 47-tool registrar is gone");
 });
 
+test("the packaged model catalog declares every supported alias", () => {
+  const catalog = JSON.parse(readFileSync(
+    join(root, "packages/pi-tai/src/agents/models.json"),
+    "utf8",
+  )) as { version?: number; aliases?: Array<{ name?: string }> };
+  assert.equal(catalog.version, 1);
+  assert.deepEqual(catalog.aliases?.map((entry) => entry.name).sort(), [
+    "fable", "glm", "kimi", "luna", "opus", "sol", "sonnet", "terra",
+  ]);
+});
+
 test("version-control and invariant modeling skills are packaged", () => {
   const skills = join(root, "packages/pi-tai/skills");
   const jj = readFileSync(join(skills, "jj-guidelines/SKILL.md"), "utf8");

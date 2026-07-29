@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MODEL_ALIAS_NAMES, resolveModel } from "../../packages/pi-tai/src/agents/models.ts";
+import {
+  MODEL_ALIAS_NAMES,
+  MODEL_CATALOG,
+  parseModelCatalog,
+  resolveModel,
+} from "../../packages/pi-tai/src/agents/models.ts";
 
 function choice(input: Parameters<typeof resolveModel>[0]) {
   const result = resolveModel(input);
@@ -29,21 +34,47 @@ describe("model resolution", () => {
     });
   });
 
-  it("offers only sol, opus and fable", () => {
-    assert.deepEqual(MODEL_ALIAS_NAMES, ["fable", "opus", "sol"]);
+  it("loads the supported model aliases from the packaged catalog", () => {
+    assert.equal(MODEL_CATALOG.version, 1);
+    assert.deepEqual(MODEL_ALIAS_NAMES, ["fable", "glm", "kimi", "luna", "opus", "sol", "sonnet", "terra"]);
   });
 
-  it("sends anthropic models to the claude harness without being told", () => {
+  it("offers Sol, Terra, and Luna through OpenAI Codex", () => {
+    for (const [alias, model] of [
+      ["sol", "gpt-5.6-sol"],
+      ["terra", "gpt-5.6-terra"],
+      ["luna", "gpt-5.6-luna"],
+    ]) {
+      assert.deepEqual(choice({ model: alias }), {
+        backend: "pi", provider: "openai-codex", model, effort: "low",
+      });
+      assert.equal(choice({ model: alias, backend: "codex" }).backend, "codex");
+    }
+  });
+
+  it("sends Claude aliases only to the Claude Code harness", () => {
     assert.deepEqual(choice({ model: "fable" }), {
       backend: "claude", provider: "anthropic", model: "claude-fable-5", effort: "medium",
     });
-    assert.equal(choice({ model: "opus" }).backend, "claude");
+    for (const model of ["fable", "opus", "sonnet"]) {
+      assert.equal(choice({ model }).backend, "claude");
+      for (const backend of ["pi", "codex"] as const) {
+        const result = resolveModel({ model, backend });
+        assert.equal(result.ok, false);
+        assert.match(result.ok ? "" : result.reason, /cannot run.*use claude/);
+      }
+    }
   });
 
-  it("lets an explicit harness override an alias's preference", () => {
-    assert.deepEqual(choice({ model: "fable", backend: "pi" }), {
-      backend: "pi", provider: "anthropic", model: "claude-fable-5", effort: "medium",
+  it("offers GLM 5.2 and Kimi K3 through OpenCode Go on Pi", () => {
+    assert.deepEqual(choice({ model: "glm" }), {
+      backend: "pi", provider: "opencode-go", model: "glm-5.2", effort: "low",
     });
+    assert.deepEqual(choice({ model: "kimi" }), {
+      backend: "pi", provider: "opencode-go", model: "kimi-k3", effort: "low",
+    });
+    assert.equal(resolveModel({ model: "glm", backend: "claude" }).ok, false);
+    assert.equal(resolveModel({ model: "kimi", backend: "codex" }).ok, false);
   });
 
   it("keeps the alias's model when a harness is named explicitly", () => {
@@ -62,10 +93,34 @@ describe("model resolution", () => {
     assert.equal(choice({ model: "Fable" }).model, "claude-fable-5");
   });
 
-  it("accepts an explicit provider/model id", () => {
+  it("accepts compatible explicit provider/model ids", () => {
     assert.deepEqual(choice({ model: "anthropic/claude-sonnet-5", backend: "claude" }), {
       backend: "claude", provider: "anthropic", model: "claude-sonnet-5", effort: "medium",
     });
+    assert.deepEqual(choice({ model: "opencode-go/glm-5.2" }), {
+      backend: "pi", provider: "opencode-go", model: "glm-5.2", effort: "low",
+    });
+  });
+
+  it("rejects explicit provider/model ids on an incompatible harness", () => {
+    assert.equal(resolveModel({ model: "anthropic/claude-sonnet-5", backend: "pi" }).ok, false);
+    assert.equal(resolveModel({ model: "openrouter/anthropic/claude-sonnet-5", backend: "pi" }).ok, false);
+    assert.equal(resolveModel({ model: "opencode-go/kimi-k3", backend: "claude" }).ok, false);
+  });
+
+  it("rejects invalid packaged catalog combinations", () => {
+    assert.throws(() => parseModelCatalog({
+      version: 1,
+      aliases: [{
+        name: "opus",
+        backend: "pi",
+        provider: "anthropic",
+        model: "claude-opus-5",
+        effort: "medium",
+        allowedBackends: ["pi"],
+        purpose: "invalid",
+      }],
+    }), /allowedBackends must be exactly claude/);
   });
 
   it("rejects a bare name that is neither alias nor provider/model", () => {

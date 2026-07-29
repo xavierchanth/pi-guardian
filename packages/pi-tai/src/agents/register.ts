@@ -148,7 +148,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         description: "Harness to run on. Defaults to pi; choose another only when the task genuinely suits it.",
       })),
       model: Type.Optional(Type.String({
-        description: `Model alias (${MODEL_ALIAS_NAMES.join(", ")}) or an explicit provider/model id. An alias picks its own harness unless you name one.`,
+        description: `Model alias (${MODEL_ALIAS_NAMES.join(", ")}) or an explicit provider/model id. An alias selects its harness; incompatible model/backend pairs are rejected.`,
       })),
       effort: Type.Optional(Type.Union(
         ["low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)),

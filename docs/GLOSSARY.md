@@ -14,7 +14,7 @@
 | **subagent** | Background agent given one self-contained objective, its own context window, and a working directory. It cannot see the parent conversation, and its final message is its entire report. |
 | **harness** | Runtime that executes a subagent — `pi`, `claude`, or `codex` — translated into one neutral event stream. |
 | **isolation** | Where a subagent works: `workspace` gives it its own JJ checkout, `shared` puts it in the user's working copy. It names a location, not a permission. |
-| **model alias** | Short name — `sol`, `opus`, or `fable` — carrying a model, a reasoning effort, and the harness it runs on. |
+| **model alias** | Short name from the validated model catalog — `sol`, `terra`, `luna`, `glm`, `kimi`, `opus`, `sonnet`, or `fable` — carrying a provider/model, reasoning effort, and compatible harnesses. |
 | **child context** | Private managed Pi SDK `AgentSession` linked to one parent and excluded from user session navigation. |
 | **execution cycle** | One concrete run or recovery attempt of a durable child context. |
 | **charter** | System prompt given to a subagent, fixing the objective, the acceptance criteria, the constraints, and how to leave its workspace. |

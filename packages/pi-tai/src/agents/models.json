@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "aliases": [
+    {
+      "name": "sol",
+      "backend": "pi",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-sol",
+      "effort": "low",
+      "allowedBackends": ["pi", "codex"],
+      "purpose": "Default implementation model"
+    },
+    {
+      "name": "terra",
+      "backend": "pi",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "allowedBackends": ["pi", "codex"],
+      "purpose": "Balanced OpenAI model"
+    },
+    {
+      "name": "luna",
+      "backend": "pi",
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "allowedBackends": ["pi", "codex"],
+      "purpose": "Fast OpenAI model"
+    },
+    {
+      "name": "glm",
+      "backend": "pi",
+      "provider": "opencode-go",
+      "model": "glm-5.2",
+      "effort": "low",
+      "allowedBackends": ["pi"],
+      "purpose": "GLM 5.2 through OpenCode Go"
+    },
+    {
+      "name": "kimi",
+      "backend": "pi",
+      "provider": "opencode-go",
+      "model": "kimi-k3",
+      "effort": "low",
+      "allowedBackends": ["pi"],
+      "purpose": "Kimi K3 through OpenCode Go"
+    },
+    {
+      "name": "opus",
+      "backend": "claude",
+      "provider": "anthropic",
+      "model": "claude-opus-5",
+      "effort": "medium",
+      "allowedBackends": ["claude"],
+      "purpose": "Design, planning, and review"
+    },
+    {
+      "name": "sonnet",
+      "backend": "claude",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "allowedBackends": ["claude"],
+      "purpose": "General Claude Code work"
+    },
+    {
+      "name": "fable",
+      "backend": "claude",
+      "provider": "anthropic",
+      "model": "claude-fable-5",
+      "effort": "medium",
+      "allowedBackends": ["claude"],
+      "purpose": "Strong Claude model used only when requested"
+    }
+  ]
+}

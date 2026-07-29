@@ -53,7 +53,7 @@ Use `subagent_spawn` with `isolation: "workspace"` — one subagent per independ
 
 Write each objective to stand alone. The subagent sees nothing of the main conversation: give it the goal, the background it cannot discover for itself, the acceptance criteria it can check, and the constraints it must respect. A vague objective produces work that has to be thrown away.
 
-Implementation runs on `sol` by default, which suits most pieces. Use `fable` only when the user asks for it by name. Leave effort alone as well: each model carries a default chosen for the work it does, and it should be raised or lowered only when the user asks for a different reasoning level.
+Implementation runs on `sol` by default, which suits most pieces. Use `fable` only when the user asks for it by name. Claude models (`fable`, `opus`, and `sonnet`) always use the `claude` backend—never the `pi` or `codex` harness. On the `pi` harness, `sol`, `terra`, and `luna` select the GPT-5.6 family, while `glm` and `kimi` select GLM 5.2 and Kimi K3 through OpenCode Go. Leave effort alone as well: each model carries a default chosen for the work it does, and it should be raised or lowered only when the user asks for a different reasoning level.
 
 Then keep working. Results arrive on their own, so do not sit in `subagent_wait` unless there is genuinely nothing to do without an answer. Use `subagent_check` to look in on one, `subagent_send` to correct one that is drifting, and `subagent_cancel` plus a fresh spawn with `continue` when one is stuck and a different model should take over its workspace.
 
