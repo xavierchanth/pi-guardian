@@ -125,6 +125,10 @@ describe("subagent tool surface", () => {
       "workspace_merge",
       "workspace_status",
     ]);
+    const guidance = host.tools.get("subagent_spawn").promptGuidelines.join("\n");
+    assert.match(guidance, /sequential, not parallel/);
+    assert.match(guidance, /`continue` naming the finished subagent/);
+    assert.match(guidance, /shared index, manifest, README table, or numbered list/);
   });
 
   it("offers every harness, so an unavailable one fails with a reason", async () => {

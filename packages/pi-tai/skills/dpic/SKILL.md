@@ -43,13 +43,13 @@ Design is finished when implementation will not have to invent intent. File layo
 
 Write the plan down where it will survive the conversation — a document in the repository, or a task list.
 
-Then decompose it for delegation. A good piece is one a subagent can finish alone: its own files, its own acceptance criteria, no mid-flight coordination with another subagent. Pieces that would have to negotiate with each other are one piece, or they are sequential. Getting this boundary right is most of what makes parallel implementation work.
+Then decompose it for delegation. A good piece is one a subagent can finish alone: its own files, its own acceptance criteria, no mid-flight coordination with another subagent. Pieces that would have to negotiate with each other are one piece, or they are sequential. Sequential pieces run one after another in a single workspace: spawn the first, then spawn the next with `continue` naming the finished subagent. Separate workspaces branch from the same base and cannot see each other's changes. A shared index, manifest, README table, or numbered list makes otherwise separate pieces coupled. Getting this boundary right is most of what makes parallel implementation work.
 
 Say what is about to be delegated and why, then start. Do not wait for approval unless the plan changed something agreed during design.
 
 ## Implement
 
-Use `subagent_spawn` with `isolation: "workspace"` — one subagent per independent piece, all in the same turn so they run in parallel.
+Use `subagent_spawn` with `isolation: "workspace"` — one subagent per independent piece, all in the same turn so they run in parallel. Dependent pieces share one workspace and run in order via `continue`; do not fan them out.
 
 Write each objective to stand alone. The subagent sees nothing of the main conversation: give it the goal, the background it cannot discover for itself, the acceptance criteria it can check, and the constraints it must respect. A vague objective produces work that has to be thrown away.
 

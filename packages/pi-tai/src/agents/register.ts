@@ -175,7 +175,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       )),
       title: Type.Optional(Type.String({ description: "Short label for progress display" })),
       continue: Type.Optional(Type.String({
-        description: "Id of a finished subagent whose workspace this one should pick up, instead of starting a fresh checkout.",
+        description: "Id of a finished subagent whose workspace this one should pick up instead of starting a fresh checkout. Use this for coupled or sequential work in one workspace, and to hand stuck work to another model.",
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
