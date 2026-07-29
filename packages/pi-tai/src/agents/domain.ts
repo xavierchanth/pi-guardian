@@ -8,7 +8,10 @@
  * provider-specific message type.
  */
 
+import type { CapabilityName } from "./capabilities.ts";
+
 export type BackendName = "pi" | "claude" | "codex";
+export type { CapabilityName } from "./capabilities.ts";
 
 export const BACKEND_NAMES: readonly BackendName[] = ["pi", "claude", "codex"];
 
@@ -25,6 +28,7 @@ export interface SpawnTask {
   /** Working directory — a managed workspace path when the spawn is isolated. */
   readonly cwd: string;
   readonly title: string;
+  readonly capability?: CapabilityName;
   readonly model?: string;
   readonly provider?: string;
   readonly effort?: string;
@@ -70,6 +74,7 @@ export interface SubagentSnapshot {
   readonly settledAt?: string;
   readonly errorText?: string;
   readonly model?: string;
+  readonly capability?: CapabilityName;
   /** Completed assistant messages, used as a cheap progress signal. */
   readonly turns: number;
   /** Text of the last completed assistant message. */
@@ -89,6 +94,7 @@ export function emptySnapshot(input: {
   title: string;
   cwd: string;
   workspaceId?: string;
+  capability?: CapabilityName;
   createdAt: string;
 }): SubagentSnapshot {
   return {
@@ -97,6 +103,7 @@ export function emptySnapshot(input: {
     title: input.title,
     cwd: input.cwd,
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    ...(input.capability ? { capability: input.capability } : {}),
     status: "running",
     createdAt: input.createdAt,
     turns: 0,

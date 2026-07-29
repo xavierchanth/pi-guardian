@@ -13,6 +13,7 @@ import { JjProcessExecutor } from "../jj/executor.ts";
 import { composePiTaiInstructions } from "../subagents/domain.ts";
 import { loadPackagedInstructions, type InstructionLoader } from "../subagents/instructions.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
+import { CAPABILITIES, CAPABILITY_NAMES, capabilityInstructions, type CapabilityName } from "./capabilities.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
 import { CodexBackend } from "./backends/codex.ts";
 import { PiBackend } from "./backends/pi.ts";
@@ -20,7 +21,7 @@ import { registerSubagentDashboard } from "./dashboard-view.ts";
 import { contextUtilisation, type BackendName, type SubagentSnapshot } from "./domain.ts";
 import { IsolatedSubagents } from "./isolated.ts";
 import { SubagentManager } from "./manager.ts";
-import { MODEL_ALIAS_NAMES, resolveModel } from "./models.ts";
+import { MODEL_ALIASES, MODEL_ALIAS_NAMES, resolveModel } from "./models.ts";
 import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
@@ -149,6 +150,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       isolation: Type.Union([Type.Literal("workspace"), Type.Literal("shared")], {
         description: "workspace: a private checkout the subagent may change. shared: your working copy, read-only.",
       }),
+      capability: Type.Optional(Type.Union(CAPABILITY_NAMES.map((name) => Type.Literal(name)), {
+        description: "Specialized environment and instructions for research tasks.",
+      })),
       background: Type.Optional(Type.String({ description: "Context the subagent needs but cannot discover on its own" })),
       acceptanceCriteria: Type.Optional(Type.Array(Type.String(), {
         description: "Conditions that must hold for the task to be complete",
@@ -175,14 +179,31 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { isolated } = await requireRuntime(ctx);
+      const { isolated, agents } = await requireRuntime(ctx);
+      const previous = params.continue ? agents.get(params.continue) : undefined;
+      if (previous && params.capability && previous.capability !== params.capability) {
+        return failure(`Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability}.`);
+      }
+      const capabilityName = (params.capability ?? previous?.capability) as CapabilityName | undefined;
+      const capability = capabilityName ? CAPABILITIES[capabilityName] : undefined;
+
+      // Known aliases select their catalog backend. Explicit provider/model IDs
+      // retain the configured backend unless the caller overrides it.
+      const explicitAlias = params.model ? MODEL_ALIASES[params.model.toLowerCase()] : undefined;
+      const selectedBackend = params.backend
+        ?? (params.model
+          ? (explicitAlias ? undefined : dependencies.defaultBackend)
+          : capability?.backend ?? dependencies.defaultBackend);
       const resolved = resolveModel({
-        ...(params.model ? { model: params.model } : {}),
-        ...(params.backend ? { backend: params.backend } : { backend: dependencies.defaultBackend ?? "pi" }),
-        ...(params.effort ? { effort: params.effort } : {}),
+        ...(params.model ? { model: params.model } : capability ? { model: capability.model } : {}),
+        ...(selectedBackend ? { backend: selectedBackend } : {}),
+        ...(params.effort ? { effort: params.effort } : capability ? { effort: capability.effort } : {}),
       });
       if (!resolved.ok) return failure(resolved.reason);
       const { backend, provider, model, effort } = resolved.choice;
+      if (capability && !capability.allowedBackends.includes(backend)) {
+        return failure(`Capability "${capability.name}" cannot run on the ${backend} backend; use ${capability.allowedBackends.join(" or ")}.`);
+      }
       if (!enabled.includes(backend)) {
         return failure(`Backend "${backend}" is not enabled here. Enabled: ${enabled.join(", ")}.`);
       }
@@ -192,6 +213,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       try {
         snapshot = await isolated.spawn({
         backend,
+        ...(capability ? { capability: capability.name } : {}),
         isolation: params.isolation,
         title,
         tools: [...CHILD_TOOLS],
@@ -204,14 +226,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
           ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
         }),
         ...(params.continue ? { continueFrom: params.continue } : {}),
-        systemPrompt: (cwd) => composeChildCharter({
+        systemPrompt: (cwd) => [composeChildCharter({
           resuming: Boolean(params.continue),
           objective: params.objective,
           cwd,
           isolated: isolatedRun,
           ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
           ...(params.constraints ? { constraints: params.constraints } : {}),
-        }),
+        }), ...(capability ? [`<capability_instructions name="${capability.name}">\n${capabilityInstructions(capability)}\n</capability_instructions>`] : [])].join("\n\n"),
         });
       } catch (error) {
         return failure(error instanceof Error ? error.message : String(error));
@@ -220,7 +242,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})`
         + `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.`
         + " Its result will arrive automatically.",
-        { id: snapshot.id, backend: snapshot.backend, model: `${provider}/${model}`, effort, workspaceId: isolated.workspaceFor(snapshot.id) },
+        {
+          id: snapshot.id,
+          backend: snapshot.backend,
+          model: `${provider}/${model}`,
+          effort,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+          workspaceId: isolated.workspaceFor(snapshot.id),
+        },
       );
     },
   });
@@ -271,7 +300,11 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       if (!snapshot) return failure(`Unknown subagent ${params.id}.`);
       return success(
         `${renderLine(snapshot)}\nturns: ${snapshot.turns}\n\n${truncate(snapshot.latestText, 2048) || "(no output yet)"}`,
-        { id: snapshot.id, status: snapshot.status },
+        {
+          id: snapshot.id,
+          status: snapshot.status,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+        },
       );
     },
   });
@@ -286,7 +319,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       const { agents } = await requireRuntime(ctx);
       const all = agents.list();
       if (!all.length) return success("No subagents have been started in this session.", { count: 0 });
-      return success(all.map(renderLine).join("\n"), { count: all.length });
+      return success(all.map(renderLine).join("\n"), {
+        count: all.length,
+        subagents: all.map((snapshot) => ({
+          id: snapshot.id,
+          status: snapshot.status,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+        })),
+      });
     },
   });
 
@@ -490,6 +530,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 function renderLine(snapshot: SubagentSnapshot): string {
   const context = contextUtilisation(snapshot);
   return `${snapshot.id}  ${snapshot.status.padEnd(7)} ${snapshot.backend.padEnd(6)} `
+    + `${snapshot.capability ? `[${snapshot.capability}] ` : ""}`
     + `${context === undefined ? "" : `ctx ${context}%  `}${snapshot.title}`;
 }
 

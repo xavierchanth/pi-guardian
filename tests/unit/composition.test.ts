@@ -25,6 +25,9 @@ test("composition root registers every feature once in order", async () => {
       workContext: () => {
         calls.push("work-context");
       },
+      contextTransfer: () => {
+        calls.push("context-transfer");
+      },
       responseEditor: () => {
         calls.push("response-editor");
       },
@@ -76,6 +79,7 @@ test("composition root registers every feature once in order", async () => {
     "compaction",
     "capabilities",
     "work-context",
+    "context-transfer",
     "response-editor",
     "web-tools",
     "model-profiles",

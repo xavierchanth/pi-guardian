@@ -12,6 +12,7 @@ import {
 } from "./src/config/register.ts";
 import { registerCmux } from "./src/cmux/register.ts";
 import { registerAutoCompaction } from "./src/compaction/register.ts";
+import { registerContextTransfer } from "./src/context-transfer/register.ts";
 import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
 import { registerFirstPartyKeybindings } from "./src/keybindings/register.ts";
@@ -62,6 +63,7 @@ export interface PiTaiRegistrars {
   compaction: PiTaiRegistrar;
   capabilities: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
+  contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
   webTools: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
@@ -81,6 +83,7 @@ const productionRegistrars: PiTaiRegistrars = {
   capabilities: (pi, runtime) => registerCapabilityController(pi, runtime.capabilities),
   // I09: durable task tools are authoritative; update_plan remains injectable only for legacy test/package consumers.
   workContext: () => undefined,
+  contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
   responseEditor: (pi) => {
     registerResponseEditor(pi);
   },
@@ -142,6 +145,7 @@ export function createPiTaiExtension(
     await registrars.compaction(pi, runtime);
     await registrars.capabilities(pi, runtime);
     await registrars.workContext(pi, runtime);
+    await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);
     await registrars.webTools(pi, runtime);
     await registrars.modelProfiles(pi, runtime);

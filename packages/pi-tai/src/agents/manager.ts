@@ -3,6 +3,7 @@ import {
   applyEvent,
   emptySnapshot,
   type BackendName,
+  type CapabilityName,
   type SpawnTask,
   type SubagentSnapshot,
 } from "./domain.ts";
@@ -18,6 +19,7 @@ export interface SpawnRequest {
   readonly cwd: string;
   readonly title: string;
   readonly workspaceId?: string;
+  readonly capability?: CapabilityName;
   readonly model?: string;
   readonly provider?: string;
   readonly effort?: string;
@@ -119,6 +121,7 @@ export class SubagentManager {
           title: request.title,
           cwd: request.cwd,
           ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+          ...(request.capability ? { capability: request.capability } : {}),
           createdAt: this.clock(),
         }),
         settled,
@@ -136,6 +139,7 @@ export class SubagentManager {
         systemPrompt: request.systemPrompt,
         cwd: request.cwd,
         title: request.title,
+        ...(request.capability ? { capability: request.capability } : {}),
         ...(request.model ? { model: request.model } : {}),
         ...(request.provider ? { provider: request.provider } : {}),
         ...(request.effort ? { effort: request.effort } : {}),

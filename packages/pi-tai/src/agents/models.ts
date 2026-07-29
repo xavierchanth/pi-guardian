@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { BACKEND_NAMES, type BackendName } from "./domain.ts";
 
-const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 /**
  * How a spawn's model, effort, and harness are chosen.

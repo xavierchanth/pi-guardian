@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "name": "researcher",
+      "backend": "pi",
+      "model": "sol",
+      "effort": "medium",
+      "allowedBackends": ["pi", "codex"],
+      "instructions": "researcher.md"
+    }
+  ]
+}
