@@ -106,7 +106,10 @@ delegation tools, so it has no way to start one of its own.
 Spawning is fire-and-forget. A subagent's result is delivered into the parent
 conversation when the parent next goes idle, so the parent starts work and
 keeps going instead of polling. `subagent_wait` exists for when you genuinely cannot
-proceed without an answer, and consumes the result so it is not also auto-delivered.
+proceed without an answer. With several ids it returns when any one finishes, includes every
+requested result ready at that moment, and identifies those still running; call it again with the
+remaining ids to collect staggered completions. Returned results (and only those results) are
+consumed so they are not also auto-delivered. Already-finished ids return immediately.
 
 At most four subagents run at once. The reservation is taken synchronously before the
 first await, so several tool calls in one assistant turn cannot all observe a free
@@ -120,7 +123,7 @@ schemas:
 | Tool | Purpose |
 |---|---|
 | `subagent_spawn` | Start a subagent. `continue` reuses a settled subagent's workspace. |
-| `subagent_wait` | Block until named subagents finish. |
+| `subagent_wait` | Block until any named subagent finishes; repeatedly collect ready results. |
 | `subagent_check` | Peek at one without blocking or consuming its result. |
 | `subagent_send` | Steer a running subagent. |
 | `subagent_cancel` | Stop subagents, keeping their workspaces. |

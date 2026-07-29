@@ -219,14 +219,19 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     name: "subagent_wait",
     label: "Wait For Subagents",
     description: WAIT_DESCRIPTION,
-    promptSnippet: "Block until named subagents finish and return their results",
+    promptSnippet: "Block until any named subagent finishes and return every result ready then",
     parameters: Type.Object({
       ids: Type.Array(Type.String(), { description: "Subagent ids to wait for", minItems: 1, maxItems: 16 }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { agents } = await requireRuntime(ctx);
-      const settled = await agents.wait(params.ids, signal);
-      return success(settled.map(renderResult).join("\n\n---\n\n"), { ids: params.ids });
+      const result = await agents.wait(params.ids, signal);
+      const ready = result.settled.map(renderResult).join("\n\n---\n\n");
+      const pending = result.pending.map((snapshot) => snapshot.id);
+      const remaining = pending.length ? `\n\nStill running: ${pending.join(", ")}.` : "";
+      return success(ready + remaining, {
+        settled: result.settled.map((snapshot) => snapshot.id), pending, reason: result.reason,
+      });
     },
   });
 

@@ -30,7 +30,7 @@ describe("subagent manager", () => {
     const manager = managerWith([new StubBackend()]);
 
     const spawned = await manager.spawn(request());
-    const [settled] = await manager.wait([spawned.id]);
+    const [settled] = (await manager.wait([spawned.id])).settled;
 
     assert.equal(settled?.status, "done");
     assert.equal(settled?.finalText, "done: do the thing");
@@ -41,7 +41,7 @@ describe("subagent manager", () => {
     const manager = managerWith([new StubBackend()]);
 
     const spawned = await manager.spawn(request({ prompt: "FAIL: no such file" }));
-    const [settled] = await manager.wait([spawned.id]);
+    const [settled] = (await manager.wait([spawned.id])).settled;
 
     assert.equal(settled?.status, "error");
     assert.equal(settled?.errorText, "no such file");
@@ -87,6 +87,50 @@ describe("subagent manager", () => {
     assert.deepEqual(manager.delivery.drain().map((result) => result.id), [second.id]);
   });
 
+  it("collects staggered completions with durable wait-any snapshots", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const first = await manager.spawn(request({ prompt: "HANG: first" }));
+    const second = await manager.spawn(request({ prompt: "HANG: second" }));
+
+    const waiting = manager.wait([first.id, second.id]);
+    await manager.cancel([first.id]);
+    const one = await waiting;
+    assert.deepEqual(one.settled.map((entry) => entry.id), [first.id]);
+    assert.deepEqual(one.pending.map((entry) => entry.id), [second.id]);
+    assert.equal(one.reason, "settled");
+    assert.equal(manager.delivery.size, 0, "only the returned result was consumed");
+
+    await manager.cancel([second.id]); // settles between wait calls
+    assert.equal(manager.delivery.size, 1);
+    const two = await manager.wait([first.id, second.id]);
+    assert.deepEqual(two.settled.map((entry) => entry.id), [first.id, second.id]);
+    assert.deepEqual(two.pending, []);
+    assert.equal(manager.delivery.size, 0);
+  });
+
+  it("collects all completions visible when wait-any resumes", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const first = await manager.spawn(request({ prompt: "HANG: first" }));
+    const second = await manager.spawn(request({ prompt: "HANG: second" }));
+    const waiting = manager.wait([first.id, second.id]);
+
+    await manager.cancel([first.id, second.id]);
+    const result = await waiting;
+    assert.deepEqual(result.settled.map((entry) => entry.id), [first.id, second.id]);
+    assert.deepEqual(result.pending, []);
+  });
+
+  it("deduplicates ids and reports all unknown ids without consuming valid results", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const spawned = await manager.spawn(request());
+    await settleQueue();
+    await assert.rejects(manager.wait([spawned.id, "missing-a", "missing-b"]), /missing-a, missing-b/);
+    assert.equal(manager.delivery.size, 1);
+    const result = await manager.wait([spawned.id, spawned.id]);
+    assert.deepEqual(result.settled.map((entry) => entry.id), [spawned.id]);
+    assert.deepEqual(result.pending, []);
+  });
+
   it("runs the settle hook exactly once per subagent", async () => {
     const settledIds: string[] = [];
     const manager = managerWith([new StubBackend()], { onSettled: (snapshot) => { settledIds.push(snapshot.id); } });
@@ -117,7 +161,7 @@ describe("subagent manager", () => {
     const spawned = await manager.spawn(request({ prompt: "design the thing" }));
     await manager.wait([spawned.id]);
     await manager.send(spawned.id, "what about the auth case?");
-    const [settled] = await manager.wait([spawned.id]);
+    const [settled] = (await manager.wait([spawned.id])).settled;
 
     assert.equal(settled?.id, spawned.id, "the follow-up keeps the same subagent id");
     assert.equal(settled?.finalText, "done: what about the auth case?");

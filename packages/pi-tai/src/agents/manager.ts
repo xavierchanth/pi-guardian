@@ -24,6 +24,12 @@ export interface SpawnRequest {
   readonly tools?: readonly string[];
 }
 
+export interface WaitResult {
+  readonly settled: readonly SubagentSnapshot[];
+  readonly pending: readonly SubagentSnapshot[];
+  readonly reason: "settled";
+}
+
 export interface SubagentManagerOptions {
   readonly registry: BackendRegistry;
   readonly maxRunning?: number;
@@ -151,27 +157,38 @@ export class SubagentManager {
     }
   }
 
-  /**
-   * Waits for the listed subagents to settle, then hands back their snapshots
-   * and marks their results consumed so they are not also auto-delivered.
+  /** Waits until any requested subagent settles and atomically collects all
+   * requested terminal snapshots visible then. Repeated calls therefore drain
+   * staggered completions without losing results that settle between calls.
    */
-  async wait(ids: readonly string[], signal?: AbortSignal): Promise<SubagentSnapshot[]> {
+  async wait(ids: readonly string[], signal?: AbortSignal): Promise<WaitResult> {
     const unique = [...new Set(ids)];
     const missing = unique.filter((id) => !this.entries.has(id));
     if (missing.length) throw new Error(`Unknown subagent(s): ${missing.join(", ")}.`);
-    const waits = unique.map((id) => this.entries.get(id)!.settled);
-    const settled = signal
-      ? await Promise.race([
-        Promise.all(waits),
-        new Promise<never>((_, reject) => {
-          const onAbort = () => reject(new Error("Wait was cancelled."));
-          if (signal.aborted) onAbort();
-          else signal.addEventListener("abort", onAbort, { once: true });
-        }),
-      ])
-      : await Promise.all(waits);
-    for (const id of unique) this.delivery.consume(id);
-    return settled;
+
+    const collect = (): WaitResult => {
+      const snapshots = unique.map((id) => this.entries.get(id)!.snapshot);
+      const settled = snapshots.filter((snapshot) => snapshot.status !== "running");
+      const pending = snapshots.filter((snapshot) => snapshot.status === "running");
+      // No await is permitted between this status snapshot and consumption.
+      for (const snapshot of settled) this.delivery.consume(snapshot.id);
+      return { settled, pending, reason: "settled" };
+    };
+    if (unique.some((id) => this.entries.get(id)!.snapshot.status !== "running")) return collect();
+
+    let onAbort: (() => void) | undefined;
+    const cancelled = signal && new Promise<never>((_, reject) => {
+      onAbort = () => reject(new Error("Wait was cancelled."));
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      const firstSettlement = Promise.race(unique.map((id) => this.entries.get(id)!.settled));
+      await (cancelled ? Promise.race([firstSettlement, cancelled]) : firstSettlement);
+      return collect();
+    } finally {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+    }
   }
 
   /**

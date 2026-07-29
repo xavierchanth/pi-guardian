@@ -14,8 +14,9 @@ export const SPAWN_DESCRIPTION =
   + "With \"shared\" it works directly in the current working copy alongside you.";
 
 export const WAIT_DESCRIPTION =
-  "Block until the listed subagents finish, then return their results. "
-  + "Prefer letting results arrive on their own; use this only when you cannot continue without the answer.";
+  "Block until any listed subagent finishes, then return every listed result ready at that moment and identify those still running. "
+  + "Call again with the remaining ids to collect staggered completions. Already-finished agents return immediately. "
+  + "Prefer letting results arrive on their own; use this only when you cannot continue without an answer.";
 
 export const CHECK_DESCRIPTION =
   "Look at a subagent's status and recent output without blocking and without consuming its result.";
