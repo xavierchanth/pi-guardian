@@ -69,7 +69,7 @@ Defaults are `sol-low`, `sol-medium`, and `sol-high`, in that cycling order; `so
 | `lightTheme` | non-empty string | `ansi-light` | Theme selected for a light terminal background. |
 | `pollIntervalMs` | integer 250–60000 | `2000` | Delay between completed OSC 11 queries. |
 
-ANSI querying runs only in interactive TUI mode.
+ANSI background queries are owned by the active interactive TUI; periodic polling continues only after the terminal confirms support with a valid response.
 
 ### `notifications`
 

@@ -1,82 +1,33 @@
-import { spawn } from "node:child_process";
+import type { TUI } from "@earendil-works/pi-tui";
 
 export type QueryTerminalBackground = (
+  tui: Pick<TUI, "queryTerminalBackgroundColor">,
   signal?: AbortSignal,
 ) => Promise<string | undefined>;
 
-const OSC_QUERY_SCRIPT = String.raw`
-const fs = require("fs");
-const tty = require("tty");
-function parseRgb(spec) {
-  const match = /^rgb:([0-9a-f]+)\/([0-9a-f]+)\/([0-9a-f]+)$/i.exec(spec);
-  if (!match) return undefined;
-  const hex = match.slice(1).map((part) => (part.length > 2 ? part.slice(0, 2) : part.padEnd(2, part))).join("");
-  return "#" + hex.toLowerCase();
-}
-function parseResponse(value) {
-  const match = /\x1b\]11;(rgb:[^\x07\x1b]+)(?:\x07|\x1b\\)/.exec(value);
-  return match ? parseRgb(match[1]) : undefined;
-}
-let fd;
-try { fd = fs.openSync("/dev/tty", "r+"); } catch { process.exit(1); }
-const input = new tty.ReadStream(fd);
-let raw = false;
-let buffer = "";
-let done = false;
-let timer;
-function finish(background) {
-  if (done) return;
-  done = true;
-  clearTimeout(timer);
-  try { if (raw) input.setRawMode(false); } catch {}
-  try { input.destroy(); } catch {}
-  if (background) process.stdout.write(JSON.stringify({ background }));
-}
-try { input.setRawMode(true); raw = true; } catch { finish(); process.exit(1); }
-timer = setTimeout(() => finish(parseResponse(buffer)), 500);
-input.on("data", (chunk) => {
-  buffer += chunk.toString("binary");
-  const background = parseResponse(buffer);
-  if (background) finish(background);
-});
-input.on("error", () => finish());
-try { fs.writeSync(fd, "\x1b]11;?\x07"); } catch { finish(); }
-`;
+const QUERY_TIMEOUT_MS = 500;
 
-export const queryTerminalBackground: QueryTerminalBackground = (signal) =>
-  new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve(undefined);
-      return;
-    }
+/** Query through the active TUI, which is the sole owner of terminal input. */
+export const queryTerminalBackground: QueryTerminalBackground = async (tui, signal) => {
+  if (signal?.aborted) return undefined;
 
-    const child = spawn(process.execPath, ["-e", OSC_QUERY_SCRIPT], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let output = "";
-    let settled = false;
-    const finish = (background?: string) => {
-      if (settled) return;
-      settled = true;
-      signal?.removeEventListener("abort", abort);
-      resolve(background);
-    };
-    const abort = () => {
-      child.kill("SIGTERM");
-      finish();
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      output += chunk;
-    });
-    child.on("error", () => finish());
-    child.on("close", () => {
-      try {
-        const parsed = JSON.parse(output) as { background?: unknown };
-        finish(typeof parsed.background === "string" ? parsed.background : undefined);
-      } catch {
-        finish();
-      }
-    });
-  });
+  let abort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<undefined>((resolve) => {
+        abort = () => resolve(undefined);
+        signal.addEventListener("abort", abort, { once: true });
+      })
+    : undefined;
+
+  try {
+    const query = tui.queryTerminalBackgroundColor({ timeoutMs: QUERY_TIMEOUT_MS });
+    const color = aborted ? await Promise.race([query, aborted]) : await query;
+    if (!color || signal?.aborted) return undefined;
+
+    const hex = (value: number) =>
+      Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+    return `#${hex(color.r)}${hex(color.g)}${hex(color.b)}`;
+  } finally {
+    if (abort) signal?.removeEventListener("abort", abort);
+  }
+};
