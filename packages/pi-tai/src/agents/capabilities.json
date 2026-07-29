@@ -8,22 +8,6 @@
       "effort": "medium",
       "allowedBackends": ["pi", "codex"],
       "instructions": "researcher.md"
-    },
-    {
-      "name": "browser_user",
-      "backend": "codex",
-      "model": "sol",
-      "effort": "medium",
-      "allowedBackends": ["codex"],
-      "instructions": "browser_user.md"
-    },
-    {
-      "name": "computer_user",
-      "backend": "codex",
-      "model": "sol",
-      "effort": "medium",
-      "allowedBackends": ["codex"],
-      "instructions": "computer_user.md"
     }
   ]
 }

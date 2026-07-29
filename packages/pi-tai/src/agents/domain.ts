@@ -9,7 +9,7 @@
  */
 
 export type BackendName = "pi" | "claude" | "codex";
-export type CapabilityName = "researcher" | "browser_user" | "computer_user";
+export type CapabilityName = "researcher";
 
 export const BACKEND_NAMES: readonly BackendName[] = ["pi", "claude", "codex"];
 

@@ -4,7 +4,8 @@ import { CAPABILITIES, CAPABILITY_NAMES, parseCapabilityCatalog } from "../../pa
 import { resolveModel } from "../../packages/pi-tai/src/agents/models.ts";
 
 describe("capability subagent catalog", () => {
-  it("packages exactly the three versioned aliases", () => {
+  it("packages researcher as the sole versioned alias", () => {
+    assert.deepEqual(CAPABILITY_NAMES, ["researcher"]);
     assert.deepEqual(Object.keys(CAPABILITIES), [...CAPABILITY_NAMES]);
   });
 

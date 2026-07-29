@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { BACKEND_NAMES, type BackendName } from "./domain.ts";
 
-export const CAPABILITY_NAMES = ["researcher", "browser_user", "computer_user"] as const;
+export const CAPABILITY_NAMES = ["researcher"] as const;
 export type CapabilityName = (typeof CAPABILITY_NAMES)[number];
 export interface Capability { readonly name: CapabilityName; readonly backend: BackendName; readonly model: string; readonly effort: string; readonly allowedBackends: readonly BackendName[]; readonly instructions: string }
 export interface CapabilityCatalog { readonly version: 1; readonly capabilities: readonly Capability[] }
