@@ -36,6 +36,13 @@ test("source uses the current Pi distribution imports", () => {
   assert.deepEqual(legacy, []);
 });
 
+test("context-transfer domain and storage remain Pi-independent", () => {
+  for (const file of ["domain.ts", "storage.ts"]) {
+    const source = readFileSync(join(root, "packages/pi-tai/src/context-transfer", file), "utf8");
+    assert.doesNotMatch(source, /@earendil-works\//, file);
+  }
+});
+
 test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
   const instructions = readFileSync(join(root, "packages/pi-tai/instructions/system.md"), "utf8");
   assert.ok(instructions.trim().length > 0);
@@ -56,6 +63,8 @@ test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
   assert.match(dpic, /name: dpic/);
   assert.match(dpic, /subagent_spawn/);
   assert.match(dpic, /isolation: "workspace"/);
+  assert.match(dpic, /`continue` naming the finished subagent/);
+  assert.match(dpic, /shared index, manifest, README table, or numbered list/);
   assert.match(dpic, /Delegation is not completion|Delegating is not finishing/);
 });
 

@@ -188,7 +188,7 @@ async function classifyPiAgentPath(
     return review(target, requestedPath, "pi-session", "The target is a private context-transfer summary from another session.");
   }
   if ((toolName === "grep" || toolName === "find")
-    && [authPath, modelsPath, sessionsPath].some((protectedPath) =>
+    && [authPath, modelsPath, sessionsPath, contextExportsPath].some((protectedPath) =>
       contains(logicalPath, protectedPath))) {
     return review(
       target,

@@ -261,14 +261,21 @@ test("Pi credentials and sessions review, safe state reads automatically, and wr
   await mkdir(workspace);
   await mkdir(outside);
   await mkdir(join(agentDir, "sessions"), { recursive: true });
+  await mkdir(join(agentDir, "pi-tai", "context-exports"), { recursive: true });
   for (const file of ["models.json", "settings.json", "trust.json", "models-store.json", "safe.json"]) {
     await writeFile(join(agentDir, file), "{}\n");
   }
   await symlink("safe.json", join(agentDir, "auth.json"));
   await symlink(outside, join(agentDir, "escape"));
   await writeFile(join(agentDir, "sessions", "conversation.jsonl"), "{}\n");
+  await writeFile(join(agentDir, "pi-tai", "context-exports", "ABCD2345.json"), "{}\n");
 
-  for (const path of ["auth.json", "models.json", "sessions/conversation.jsonl"]) {
+  for (const path of [
+    "auth.json",
+    "models.json",
+    "sessions/conversation.jsonl",
+    "pi-tai/context-exports/ABCD2345.json",
+  ]) {
     const decision = await checkFileToolPath(
       "read",
       { path: join(agentDir, path) },

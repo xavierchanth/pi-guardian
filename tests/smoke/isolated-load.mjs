@@ -82,7 +82,9 @@ lines.on("line", (line) => {
       !names.has("dpic") ||
       !names.has("capabilities") ||
       !names.has("subagents") ||
-      !names.has("init-pi-tai") ||
+      !names.has("context-export") ||
+      !names.has("context-import") ||
+      names.has("init-pi-tai") ||
       names.has("parallelize") ||
       names.has("plan-status") ||
       names.has("collect-status") ||
