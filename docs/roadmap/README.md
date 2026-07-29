@@ -40,6 +40,7 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Complete | I06, I08 | Source `@` is the user's; operations resolve `@`/`@-` when they execute; shared targets sit immediately before current `@` |
 | I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
+| I17 | [Context transfer under `/export` and `/import`](initiatives/I17-context-transfer.md) | Planned | I00 | Bare `/export` and `/import` carry a session's goal, decisions, state, and next step to a new session |
 
 ## Dependency graph
 
@@ -62,6 +63,7 @@ graph TD
   I14[I14 User-owned source workspace]
   I15[I15 Session presence]
   I16[I16 /btw sidebar query]
+  I17[I17 Context transfer]
 
   I00 --> I01
   I00 --> I02
@@ -75,6 +77,7 @@ graph TD
   I13 --> I04
   I13 --> I15
   I13 --> I16
+  I00 --> I17
 
   I05 --> I06
   I05 --> I07
@@ -104,7 +107,7 @@ Concurrency/JJ and Host/core work can proceed in parallel. Their convergence poi
 | Concurrency/JJ | I05 → I06 → I07 → I08 → I09 → I14 |
 | Clients | I04 → I10 → I11 |
 | Machine capabilities | {I02, I03, I04} → I12 |
-| Session affordances | I13 → {I15, I16} |
+| Session affordances | I13 → {I15, I16}; I17 runs independently |
 
 I13 is the forcing function for I01: core extraction stalled because nothing required it, and configuration is the one place Pi's ownership is load-bearing rather than incidental.
 
