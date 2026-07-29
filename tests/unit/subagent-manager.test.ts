@@ -26,6 +26,34 @@ function request(overrides: Partial<Parameters<SubagentManager["spawn"]>[0]> = {
 }
 
 describe("subagent manager", () => {
+  it("returns partial results on user interruption without cancelling pending agents", async () => {
+    const backend = new StubBackend();
+    const manager = managerWith([backend]);
+    const settledAgent = await manager.spawn(request({ prompt: "quick" }));
+    const pendingAgent = await manager.spawn(request({ prompt: "HANG: later" }));
+    await manager.wait([settledAgent.id]);
+
+    const interruption = new AbortController();
+    const waiting = manager.wait([settledAgent.id, pendingAgent.id], undefined, interruption.signal);
+    interruption.abort();
+    const result = await waiting;
+
+    assert.equal(result.reason, "user-interrupted");
+    assert.deepEqual(result.settled.map(({ id }) => id), [settledAgent.id]);
+    assert.deepEqual(result.pending, [pendingAgent.id]);
+    assert.equal(manager.get(pendingAgent.id)?.status, "running");
+  });
+
+  it("keeps tool cancellation a rejected wait and does not cancel the child", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const agent = await manager.spawn(request({ prompt: "HANG: later" }));
+    const cancellation = new AbortController();
+    const waiting = manager.wait([agent.id], cancellation.signal);
+    cancellation.abort();
+    await assert.rejects(waiting, /Wait was cancelled/);
+    assert.equal(manager.get(agent.id)?.status, "running");
+  });
+
   it("spawns and settles, exposing the child's final text", async () => {
     const manager = managerWith([new StubBackend()]);
 

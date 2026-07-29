@@ -120,7 +120,7 @@ schemas:
 | Tool | Purpose |
 |---|---|
 | `subagent_spawn` | Start a subagent. `continue` reuses a settled subagent's workspace. |
-| `subagent_wait` | Block until named subagents finish. |
+| `subagent_wait` | Block until named subagents finish. Foreground user input releases the wait (returning settled partial results) without cancelling or steering pending agents. |
 | `subagent_check` | Peek at one without blocking or consuming its result. |
 | `subagent_send` | Steer a running subagent. |
 | `subagent_cancel` | Stop subagents, keeping their workspaces. |

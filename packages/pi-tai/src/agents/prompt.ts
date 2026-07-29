@@ -14,7 +14,8 @@ export const SPAWN_DESCRIPTION =
   + "With \"shared\" it works directly in the current working copy alongside you.";
 
 export const WAIT_DESCRIPTION =
-  "Block until the listed subagents finish, then return their results. "
+  "Block until the listed subagents finish, then return their results. Foreground user input interrupts the wait "
+  + "without stopping or steering subagents; settled results are returned and pending ids remain collectable. "
   + "Prefer letting results arrive on their own; use this only when you cannot continue without the answer.";
 
 export const CHECK_DESCRIPTION =
@@ -46,7 +47,8 @@ export const WORKSPACE_STATUS_DESCRIPTION =
 export const DELEGATION_GUIDELINES: readonly string[] = [
   "Delegate work that is self-contained and worth its own context window: a focused implementation task, an independent investigation, a review of work that already exists. Do trivial or tightly coupled work yourself.",
   "Write the subagent's prompt so it stands alone. It cannot see this conversation, so state the goal, the relevant background, the acceptance criteria, and the constraints in the prompt itself.",
-  "After starting a subagent, keep working. Results arrive on their own when the subagent finishes; only call subagent_wait when you genuinely cannot proceed without the answer.",
+  "After starting a subagent, keep working. Results arrive on their own when the subagent finishes; only call subagent_wait when you genuinely cannot proceed without the answer. Foreground user input releases waits without cancelling subagents.",
+  "A user message always addresses you, the parent. Do not relay it with subagent_send unless the user explicitly asks you to send that message to a subagent.",
   "Give a subagent its own workspace when its changes should land as a reviewable unit or run alongside other subagents. Use the shared working copy when you want its work to appear directly in yours.",
   "Review a subagent's work before merging it: read the changes it describes, and spawn a reviewer when the change is large or risky. Merging is not automatic and should not be reflexive.",
   "Model defaults by what the subagent is for: `opus` for design partners and reviewers, `sol` for implementation. `sol` is the default when you name nothing.",

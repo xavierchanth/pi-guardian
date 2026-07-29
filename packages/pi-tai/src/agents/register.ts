@@ -79,6 +79,15 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   let runtime: Promise<Runtime> | undefined;
   /** Settled runtime, for callers such as the dashboard that cannot await one. */
   let built: Runtime | undefined;
+  const activeWaitInterruptions = new Set<AbortController>();
+
+  pi.on("input", (event) => {
+    // Extension-generated prompts are internal plumbing, not foreground users.
+    if (event.source !== "extension") {
+      for (const controller of [...activeWaitInterruptions]) controller.abort();
+    }
+    return { action: "continue" };
+  });
 
   /**
    * The runtime needs a model registry and a cwd, which only exist once a
@@ -225,8 +234,18 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { agents } = await requireRuntime(ctx);
-      const settled = await agents.wait(params.ids, signal);
-      return success(settled.map(renderResult).join("\n\n---\n\n"), { ids: params.ids });
+      const interruption = new AbortController();
+      activeWaitInterruptions.add(interruption);
+      try {
+        const result = await agents.wait(params.ids, signal, interruption.signal);
+        const rendered = result.settled.map(renderResult).join("\n\n---\n\n");
+        const message = result.reason === "user-interrupted"
+          ? `${rendered ? `${rendered}\n\n---\n\n` : ""}Wait interrupted by foreground user input; ${result.pending.length} subagent(s) remain running and can be collected later.`
+          : rendered;
+        return success(message, { ids: params.ids, reason: result.reason, pending: result.pending });
+      } finally {
+        activeWaitInterruptions.delete(interruption);
+      }
     },
   });
 

@@ -24,6 +24,12 @@ export interface SpawnRequest {
   readonly tools?: readonly string[];
 }
 
+export interface WaitResult extends Iterable<SubagentSnapshot> {
+  readonly settled: readonly SubagentSnapshot[];
+  readonly pending: readonly string[];
+  readonly reason: "settled" | "user-interrupted";
+}
+
 export interface SubagentManagerOptions {
   readonly registry: BackendRegistry;
   readonly maxRunning?: number;
@@ -151,27 +157,52 @@ export class SubagentManager {
     }
   }
 
-  /**
-   * Waits for the listed subagents to settle, then hands back their snapshots
-   * and marks their results consumed so they are not also auto-delivered.
-   */
-  async wait(ids: readonly string[], signal?: AbortSignal): Promise<SubagentSnapshot[]> {
+  /** Waits for all listed agents, or returns a partial snapshot on foreground input. */
+  async wait(ids: readonly string[], signal?: AbortSignal, interruption?: AbortSignal): Promise<WaitResult> {
     const unique = [...new Set(ids)];
     const missing = unique.filter((id) => !this.entries.has(id));
     if (missing.length) throw new Error(`Unknown subagent(s): ${missing.join(", ")}.`);
-    const waits = unique.map((id) => this.entries.get(id)!.settled);
-    const settled = signal
-      ? await Promise.race([
-        Promise.all(waits),
-        new Promise<never>((_, reject) => {
-          const onAbort = () => reject(new Error("Wait was cancelled."));
-          if (signal.aborted) onAbort();
-          else signal.addEventListener("abort", onAbort, { once: true });
-        }),
-      ])
-      : await Promise.all(waits);
-    for (const id of unique) this.delivery.consume(id);
-    return settled;
+
+    return new Promise<WaitResult>((resolve, reject) => {
+      let done = false;
+      const cleanup = () => {
+        signal?.removeEventListener("abort", cancel);
+        interruption?.removeEventListener("abort", interrupt);
+      };
+      const finish = (reason: WaitResult["reason"]) => {
+        if (done) return;
+        done = true;
+        cleanup();
+        const settled = unique
+          .map((id) => this.entries.get(id)!.snapshot)
+          .filter((snapshot) => snapshot.status !== "running");
+        const settledIds = new Set(settled.map(({ id }) => id));
+        for (const id of settledIds) this.delivery.consume(id);
+        resolve({
+          settled,
+          pending: unique.filter((id) => !settledIds.has(id)),
+          reason,
+          [Symbol.iterator]: () => settled[Symbol.iterator](),
+        });
+      };
+      const cancel = () => {
+        if (done) return;
+        done = true;
+        cleanup();
+        reject(new Error("Wait was cancelled."));
+      };
+      const interrupt = () => finish("user-interrupted");
+      if (signal?.aborted) return cancel();
+      if (interruption?.aborted) return interrupt();
+      signal?.addEventListener("abort", cancel, { once: true });
+      interruption?.addEventListener("abort", interrupt, { once: true });
+      void Promise.all(unique.map((id) => this.entries.get(id)!.settled)).then(() => finish("settled"), (error) => {
+        if (done) return;
+        done = true;
+        cleanup();
+        reject(error);
+      });
+    });
   }
 
   /**
