@@ -51,6 +51,7 @@ export const DELEGATION_GUIDELINES: readonly string[] = [
   "Review a subagent's work before merging it: read the changes it describes, and spawn a reviewer when the change is large or risky. Merging is not automatic and should not be reflexive.",
   "Model defaults by what the subagent is for: `opus` for design partners and reviewers, `sol` for implementation. `sol` is the default when you name nothing.",
   "Use `fable` only when I ask for it by name. It is stronger than `opus` and correspondingly more expensive; do not reach for it on your own judgment.",
+  "Leave effort alone. Each model carries a default effort chosen for the work it is used for, and that default is almost always right. Set it only when I ask for a different reasoning level — if I say to think harder about something, raise it; if I say a task is trivial or want it fast, lower it.",
 ];
 
 export const WORKSPACE_GUIDELINES: readonly string[] = [

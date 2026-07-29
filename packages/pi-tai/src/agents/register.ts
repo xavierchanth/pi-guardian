@@ -152,7 +152,10 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       })),
       effort: Type.Optional(Type.Union(
         ["low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)),
-        { description: "Reasoning effort for this subagent" },
+        {
+          description: "Reasoning effort. Omit this: each model has a default chosen for its purpose. "
+            + "Set it only when the user asks for a different reasoning level.",
+        },
       )),
       title: Type.Optional(Type.String({ description: "Short label for progress display" })),
       continue: Type.Optional(Type.String({
