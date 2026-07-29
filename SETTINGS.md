@@ -156,3 +156,7 @@ Guardian currently has no settings. It reviews every agent-generated `bash` call
 Low- and medium-risk related work may proceed. High- and critical-risk actions never execute through an agent: related actions are returned to the root user for direct human execution, while unrelated or unclear actions are denied without a runnable command. Destructive candidates fail closed when review is unavailable; ordinary actions proceed. Guardian never provides an interactive approval or persistent bypass path.
 
 Built-in file tools enforce canonical workspace boundaries. External research is delegated through the `researcher` subagent capability; root sessions have no direct web tools.
+
+## Context transfer
+
+Context transfer v1 has no configuration. Use `/context-export [notes…]` and `/context-import <ID>`; artifacts are retained locally for 30 days, with at most 50 kept.

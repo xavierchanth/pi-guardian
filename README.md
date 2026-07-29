@@ -203,3 +203,7 @@ Start with the [documentation index](docs/README.md), then follow the [product](
 ## License
 
 Pi-Tai is MIT licensed.
+
+## Context transfer
+
+`/context-export [notes…]` creates a summary-only local handoff and copies a `/context-import <ID>` command. Run that command in another session to persist the reference and request one concise restatement. Artifacts are private files under `<agentDir>/pi-tai/context-exports`; upstream `/export` and `/import` remain untouched.
