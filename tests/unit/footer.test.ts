@@ -14,7 +14,7 @@ import type { WorkContextStore } from "../../packages/pi-tai/src/work-context/pe
 
 const snapshot: FooterSnapshot = {
   cwd: "/Users/chant/src/xc/pi-tai",
-  capabilities: ["orchestrator"],
+  capabilities: ["subagents"],
   goal: "Ship a focused three-row footer",
   currentStep: "Implement layout and truncation",
   currentStepNumber: 2,
@@ -43,7 +43,7 @@ test("renders the requested three-row work-focused footer", () => {
   assert.ok(lines[0]?.endsWith("gpt-5.6-sol · low"));
   assert.ok(lines[1]?.startsWith("2/3: Implement layout and truncation"));
   assert.ok(lines[1]?.endsWith("67.6%/272k (auto)"));
-  assert.ok(lines[2]?.startsWith("xc/pi-tai · orchestrator"));
+  assert.ok(lines[2]?.startsWith("xc/pi-tai · subagents"));
   assert.ok(lines[2]?.endsWith("↑465k ↓35k R7.2M $6.991 (sub)"));
   assert.deepEqual(rows.map((row) => row.leftColor), ["text", "text", "text"]);
   for (const line of lines) assert.equal(visibleWidth(line), 100);
@@ -111,7 +111,7 @@ test("renders enabled capability labels beside the directory with base foregroun
       getEntries: () => [{
         type: "custom",
         customType: "pi-tai-subagent-role",
-        data: { mode: "root", agentName: "orchestrator" },
+        data: { mode: "root", agentName: "subagents" },
       }, {
         type: "message",
         message: {
@@ -149,7 +149,7 @@ test("renders enabled capability labels beside the directory with base foregroun
   );
   const lines = footer.render(80);
   assert.equal(lines.length, 3);
-  assert.match(lines[2] ?? "", /^tmp\/project · orchestrator/);
+  assert.match(lines[2] ?? "", /^tmp\/project · Subagents/);
   assert.match(lines[2] ?? "", /↑11 ↓22 R33 W44 \$0\.300$/);
   assert.deepEqual(colors, ["text", "text", "text", "text", "text", "text"]);
 

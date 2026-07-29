@@ -19,15 +19,9 @@ These documents describe the **intended end state**. They are not organized arou
 
 ## Agent concurrency and JJ
 
-Agent concurrency is a core Pi-Tai capability and the most rigorously specified subsystem.
+Agent concurrency is a core Pi-Tai capability.
 
-- [Concurrency overview](concurrency/README.md) — routes, roles, ownership, and end-to-end workflows.
-- [Runtime and messaging](concurrency/RUNTIME.md) — private child contexts, push events, waits, restart, and accounting.
-- [JJ coordination](concurrency/JJ.md) — WIP changes, file-set queues, isolated workspaces, review, and integration.
-- [State machines and invariants](concurrency/STATE-MACHINES.md) — normative lifecycle and invalid-state rules.
-- [Agents and tools](concurrency/TOOLS.md) — authority matrix and deterministic operation catalog.
-- [Failure and recovery](concurrency/RECOVERY.md) — wait, refresh, repair, stop, and user-directed recovery policy.
-- [Testing](concurrency/TESTING.md) — deterministic, Real-JJ, SDK, and optional model-eval strategy.
+- [Subagents and workspaces](concurrency/README.md) — harnesses, isolation, model selection, result delivery, the tool surface, and the JJ workspace lifecycle.
 
 ## Roadmap
 

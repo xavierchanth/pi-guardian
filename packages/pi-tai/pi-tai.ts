@@ -24,16 +24,19 @@ import {
 import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
-import { registerSubagents, type SubagentRuntimeMode } from "./src/subagents/register.ts";
+import { registerAgents } from "./src/agents/register.ts";
+import type { BackendName } from "./src/agents/domain.ts";
 import { registerWebTools } from "./src/web/register.ts";
-import type { HostServiceClientPort } from "./src/concurrency/host-repository.ts";
+
+/** Where child sessions run. The legacy out-of-process launcher is retired. */
+export type SubagentRuntimeMode = "pi-cli" | "host-worker";
 import {
   createPiSessionWorkContextStore,
   type WorkContextStore,
 } from "./src/work-context/persistence.ts";
 
 export interface PiTaiRuntime {
-  mode: Exclude<SubagentRuntimeMode, "legacy-child-process">;
+  mode: SubagentRuntimeMode;
   config: PiTaiConfigService;
   workContext: WorkContextStore;
   titleGenerator: TitleGenerator;
@@ -41,8 +44,11 @@ export interface PiTaiRuntime {
   notificationSender: NotificationSender;
   capabilities: SessionCapabilityController;
   agentDir: string;
-  hostServices?: HostServiceClientPort;
   rootSessionId?: string;
+  /** Opt-in subagent backends beyond the built-in pi one. */
+  backends?: readonly BackendName[];
+  /** Harness used for subagents when a spawn names none. */
+  defaultBackend?: BackendName;
 }
 
 export type PiTaiRegistrar = (
@@ -85,13 +91,11 @@ const productionRegistrars: PiTaiRegistrars = {
     registerModelProfiles(pi, runtime.config);
   },
   subagents: (pi, runtime) => {
-    registerSubagents(pi, {
-      runtime: runtime.mode,
-      capabilities: runtime.capabilities,
+    registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
-      ...(runtime.hostServices ? { hostServices: runtime.hostServices } : {}),
-      ...(runtime.rootSessionId ? { rootSessionId: runtime.rootSessionId } : {}),
+      ...(runtime.backends ? { backends: runtime.backends } : {}),
+      ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });
   },
   sessionTitle: (pi, runtime) => {

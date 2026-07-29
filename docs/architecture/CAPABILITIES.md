@@ -38,7 +38,7 @@ Clients and models do not receive ambient machine handles.
 
 ### JJ and workspaces
 
-Strong semantic operations consume injected tracked handles and leases. Models supply intent and descriptions, not cwd, filesets, revsets, tracked IDs, or argv. See [JJ coordination](../concurrency/JJ.md).
+Strong semantic operations consume injected tracked handles and leases. Models supply intent and descriptions, not cwd, filesets, revsets, tracked IDs, or argv. See [Subagents and workspaces](../concurrency/README.md).
 
 ### Web
 

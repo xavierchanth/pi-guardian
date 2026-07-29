@@ -3,6 +3,8 @@
 **Status:** Complete  
 **Depends on:** I05
 
+**Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
+
 ## Outcome
 
 Bounded workers safely edit a shared source workspace through atomic whole-file ownership and deterministic feature checkpoints while preserving the orchestrator's private WIP change.

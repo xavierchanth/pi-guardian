@@ -11,17 +11,13 @@
 | **foreground operation** | One accepted prompt or interaction cycle whose state is idle, running, or requires action. |
 | **event cursor** | Monotonic position in one session's ordered durable event stream, used for replay and optimistic concurrency. |
 | **projection** | Rebuildable view derived from canonical events and snapshots for a client or protocol. |
-| **Orchestrator** | Root agent that sizes and routes work orders, uses Design–Plan–Implement–Closure for consequential work, and owns review disposition, integration, and final verification. |
-| **Implementation Lead** | Agent owning one large product work order in a dedicated workspace, including direct implementation or decomposition into small Worker work orders. |
-| **Documenter** | Non-delegating agent materializing one standalone documentation work order within explicit documentation paths. |
-| **Worker** | Agent owning one small bounded product work order, either in a dedicated workspace or under an Implementation Lead's file-set ownership. |
-| **reviewer** | Read-only agent comparing an exact change range with an immutable work-order snapshot. |
-| **scout** | Read-only repository reconnaissance agent. |
-| **researcher** | Read-only agent gathering current external or repository evidence. |
+| **subagent** | Background agent given one self-contained objective, its own context window, and a working directory. It cannot see the parent conversation, and its final message is its entire report. |
+| **harness** | Runtime that executes a subagent — `pi`, `claude`, or `codex` — translated into one neutral event stream. |
+| **isolation** | Where a subagent works: `workspace` gives it its own JJ checkout, `shared` puts it in the user's working copy. It names a location, not a permission. |
+| **model alias** | Short name — `sol`, `opus`, or `fable` — carrying a model, a reasoning effort, and the harness it runs on. |
 | **child context** | Private managed Pi SDK `AgentSession` linked to one parent and excluded from user session navigation. |
 | **execution cycle** | One concrete run or recovery attempt of a durable child context. |
-| **task packet** | Self-contained bounded objective, context, resources, authority, acceptance criteria, and report contract given to a child. |
-| **work order** | Durable execution authority combining objective, constraints, acceptance criteria, resources, implementation instructions, and Closure requirements. Its execution class is `small-product`, `large-product`, or `documentation`, selecting Worker, Implementation Lead, or Documenter. Instruction revisions are append-only and Reviewers receive immutable full-history snapshots. |
+| **charter** | System prompt given to a subagent, fixing the objective, the acceptance criteria, the constraints, and how to leave its workspace. |
 | **work context** | Current goal and execution checklist associated with a session or context. |
 | **orchestration change** | Mutable private per-session JJ change, described `pi-tai: session <id>`, preserving that Host session's integrated work without moving or rewriting the invoking user workspace. |
 | **source base** | The invoking workspace's single parent, `@-`, recorded as the stable insertion and rebase anchor for managed work. |

@@ -67,10 +67,10 @@ Provides:
 
 - lightweight session goal/checklist state;
 - durable state-owned task trees for substantial implementation;
-- immutable content-addressed Markdown snapshots included in child and reviewer packets;
+- immutable content-addressed Markdown snapshots referenced by the material handed to a subagent;
 - projections consumable by any client.
 
-Packaged roles use scoped task tools rather than `update_plan`: the Orchestrator owns immutable goals, sourced user directions, and effective plans; Implementation Lead and Documenter assignments bind a persisted plan without user approval; Implementation Leads replace their effective execution plans through append-only revisions; and child contexts execute bound task nodes using role-scoped task projections. Production no longer exposes `update_plan`; Host-backed task records are authoritative.
+Task state is owned by the Host rather than by a model: production does not expose `update_plan`, and Host-backed task records are authoritative. A subagent does not read this state. It is given its objective, acceptance criteria, and constraints in its charter when it is spawned, and reports back in its final message.
 
 ### Guardian
 

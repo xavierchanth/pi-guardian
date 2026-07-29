@@ -3,6 +3,8 @@
 **Status:** Complete  
 **Depends on:** I06, I07
 
+**Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
+
 ## Outcome
 
 Every nonempty isolated range is bound to a durable Orchestrator plan, checked by an independent Reviewer against frozen evidence, integrated deterministically into the active source working change, verified, and recoverable across known interruption boundaries.

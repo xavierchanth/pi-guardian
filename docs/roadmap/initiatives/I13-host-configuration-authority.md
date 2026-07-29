@@ -159,6 +159,10 @@ wider tool set. Guardian reviews `bash` and `web_fetch` but not the composition,
 `write`/`edit`. The resolver must enforce that a project-layer agent definition is a subset of the
 same-named user or packaged definition's tools — never a superset — and may never set `root: true`.
 
+This concern is currently moot: declarative agent definitions were removed along with named roles, so
+there is no `.pi/agents` layer to resolve and no per-agent `tools:` list to narrow. The requirement
+stands if project-layer agent definitions are ever reintroduced.
+
 ### D9 — Schema and resolution in Rust
 
 | Option | Verdict |
