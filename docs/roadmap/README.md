@@ -41,7 +41,7 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
 | I17 | [Researcher capability subagent](initiatives/I17-capability-subagents.md) | Complete | — | External research moves behind a specialized Codex subagent |
-| I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Planned | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
+| I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Complete | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
 
 ## Dependency graph
 

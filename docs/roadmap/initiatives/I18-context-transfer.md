@@ -1,6 +1,6 @@
 # I18 — Context transfer with `/context-export` and `/context-import`
 
-**Status:** Planned  
+**Status:** Complete  
 **Depends on:** I00. Uses no I13 checkpoint beyond what already ships.
 
 ## Outcome
