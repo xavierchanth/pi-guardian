@@ -23,6 +23,7 @@ function fakeHost() {
   const tools = new Map<string, any>();
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
   const messages: any[] = [];
+  const messageOptions: any[] = [];
   const commands = new Map<string, any>();
   const pi = {
     registerTool(tool: any) { tools.set(tool.name, tool); },
@@ -30,9 +31,12 @@ function fakeHost() {
     on(name: string, handler: (event: any, ctx: any) => any) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
-    sendMessage(message: any) { messages.push(message); },
+    sendMessage(message: any, options: any) {
+      messages.push(message);
+      messageOptions.push(options);
+    },
   };
-  return { pi, tools, commands, handlers, messages };
+  return { pi, tools, commands, handlers, messages, messageOptions };
 }
 
 /** A backend registered as "pi" whose children commit a described change. */
@@ -136,7 +140,7 @@ describe("subagent tool surface", () => {
     assert.match(textOf(result), /neither a known alias/);
   });
 
-  it("spawns an isolated subagent and tells the model not to wait", async () => {
+  it("spawns an isolated subagent with dependency-neutral wait guidance", async () => {
     const backend = new StubBackend({ name: "pi" });
     const { call, workspaces } = await harness(backend);
 
@@ -149,7 +153,7 @@ describe("subagent tool surface", () => {
 
     assert.equal(result.isError, undefined);
     assert.match(textOf(result), /in its own workspace/);
-    assert.match(textOf(result), /result will arrive automatically/);
+    assert.match(textOf(result), /wait if the current task depends on it/);
     assert.equal((await workspaces.list()).length, 1);
     const charter = backend.spawned[0]?.systemPrompt ?? "";
     assert.match(charter, /your own checkout/, "the child is told where it is working");
@@ -240,6 +244,27 @@ describe("subagent tool surface", () => {
     await handlerFor(host, "agent_settled")({}, ctx);
     assert.equal(host.messages.length, 1, "an unattended result is delivered when the parent goes idle");
     assert.match(host.messages[0].content, /finished/);
+  });
+
+  it("nudges once per exchange to reassess waiting while a subagent runs", async () => {
+    const { call, host, ctx } = await harness();
+    await call("subagent_spawn", { objective: "HANG: keep going", isolation: "workspace" });
+    const settled = handlerFor(host, "agent_settled");
+
+    await settled({}, ctx);
+    assert.equal(host.messages.length, 1);
+    assert.equal(host.messages[0].display, false);
+    assert.match(host.messages[0].content, /Reassess contextually/);
+    assert.match(host.messages[0].content, /subagent_wait/);
+    assert.deepEqual(host.messageOptions[0], { deliverAs: "followUp", triggerTurn: true });
+
+    await settled({}, ctx);
+    assert.equal(host.messages.length, 1, "the reassessment turn settling does not recursively nudge");
+
+    await handlerFor(host, "input")({ source: "interactive" }, ctx);
+    await settled({}, ctx);
+    assert.equal(host.messages.length, 2, "foreground input makes reassessment eligible again");
+    await call("subagent_cancel", { ids: [host.messages[1].details.ids[0]] });
   });
 
   it("releases active waits only for foreground input", async () => {

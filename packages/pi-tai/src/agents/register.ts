@@ -80,10 +80,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   /** Settled runtime, for callers such as the dashboard that cannot await one. */
   let built: Runtime | undefined;
   const activeWaitInterruptions = new Set<AbortController>();
+  // A reassessment follow-up itself eventually settles. Keep it from nudging
+  // again unless foreground input starts a genuinely new exchange.
+  let reassessmentSent = false;
 
   pi.on("input", (event) => {
     // Extension-generated prompts are internal plumbing, not foreground users.
     if (event.source !== "extension") {
+      reassessmentSent = false;
       for (const controller of [...activeWaitInterruptions]) controller.abort();
     }
     return { action: "continue" };
@@ -216,7 +220,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       return success(
         `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})`
         + `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.`
-        + " Keep working; its result will arrive automatically.",
+        + " Its result will arrive automatically; wait if the current task depends on it, or continue with independent work.",
         { id: snapshot.id, backend: snapshot.backend, model: `${provider}/${model}`, effort, workspaceId: isolated.workspaceFor(snapshot.id) },
       );
     },
@@ -450,7 +454,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     if (!runtime) return;
     const { agents } = await runtime;
     const results = agents.delivery.drain();
-    if (!results.length || typeof pi.sendMessage !== "function") return;
+    if (typeof pi.sendMessage !== "function") return;
     for (const result of results) {
       const snapshot = agents.get(result.id);
       pi.sendMessage({
@@ -460,6 +464,21 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         details: { id: result.id },
       }, { deliverAs: "followUp", triggerTurn: true });
     }
+
+    const running = agents.list().filter((snapshot) => snapshot.status === "running");
+    if (!running.length) {
+      reassessmentSent = false;
+      return;
+    }
+    if (reassessmentSent) return;
+    reassessmentSent = true;
+    pi.sendMessage({
+      customType: "pi-tai-subagent-wait-reassessment",
+      content: "Subagents remain running. Reassess contextually whether the current dialogue or task depends on their answer. "
+        + "Call subagent_wait for the relevant ids if it does; otherwise continue without waiting.",
+      display: false,
+      details: { ids: running.map((snapshot) => snapshot.id) },
+    }, { deliverAs: "followUp", triggerTurn: true });
   });
 
   pi.on("session_shutdown", async () => {
