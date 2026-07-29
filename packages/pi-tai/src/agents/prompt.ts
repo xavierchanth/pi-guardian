@@ -16,8 +16,7 @@ export const SPAWN_DESCRIPTION =
 export const WAIT_DESCRIPTION =
   "Block until any listed subagent finishes, then return every listed result ready at that moment and identify those still running. "
   + "Call again with the remaining ids to collect staggered completions; already-finished agents return immediately. "
-  + "Foreground user input releases the wait without stopping or steering subagents, and pending results remain collectable. "
-  + "Use it when the current dialogue or task depends on a subagent's answer; continue with independent work otherwise.";
+  + "Foreground user input releases the wait without stopping or steering subagents, and pending results remain collectable.";
 
 export const CHECK_DESCRIPTION =
   "Look at a subagent's status and recent output without blocking and without consuming its result.";
@@ -48,7 +47,7 @@ export const WORKSPACE_STATUS_DESCRIPTION =
 export const DELEGATION_GUIDELINES: readonly string[] = [
   "Delegate work that is self-contained and worth its own context window: a focused implementation task, an independent investigation, a review of work that already exists. Do trivial or tightly coupled work yourself.",
   "Write the subagent's prompt so it stands alone. It cannot see this conversation, so state the goal, the relevant background, the acceptance criteria, and the constraints in the prompt itself.",
-  "After starting a subagent, decide based on dependency: call subagent_wait when the current dialogue or task needs its answer, or continue with independent work while results arrive automatically. Foreground user input releases waits without cancelling subagents.",
+  "Foreground user input releases subagent_wait without cancelling subagents.",
   "A user message always addresses you, the parent. Do not relay it with subagent_send unless the user explicitly asks you to send that message to a subagent.",
   "Give a subagent its own workspace when its changes should land as a reviewable unit or run alongside other subagents. Use the shared working copy when you want its work to appear directly in yours.",
   "Review a subagent's work before merging it: read the changes it describes, and spawn a reviewer when the change is large or risky. Merging is not automatic and should not be reflexive.",

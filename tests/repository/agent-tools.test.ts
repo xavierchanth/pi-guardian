@@ -140,7 +140,7 @@ describe("subagent tool surface", () => {
     assert.match(textOf(result), /neither a known alias/);
   });
 
-  it("spawns an isolated subagent with dependency-neutral wait guidance", async () => {
+  it("spawns an isolated subagent with a neutral delivery notice", async () => {
     const backend = new StubBackend({ name: "pi" });
     const { call, workspaces } = await harness(backend);
 
@@ -153,7 +153,8 @@ describe("subagent tool surface", () => {
 
     assert.equal(result.isError, undefined);
     assert.match(textOf(result), /in its own workspace/);
-    assert.match(textOf(result), /wait if the current task depends on it/);
+    assert.match(textOf(result), /Its result will arrive automatically\.$/);
+    assert.doesNotMatch(textOf(result), /\b(?:wait|continue)\b/i);
     assert.equal((await workspaces.list()).length, 1);
     const charter = backend.spawned[0]?.systemPrompt ?? "";
     assert.match(charter, /your own checkout/, "the child is told where it is working");
@@ -248,23 +249,27 @@ describe("subagent tool surface", () => {
 
   it("nudges once per exchange to reassess waiting while a subagent runs", async () => {
     const { call, host, ctx } = await harness();
-    await call("subagent_spawn", { objective: "HANG: keep going", isolation: "workspace" });
+    const spawned = await call("subagent_spawn", { objective: "HANG: keep going", isolation: "workspace" });
     const settled = handlerFor(host, "agent_settled");
+    const input = handlerFor(host, "input");
 
     await settled({}, ctx);
     assert.equal(host.messages.length, 1);
     assert.equal(host.messages[0].display, false);
-    assert.match(host.messages[0].content, /Reassess contextually/);
-    assert.match(host.messages[0].content, /subagent_wait/);
+    assert.equal(host.messages[0].content, `Subagents still running: ${spawned.details.id}. Reassess whether to wait.`);
     assert.deepEqual(host.messageOptions[0], { deliverAs: "followUp", triggerTurn: true });
 
     await settled({}, ctx);
-    assert.equal(host.messages.length, 1, "the reassessment turn settling does not recursively nudge");
+    assert.equal(host.messages.length, 1, "repeat settling does not recursively nudge");
 
-    await handlerFor(host, "input")({ source: "interactive" }, ctx);
+    await input({ source: "extension" }, ctx);
+    await settled({}, ctx);
+    assert.equal(host.messages.length, 1, "extension input does not reset the recursion guard");
+
+    await input({ source: "interactive" }, ctx);
     await settled({}, ctx);
     assert.equal(host.messages.length, 2, "foreground input makes reassessment eligible again");
-    await call("subagent_cancel", { ids: [host.messages[1].details.ids[0]] });
+    await call("subagent_cancel", { ids: [spawned.details.id] });
   });
 
   it("releases active waits only for foreground input", async () => {

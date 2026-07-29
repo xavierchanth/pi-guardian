@@ -80,8 +80,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   /** Settled runtime, for callers such as the dashboard that cannot await one. */
   let built: Runtime | undefined;
   const activeWaitInterruptions = new Set<AbortController>();
-  // A reassessment follow-up itself eventually settles. Keep it from nudging
-  // again unless foreground input starts a genuinely new exchange.
+  // Suppress repeated reassessments until foreground input starts a new exchange.
   let reassessmentSent = false;
 
   pi.on("input", (event) => {
@@ -220,7 +219,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       return success(
         `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})`
         + `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.`
-        + " Its result will arrive automatically; wait if the current task depends on it, or continue with independent work.",
+        + " Its result will arrive automatically.",
         { id: snapshot.id, backend: snapshot.backend, model: `${provider}/${model}`, effort, workspaceId: isolated.workspaceFor(snapshot.id) },
       );
     },
@@ -472,12 +471,12 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     }
     if (reassessmentSent) return;
     reassessmentSent = true;
+    const ids = running.map((snapshot) => snapshot.id);
     pi.sendMessage({
       customType: "pi-tai-subagent-wait-reassessment",
-      content: "Subagents remain running. Reassess contextually whether the current dialogue or task depends on their answer. "
-        + "Call subagent_wait for the relevant ids if it does; otherwise continue without waiting.",
+      content: `Subagents still running: ${ids.join(", ")}. Reassess whether to wait.`,
       display: false,
-      details: { ids: running.map((snapshot) => snapshot.id) },
+      details: { ids },
     }, { deliverAs: "followUp", triggerTurn: true });
   });
 

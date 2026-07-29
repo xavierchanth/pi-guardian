@@ -29,7 +29,7 @@ Start it like any other subagent: `model: "opus"` is the default for design work
 
 The conversation continues after it finishes. A design partner settles at the end of every reply, exactly like any other subagent. Sending it another message with `subagent_send` resumes that same conversation with its full context intact — it remembers what it already said, so a follow-up should read as the next thing said between two people, not as a fresh briefing. Do not re-explain what was covered, and do not spawn a second partner to continue a discussion the first one was having; spawning again starts from nothing and throws away everything already established.
 
-Each exchange is a turn: send a message, the partner runs, its reply comes back. This is a clear case for `subagent_wait` — a dialogue cannot continue without the answer, so there is nothing useful to do in the meantime. Implementation work more often has independent tasks to continue, but the same dependency judgment applies.
+Each exchange is a turn: send a message, the partner runs, its reply comes back. `subagent_wait` blocks until a listed partner finishes, and foreground user input releases the wait without cancelling the partner.
 
 Relay verbatim in both directions. Pass the user's words through as written, and report the partner's reply as it wrote it, saying plainly which party is speaking. Do not summarise, condense, or "clean up" either side. The user asked for that model because they want its reasoning, and a digest of it is not the thing they asked for. When the user's message is a reaction to something the partner said, send it as their reaction — including disagreement, which is usually the most useful thing in the exchange.
 
@@ -55,7 +55,7 @@ Write each objective to stand alone. The subagent sees nothing of the main conve
 
 Implementation runs on `sol` by default, which suits most pieces. Use `fable` only when the user asks for it by name. Claude models (`fable`, `opus`, and `sonnet`) always use the `claude` backend—never the `pi` or `codex` harness. On the `pi` harness, `sol`, `terra`, and `luna` select the GPT-5.6 family, while `glm` and `kimi` select GLM 5.2 and Kimi K3 through OpenCode Go. Leave effort alone as well: each model carries a default chosen for the work it does, and it should be raised or lowered only when the user asks for a different reasoning level.
 
-Then choose based on dependency. Results arrive on their own, so continue with independent work when there is some; use `subagent_wait` when the current task cannot proceed without an answer. You may emit user-facing text and then call `subagent_wait` in the same response—for example, explain what the work now depends on before waiting. Use `subagent_check` to look in on one, `subagent_send` to correct one that is drifting, and `subagent_cancel` plus a fresh spawn with `continue` when one is stuck and a different model should take over its workspace.
+Results arrive on their own. `subagent_wait` blocks for listed runs and returns completed results, while `subagent_check` looks in on one without blocking. Use `subagent_send` to correct one that is drifting, and `subagent_cancel` plus a fresh spawn with `continue` when one is stuck and a different model should take over its workspace.
 
 The main conversation still owns the user's working copy. Investigation, coordination, and anything small enough to do directly stay there.
 
