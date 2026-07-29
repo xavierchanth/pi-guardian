@@ -33,3 +33,5 @@
 | **Guardian** | Pi-Tai policy and reviewer boundary that decides whether proposed machine or network actions may execute. |
 | **capability** | Host-advertised machine operation or resource, governed by role and Guardian policy. |
 | **attention required** | Preserved state in which automatic mutation stops because identity, ownership, authority, or completed boundaries cannot be proved. |
+
+**Researcher capability** — The sole role-scoped external-research alias. A parent invokes it through `subagent_spawn` with `capability: "researcher"`; neither root sessions nor Pi children receive direct web tools.

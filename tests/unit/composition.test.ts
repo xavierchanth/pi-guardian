@@ -31,9 +31,6 @@ test("composition root registers every feature once in order", async () => {
       responseEditor: () => {
         calls.push("response-editor");
       },
-      webTools: () => {
-        calls.push("web-tools");
-      },
       modelProfiles: () => {
         calls.push("model-profiles");
       },
@@ -81,7 +78,6 @@ test("composition root registers every feature once in order", async () => {
     "work-context",
     "context-transfer",
     "response-editor",
-    "web-tools",
     "model-profiles",
     "subagents",
     "session-title",

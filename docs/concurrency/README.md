@@ -181,3 +181,7 @@ against mocks: the failure modes worth catching are jj's, and a mock would encod
 same assumptions the code does. Harnesses are tested against scripted event streams —
 for Codex, a fake `app-server` speaking the real protocol, whose method names come
 from `codex app-server generate-json-schema` rather than from memory.
+
+## Research capability
+
+External or source-backed research is delegated with `subagent_spawn`, `capability: "researcher"`, and normally `isolation: "shared"`. The root and Pi children have no direct web tools. The researcher role is the sole research alias; it applies compatible model/backend defaults and returns evidence with source URLs.

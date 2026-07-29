@@ -69,7 +69,7 @@ interface Runtime {
  * Tools a pi child gets. Claude and Codex run their own default toolsets; there
  * is no portable allowlist, and there does not need to be.
  */
-const CHILD_TOOLS = ["read", "write", "edit", "grep", "find", "ls", "bash", "web_search", "web_fetch"] as const;
+const CHILD_TOOLS = ["read", "write", "edit", "grep", "find", "ls", "bash"] as const;
 
 const MAX_RESULT_BYTES = 16 * 1024;
 

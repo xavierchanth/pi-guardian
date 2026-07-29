@@ -593,57 +593,6 @@ test("custom tools that reuse file-tool names own their own policy", async () =>
   );
 });
 
-test("web_fetch is reviewed with canonical public-network evidence", async () => {
-  let request: ReviewRequest | undefined;
-  const state = registerWith(async (received) => {
-    request = received;
-    return allow();
-  });
-  assert.equal(
-    await state.handler(
-      toolEvent("web_fetch", { url: "https://Example.com/docs?q=1" }),
-      fakeContext(),
-    ),
-    undefined,
-  );
-  assert.equal(request?.action.toolName, "web_fetch");
-  assert.deepEqual(request?.reviewEvidence, {
-    type: "web-fetch",
-    requestedUrl: "https://Example.com/docs?q=1",
-    canonicalUrl: "https://example.com/docs?q=1",
-    hostname: "example.com",
-    method: "GET",
-    sendsCredentials: false,
-  });
-});
-
-test("web_fetch private targets are blocked before review", async () => {
-  let reviewed = false;
-  const state = registerWith(async () => {
-    reviewed = true;
-    return allow();
-  });
-  const result = await state.handler(
-    toolEvent("web_fetch", { url: "http://169.254.169.254/latest/meta-data" }),
-    fakeContext(),
-  ) as { block?: boolean; reason?: string };
-  assert.equal(result.block, true);
-  assert.match(result.reason ?? "", /non-public/);
-  assert.equal(reviewed, false);
-});
-
-test("hosted web_search remains outside Guardian review", async () => {
-  let reviewed = false;
-  const state = registerWith(async () => {
-    reviewed = true;
-    return allow();
-  });
-  assert.equal(
-    await state.handler(toolEvent("web_search", { query: "current docs" }), fakeContext()),
-    undefined,
-  );
-  assert.equal(reviewed, false);
-});
 
 test("reviewer resolves the internal identity from gpt-5.4 metadata", () => {
   const template = { provider: "openai-codex", id: "gpt-5.4-mini", name: "mini" };

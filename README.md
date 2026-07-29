@@ -66,11 +66,9 @@ When the effective editor command launches NeoVim (`nvim`, an executable path, o
 
 After the first meaningful request settles, Pi-Tai names an unnamed session with an independently configured provider/model. The naming request uses no tools and a small output budget. It never silently falls back to the active work model; missing or failed title-model configuration uses a deterministic local title instead.
 
-### Hosted web research and safe page fetches
+### Delegated external research
 
-Pi-Tai registers `web_search` and `web_fetch` as normal standalone tools, available to the main session and to subagents alike. `web_search` uses `openai-codex/gpt-5.6-terra`, Pi's existing Codex OAuth, and OpenAI's hosted live search; optional `allowedDomains` restricts discovery to public DNS hostnames. The isolated nested request receives only the research query, exposes no local tools, and returns a concise linked answer with nested usage accounting.
-
-`web_fetch` performs an anonymous GET for one known public HTTP(S) URL, converts HTML to readable linked text, and supports an `offset` for bounded continuation. Guardian reviews every fetch before network access. Deterministic checks still reject credentials in URLs, private or intranet names and addresses, mixed public/private DNS answers, metadata endpoints, non-routable targets, unsafe redirects, oversized responses, and unsupported binary media. For documentation discovery, agents may explicitly fetch a site-root `/llms.txt`; Pi-Tai never assumes or automatically fetches `llms-full.txt`.
+Root sessions and Pi children do not receive direct web tools. Delegate current, external, or source-backed research with `subagent_spawn` using `capability: "researcher"` and `isolation: "shared"`. The capability selects its supported model/backend defaults and injects research instructions that require careful claims, primary sources, and source URLs.
 
 ### Subagents and managed workspaces
 
@@ -88,7 +86,7 @@ Independent model profiles now live in `pi-tai.json`. Shift+Tab cycles profiles 
 
 ### Approval Guardian
 
-Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generated `bash` and `web_fetch` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. The reviewer independently classifies risk, task relationship (`explicit`, `direct`, `supporting`, `unrelated`, or `unclear`), impact scope, and harm kinds. Low/medium-risk work proceeds without method-level permission, including repository understanding, diagnostics, linting, tests, builds, dependency work, configured CI uploads, and communication with development SaaS backends. High/critical actions never execute through an agent: related actions are blocked and surfaced to the human with the exact proposed action for direct execution, while unrelated or unclear actions are denied without a runnable command. Destructive candidates also stop safely when review is unavailable; ordinary actions proceed. Child Guardians route human-execution requirements directly to the root session so intermediate agents cannot authorize or perform them. Review failures and denials are retained locally under `~/.pi/agent/pi-tai/guardian-reviews/` for evaluation.
+Pi-Tai includes a standalone autonomy-first action guardian. Every agent-generated `bash` call is reviewed by `openai-codex/codex-auto-review` using Pi's Codex OAuth provider. The reviewer independently classifies risk, task relationship (`explicit`, `direct`, `supporting`, `unrelated`, or `unclear`), impact scope, and harm kinds. Low/medium-risk work proceeds without method-level permission, including repository understanding, diagnostics, linting, tests, builds, dependency work, configured CI uploads, and communication with development SaaS backends. High/critical actions never execute through an agent: related actions are blocked and surfaced to the human with the exact proposed action for direct execution, while unrelated or unclear actions are denied without a runnable command. Destructive candidates also stop safely when review is unavailable; ordinary actions proceed. Child Guardians route human-execution requirements directly to the root session so intermediate agents cannot authorize or perform them. Review failures and denials are retained locally under `~/.pi/agent/pi-tai/guardian-reviews/` for evaluation.
 
 Built-in file tools use deterministic canonical boundaries. Unignored repository files remain frictionless; direct targets ignored by Git, likely credential paths, VCS metadata, Pi `auth.json`, Pi `models.json`, and Pi `sessions/**` receive Guardian review. Repository-wide `grep` and `find` retain their native Git-ignore behavior. Read-only tools may additionally inspect safe Pi state/resources and global `.agents/skills`; Pi-state writes and outside-boundary file operations remain blocked, with reviewed `bash` as the escalation path. Traversal and symlink escapes are always blocked.
 
@@ -185,7 +183,6 @@ packages/pi-tai/skills/             specialized version-control, invariant, DPIC
 packages/pi-tai/prompts/            checkpoint and DPIC prompt commands
 packages/pi-tai/src/session-title/  independent title generation
 packages/pi-tai/src/guardian/       standalone action review and path boundaries
-packages/pi-tai/src/web/            hosted web search and public-only page fetching
 packages/pi-tai/src/notifications/  native review/completion notifications
 packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
 packages/pi-tai/themes/             packaged dark and light themes

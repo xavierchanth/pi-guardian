@@ -151,8 +151,8 @@ If cmux presentation does not appear, verify `command -v cmux`, `CMUX_WORKSPACE_
 
 ## Action Guardian
 
-Guardian currently has no settings. It reviews every agent-generated `bash` and `web_fetch` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second deadline.
+Guardian currently has no settings. It reviews every agent-generated `bash` call with `openai-codex/codex-auto-review` through Pi's existing Codex OAuth authentication, with a 30-second deadline.
 
 Low- and medium-risk related work may proceed. High- and critical-risk actions never execute through an agent: related actions are returned to the root user for direct human execution, while unrelated or unclear actions are denied without a runnable command. Destructive candidates fail closed when review is unavailable; ordinary actions proceed. Guardian never provides an interactive approval or persistent bypass path.
 
-Built-in file tools enforce canonical workspace boundaries. `web_fetch` remains public-only regardless of review: private, intranet, metadata, mixed-DNS, and non-routable targets are blocked deterministically.
+Built-in file tools enforce canonical workspace boundaries. External research is delegated through the `researcher` subagent capability; root sessions have no direct web tools.

@@ -27,7 +27,6 @@ import { generateModelTitle, type TitleGenerator } from "./src/session-title/gen
 import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerAgents } from "./src/agents/register.ts";
 import type { BackendName } from "./src/agents/domain.ts";
-import { registerWebTools } from "./src/web/register.ts";
 
 /** Where child sessions run. The legacy out-of-process launcher is retired. */
 export type SubagentRuntimeMode = "pi-cli" | "host-worker";
@@ -65,7 +64,6 @@ export interface PiTaiRegistrars {
   workContext: PiTaiRegistrar;
   contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
-  webTools: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
@@ -86,9 +84,6 @@ const productionRegistrars: PiTaiRegistrars = {
   contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
   responseEditor: (pi) => {
     registerResponseEditor(pi);
-  },
-  webTools: (pi) => {
-    registerWebTools(pi);
   },
   modelProfiles: (pi, runtime) => {
     registerModelProfiles(pi, runtime.config);
@@ -147,7 +142,6 @@ export function createPiTaiExtension(
     await registrars.workContext(pi, runtime);
     await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);
-    await registrars.webTools(pi, runtime);
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);

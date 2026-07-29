@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { CodexBackend } from "../../packages/pi-tai/src/agents/backends/codex.ts";
+import { researchAvailability } from "../../packages/pi-tai/src/agents/backends/codex-protocol.ts";
 import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/agents/domain.ts";
 
 /**
@@ -22,6 +23,12 @@ let started = false;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const frame = JSON.parse(line);
   if (frame.method === "initialize") return send({ id: frame.id, result: { userAgent: "fake" } });
+  if (frame.method === "modelProvider/capabilities/read") return send({ id: frame.id, result: {
+    webSearch: scenario !== "no-web", imageGeneration: false, namespaceTools: false,
+  } });
+  if (frame.method === "configRequirements/read") return send({ id: frame.id, result: {
+    requirements: scenario === "policy" ? { allowedWebSearchModes: ["cached"] } : null,
+  } });
   if (frame.method === "thread/resume") {
     send({ id: frame.id, result: { thread: { id: frame.params.threadId } } });
     process.stderr.write("resumed thread=" + frame.params.threadId + "\n");
@@ -32,7 +39,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     process.stderr.write("started with cwd=" + frame.params.cwd
       + " instructions=" + frame.params.developerInstructions
       + " sandbox=" + frame.params.sandbox
-      + " approval=" + frame.params.approvalPolicy + "\n");
+      + " approval=" + frame.params.approvalPolicy
+      + " web_search=" + (frame.params.config && frame.params.config.web_search) + "\n");
     return;
   }
   if (frame.method === "turn/start") {
@@ -43,6 +51,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     started = true;
     send({ id: frame.id, result: { turnId } });
     notify("turn/started", { threadId: "thread-1", turn: { id: turnId, status: "inProgress", items: [] } });
+    if (scenario === "research") {
+      notify("item/started", { threadId: "thread-1", turnId, item: { id: "web-1", type: "webSearch", query: "current facts" } });
+      notify("item/completed", { threadId: "thread-1", turnId, item: { id: "web-1", type: "webSearch", query: "current facts", results: [] } });
+    }
     notify("item/started", { threadId: "thread-1", turnId, item: { id: "i1", type: "commandExecution", command: "ls -la" } });
     notify("item/completed", { completedAtMs: 1, threadId: "thread-1", turnId, item: { id: "i1", type: "commandExecution", status: "completed" } });
     notify("item/agentMessage/delta", { threadId: "thread-1", turnId, itemId: "i2", delta: "wor" });
@@ -90,6 +102,24 @@ async function collect(events: AsyncIterable<SubagentEvent>): Promise<SubagentEv
   for await (const event of events) seen.push(event);
   return seen;
 }
+
+describe("codex protocol capability mapping", () => {
+  const supported = { webSearch: true, imageGeneration: false, namespaceTools: false };
+
+  it("distinguishes unsupported provider support from policy restrictions", () => {
+    const unsupported = researchAvailability({ ...supported, webSearch: false }, { requirements: null });
+    const policy = researchAvailability(supported, { requirements: { allowedWebSearchModes: ["cached"] } });
+    assert.equal(unsupported.ok, false);
+    assert.equal(!unsupported.ok && unsupported.kind, "unsupported");
+    assert.equal(policy.ok, false);
+    assert.equal(!policy.ok && policy.kind, "policy");
+  });
+
+  it("permits live search when requirements are absent or explicitly allow it", () => {
+    assert.deepEqual(researchAvailability(supported, { requirements: null }), { ok: true });
+    assert.deepEqual(researchAvailability(supported, { requirements: { allowedWebSearchModes: ["live"] } }), { ok: true });
+  });
+});
 
 describe("codex backend", () => {
   before(async () => {
@@ -148,6 +178,33 @@ describe("codex backend", () => {
     assert.match(text, /instructions=you are a worker/);
     assert.match(text, /sandbox=workspace-write/);
     assert.match(text, /approval=never/, "a headless child cannot answer approval prompts");
+  });
+
+  it("probes and explicitly enables live native search for researchers", async () => {
+    process.env.FAKE_CODEX_SCENARIO = "research";
+    const session = await new CodexBackend({ binary }).spawn(task({ capability: "researcher" }));
+    const stderr = captureStderr(session);
+    const events = await collect(session.events);
+
+    assert.match(await stderr, /web_search=live/);
+    const web = events.filter((event) => event.type === "tool_start" || event.type === "tool_end");
+    assert.ok(web.some((event) => event.type === "tool_start" && event.name === "web_search" && event.preview === "current facts"));
+  });
+
+  it("fails a researcher before starting a thread when native search is unsupported", async () => {
+    process.env.FAKE_CODEX_SCENARIO = "no-web";
+    await assert.rejects(
+      new CodexBackend({ binary }).spawn(task({ capability: "researcher" })),
+      /Researcher unavailable:.*does not support native web search/,
+    );
+  });
+
+  it("fails a researcher clearly when policy blocks live search", async () => {
+    process.env.FAKE_CODEX_SCENARIO = "policy";
+    await assert.rejects(
+      new CodexBackend({ binary }).spawn(task({ capability: "researcher" })),
+      /Researcher unavailable:.*policy blocks live web search/,
+    );
   });
 
   it("exposes the thread id so a settled subagent can be continued", async () => {

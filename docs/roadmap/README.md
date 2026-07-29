@@ -40,6 +40,7 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Complete | I06, I08 | Source `@` is the user's; operations resolve `@`/`@-` when they execute; shared targets sit immediately before current `@` |
 | I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
+| I17 | [Researcher capability subagent](initiatives/I17-capability-subagents.md) | Complete | — | External research moves behind a specialized Codex subagent |
 | I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Planned | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
 
 ## Dependency graph
@@ -63,6 +64,7 @@ graph TD
   I14[I14 User-owned source workspace]
   I15[I15 Session presence]
   I16[I16 /btw sidebar query]
+  I17[I17 Capability subagents]
   I18[I18 Context transfer]
 
   I00 --> I01

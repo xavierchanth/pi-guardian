@@ -19,7 +19,7 @@ Scale the ceremony to the work. If something can be inspected, changed, and veri
 
 ## Design
 
-Ground the request before proposing anything: read the code, the tests, the configuration, and the docs that actually govern the area. Delegate the wide sweeps. `subagent_spawn` with `isolation: "shared"` puts a subagent in the user's working copy to investigate the codebase or research externally without flooding the main conversation. Spawn several at once — they run concurrently and their findings come back on their own.
+Ground the request before proposing anything: read the code, the tests, the configuration, and the docs that actually govern the area. Delegate the wide sweeps. `subagent_spawn` with `isolation: "shared"` puts a subagent in the user's working copy to investigate the codebase. For external research, set `capability: "researcher"` without flooding the main conversation. Spawn several at once — they run concurrently and their findings come back on their own.
 
 ### Working with a design partner
 

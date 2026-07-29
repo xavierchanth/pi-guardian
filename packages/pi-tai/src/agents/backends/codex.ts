@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { EventChannel, type AvailabilityResult, type SubagentBackend, type SubagentSession } from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
+import { researchAvailability, type CodexMethod, type CodexParams, type CodexResult } from "./codex-protocol.ts";
 
 /**
  * Opt-in backend running children on `codex app-server`.
@@ -116,6 +117,14 @@ class CodexSubagentSession implements SubagentSession {
         },
       });
       this.notify("initialized", {});
+      if (this.task.capability === "researcher") {
+        const [capabilities, requirements] = await Promise.all([
+          this.request("modelProvider/capabilities/read", {}),
+          this.request("configRequirements/read", {}),
+        ]);
+        const availability = researchAvailability(capabilities, requirements);
+        if (!availability.ok) throw new Error(`Researcher unavailable: ${availability.reason}`);
+      }
       // A resume token is a thread id: continuing a finished subagent is the
       // same conversation, not a new one that has to be re-briefed.
       const thread = this.task.resumeToken
@@ -127,6 +136,8 @@ class CodexSubagentSession implements SubagentSession {
         // child works in its own directory like on any other harness.
         approvalPolicy: this.options.approvalPolicy ?? "never",
         sandbox: this.options.sandbox ?? "workspace-write",
+        // Research is truthful only when app-server itself is put in live mode.
+        ...(this.task.capability === "researcher" ? { config: { web_search: "live" } } : {}),
         ...(this.task.model ?? this.options.defaultModel
           ? { model: this.task.model ?? this.options.defaultModel }
           : {}),
@@ -206,6 +217,14 @@ class CodexSubagentSession implements SubagentSession {
             this.lastAssistantText = text;
             this.channel.push({ type: "assistant_message", text });
           }
+          return;
+        }
+        if (item.type === "webSearch") {
+          const toolId = typeof item.id === "string" ? item.id : "webSearch";
+          const query = typeof item.query === "string" ? item.query : undefined;
+          this.channel.push(method === "item/started"
+            ? { type: "tool_start", toolId, name: "web_search", ...(query ? { preview: query } : {}) }
+            : { type: "tool_end", toolId, ok: true, ...(query ? { preview: query } : {}) });
           return;
         }
         if (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "fileChange") {
@@ -311,7 +330,7 @@ class CodexSubagentSession implements SubagentSession {
     this.channel.push({ type: "backend_error", message });
   }
 
-  private request(method: string, params: unknown): Promise<Record<string, unknown>> {
+  private request<M extends CodexMethod>(method: M, params: CodexParams<M>): Promise<CodexResult<M>> {
     const id = this.nextId++;
     const timeoutMs = this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
@@ -320,7 +339,7 @@ class CodexSubagentSession implements SubagentSession {
         reject(new Error(`codex ${method} timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
       this.pending.set(id, {
-        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        resolve: (value) => { clearTimeout(timer); resolve(value as CodexResult<M>); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
       this.write({ id, method, params });

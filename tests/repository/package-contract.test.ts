@@ -194,12 +194,10 @@ test("package composes only the reporting-only pi-cmux modules", () => {
   }
 });
 
-test("package ships web tools and their child-runtime dependencies", () => {
-  assert.ok(manifest.dependencies?.["html-to-text"]);
-  assert.ok(manifest.dependencies?.["ipaddr.js"]);
-  assert.ok(existsSync(join(root, "packages/pi-tai/src/web/register.ts")));
-  // Children get their tools from their agent definition rather than a separate
-  // child-runtime entry point, so there is no second extension file to ship.
+test("package omits retired direct web tools and dependencies", () => {
+  assert.equal(manifest.dependencies?.["html-to-text"], undefined);
+  assert.equal(manifest.dependencies?.["ipaddr.js"], undefined);
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/web")), false);
   assert.equal(existsSync(join(root, "packages/pi-tai/subagent.ts")), false);
 });
 
