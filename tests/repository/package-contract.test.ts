@@ -78,6 +78,19 @@ test("the subagent tool surface is the nine-tool set", () => {
     "the retired 47-tool registrar is gone");
 });
 
+test("the packaged capability catalog and instruction assets agree", () => {
+  const catalog = JSON.parse(readFileSync(
+    join(root, "packages/pi-tai/src/agents/capabilities.json"),
+    "utf8",
+  )) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
+  assert.equal(catalog.version, 1);
+  assert.deepEqual(catalog.capabilities?.map((entry) => entry.name), ["researcher"]);
+  for (const capability of catalog.capabilities ?? []) {
+    assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
+    assert.ok(existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)));
+  }
+});
+
 test("the packaged model catalog declares every supported alias", () => {
   const catalog = JSON.parse(readFileSync(
     join(root, "packages/pi-tai/src/agents/models.json"),

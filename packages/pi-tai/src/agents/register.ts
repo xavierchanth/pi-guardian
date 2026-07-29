@@ -21,7 +21,7 @@ import { registerSubagentDashboard } from "./dashboard-view.ts";
 import { contextUtilisation, type BackendName, type SubagentSnapshot } from "./domain.ts";
 import { IsolatedSubagents } from "./isolated.ts";
 import { SubagentManager } from "./manager.ts";
-import { MODEL_ALIAS_NAMES, resolveModel } from "./models.ts";
+import { MODEL_ALIASES, MODEL_ALIAS_NAMES, resolveModel } from "./models.ts";
 import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
@@ -148,7 +148,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         description: "workspace: a private checkout the subagent may change. shared: your working copy, read-only.",
       }),
       capability: Type.Optional(Type.Union(CAPABILITY_NAMES.map((name) => Type.Literal(name)), {
-        description: "Specialized environment and instructions for research, browser use, or computer use.",
+        description: "Specialized environment and instructions for research tasks.",
       })),
       background: Type.Optional(Type.String({ description: "Context the subagent needs but cannot discover on its own" })),
       acceptanceCriteria: Type.Optional(Type.Array(Type.String(), {
@@ -177,18 +177,23 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { isolated, agents } = await requireRuntime(ctx);
-      const capability = params.capability ? CAPABILITIES[params.capability as CapabilityName] : undefined;
-      if (params.continue) {
-        const previous = agents.get(params.continue);
-        if (previous && previous.capability !== params.capability) {
-          return failure(`Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability ?? "(none)"}.`);
-        }
+      const previous = params.continue ? agents.get(params.continue) : undefined;
+      if (previous && params.capability && previous.capability !== params.capability) {
+        return failure(`Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability}.`);
       }
-      // An explicit model alias gets to select its catalog backend. Capability
-      // defaults apply only where the caller did not provide a narrower choice.
+      const capabilityName = (params.capability ?? previous?.capability) as CapabilityName | undefined;
+      const capability = capabilityName ? CAPABILITIES[capabilityName] : undefined;
+
+      // Known aliases select their catalog backend. Explicit provider/model IDs
+      // retain the configured backend unless the caller overrides it.
+      const explicitAlias = params.model ? MODEL_ALIASES[params.model.toLowerCase()] : undefined;
+      const selectedBackend = params.backend
+        ?? (params.model
+          ? (explicitAlias ? undefined : dependencies.defaultBackend)
+          : capability?.backend ?? dependencies.defaultBackend);
       const resolved = resolveModel({
         ...(params.model ? { model: params.model } : capability ? { model: capability.model } : {}),
-        ...(params.backend ? { backend: params.backend } : (!params.model && capability ? { backend: capability.backend } : !params.model && dependencies.defaultBackend ? { backend: dependencies.defaultBackend } : {})),
+        ...(selectedBackend ? { backend: selectedBackend } : {}),
         ...(params.effort ? { effort: params.effort } : capability ? { effort: capability.effort } : {}),
       });
       if (!resolved.ok) return failure(resolved.reason);
@@ -234,7 +239,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})`
         + `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.`
         + " Keep working; its result will arrive automatically.",
-        { id: snapshot.id, backend: snapshot.backend, model: `${provider}/${model}`, effort, workspaceId: isolated.workspaceFor(snapshot.id) },
+        {
+          id: snapshot.id,
+          backend: snapshot.backend,
+          model: `${provider}/${model}`,
+          effort,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+          workspaceId: isolated.workspaceFor(snapshot.id),
+        },
       );
     },
   });
@@ -285,7 +297,11 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       if (!snapshot) return failure(`Unknown subagent ${params.id}.`);
       return success(
         `${renderLine(snapshot)}\nturns: ${snapshot.turns}\n\n${truncate(snapshot.latestText, 2048) || "(no output yet)"}`,
-        { id: snapshot.id, status: snapshot.status },
+        {
+          id: snapshot.id,
+          status: snapshot.status,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+        },
       );
     },
   });
@@ -300,7 +316,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       const { agents } = await requireRuntime(ctx);
       const all = agents.list();
       if (!all.length) return success("No subagents have been started in this session.", { count: 0 });
-      return success(all.map(renderLine).join("\n"), { count: all.length });
+      return success(all.map(renderLine).join("\n"), {
+        count: all.length,
+        subagents: all.map((snapshot) => ({
+          id: snapshot.id,
+          status: snapshot.status,
+          ...(snapshot.capability ? { capability: snapshot.capability } : {}),
+        })),
+      });
     },
   });
 
@@ -489,6 +512,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 function renderLine(snapshot: SubagentSnapshot): string {
   const context = contextUtilisation(snapshot);
   return `${snapshot.id}  ${snapshot.status.padEnd(7)} ${snapshot.backend.padEnd(6)} `
+    + `${snapshot.capability ? `[${snapshot.capability}] ` : ""}`
     + `${context === undefined ? "" : `ctx ${context}%  `}${snapshot.title}`;
 }
 

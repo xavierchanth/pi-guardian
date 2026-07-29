@@ -50,7 +50,10 @@ function writingBackend(file: string, contents: string): StubBackend {
   return backend;
 }
 
-async function harness(backend: StubBackend = new StubBackend({ name: "pi" })) {
+async function harness(
+  backend: StubBackend = new StubBackend({ name: "pi" }),
+  options: { defaultBackend?: "pi" | "claude" | "codex" } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-tools-"));
   roots.push(root);
   const source = join(root, "repo");
@@ -72,6 +75,7 @@ async function harness(backend: StubBackend = new StubBackend({ name: "pi" })) {
     agentDir: join(root, "agent-dir"),
     workspaces,
     extraBackends: [backend],
+    ...(options.defaultBackend ? { defaultBackend: options.defaultBackend } : {}),
   });
   const ctx = {
     cwd: source,
@@ -134,6 +138,45 @@ describe("subagent tool surface", () => {
 
     assert.equal(result.isError, true);
     assert.match(textOf(result), /neither a known alias/);
+  });
+
+  it("applies capability defaults and injects its charter", async () => {
+    const backend = new StubBackend({ name: "pi" });
+    const { call } = await harness(backend);
+
+    const result = await call("subagent_spawn", {
+      objective: "research the implementation",
+      isolation: "shared",
+      capability: "researcher",
+    });
+
+    assert.equal(result.details.capability, "researcher");
+    assert.equal(backend.spawned[0]?.model, "gpt-5.6-sol");
+    assert.equal(backend.spawned[0]?.effort, "medium");
+    assert.match(backend.spawned[0]?.systemPrompt ?? "", /<capability_instructions name="researcher">/);
+  });
+
+  it("keeps the configured backend for explicit model IDs and rejects incompatible capability backends", async () => {
+    const codex = new StubBackend({ name: "codex" });
+    const { call } = await harness(codex, { defaultBackend: "codex" });
+
+    const compatible = await call("subagent_spawn", {
+      objective: "research",
+      isolation: "shared",
+      capability: "researcher",
+      model: "openai-codex/custom",
+    });
+    assert.equal(compatible.isError, undefined);
+    assert.equal(codex.spawned[0]?.model, "custom");
+
+    const rejected = await call("subagent_spawn", {
+      objective: "research",
+      isolation: "shared",
+      capability: "researcher",
+      backend: "claude",
+    });
+    assert.equal(rejected.isError, true);
+    assert.match(textOf(rejected), /cannot run on the claude backend/);
   });
 
   it("spawns an isolated subagent and tells the model not to wait", async () => {
@@ -283,7 +326,11 @@ describe("workspace continuation", () => {
   it("sends a second subagent into a cancelled one's workspace", async () => {
     const { call, host, workspaces } = await harness(writingBackend("partial.txt", "half done\n"));
 
-    const first = await call("subagent_spawn", { objective: "HANG: long job", isolation: "workspace" });
+    const first = await call("subagent_spawn", {
+      objective: "HANG: long job",
+      isolation: "workspace",
+      capability: "researcher",
+    });
     await call("subagent_cancel", { ids: [first.details.id] });
     const workspaceId = first.details.workspaceId;
     const second = await call("subagent_spawn", {
@@ -292,10 +339,26 @@ describe("workspace continuation", () => {
       continue: first.details.id,
     });
 
+    assert.equal(second.details.capability, "researcher", "an omitted capability is inherited");
     assert.equal(second.details.workspaceId, workspaceId, "the second subagent inherits the same checkout");
     assert.equal((await workspaces.list()).length, 1, "no second workspace was created");
     const backend = host.tools.get("subagent_spawn") && undefined;
     assert.equal(backend, undefined);
+  });
+
+  it("rejects only an explicitly conflicting continuation capability", async () => {
+    const { call } = await harness();
+    const first = await call("subagent_spawn", { objective: "HANG: plain job", isolation: "workspace" });
+    await call("subagent_cancel", { ids: [first.details.id] });
+
+    const result = await call("subagent_spawn", {
+      objective: "change its specialization",
+      isolation: "workspace",
+      capability: "researcher",
+      continue: first.details.id,
+    });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /must retain capability/);
   });
 
   it("refuses to continue into a workspace whose subagent is still running", async () => {

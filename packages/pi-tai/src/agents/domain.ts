@@ -8,8 +8,10 @@
  * provider-specific message type.
  */
 
+import type { CapabilityName } from "./capabilities.ts";
+
 export type BackendName = "pi" | "claude" | "codex";
-export type CapabilityName = "researcher";
+export type { CapabilityName } from "./capabilities.ts";
 
 export const BACKEND_NAMES: readonly BackendName[] = ["pi", "claude", "codex"];
 
