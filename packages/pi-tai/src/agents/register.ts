@@ -13,6 +13,7 @@ import { JjProcessExecutor } from "../jj/executor.ts";
 import { composePiTaiInstructions } from "../subagents/domain.ts";
 import { loadPackagedInstructions, type InstructionLoader } from "../subagents/instructions.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
+import { CAPABILITIES, CAPABILITY_NAMES, capabilityInstructions, type CapabilityName } from "./capabilities.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
 import { CodexBackend } from "./backends/codex.ts";
 import { PiBackend } from "./backends/pi.ts";
@@ -146,6 +147,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       isolation: Type.Union([Type.Literal("workspace"), Type.Literal("shared")], {
         description: "workspace: a private checkout the subagent may change. shared: your working copy, read-only.",
       }),
+      capability: Type.Optional(Type.Union(CAPABILITY_NAMES.map((name) => Type.Literal(name)), {
+        description: "Specialized environment and instructions for research, browser use, or computer use.",
+      })),
       background: Type.Optional(Type.String({ description: "Context the subagent needs but cannot discover on its own" })),
       acceptanceCriteria: Type.Optional(Type.Array(Type.String(), {
         description: "Conditions that must hold for the task to be complete",
@@ -172,14 +176,26 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { isolated } = await requireRuntime(ctx);
+      const { isolated, agents } = await requireRuntime(ctx);
+      const capability = params.capability ? CAPABILITIES[params.capability as CapabilityName] : undefined;
+      if (params.continue) {
+        const previous = agents.get(params.continue);
+        if (previous && previous.capability !== params.capability) {
+          return failure(`Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability ?? "(none)"}.`);
+        }
+      }
+      // An explicit model alias gets to select its catalog backend. Capability
+      // defaults apply only where the caller did not provide a narrower choice.
       const resolved = resolveModel({
-        ...(params.model ? { model: params.model } : {}),
-        ...(params.backend ? { backend: params.backend } : { backend: dependencies.defaultBackend ?? "pi" }),
-        ...(params.effort ? { effort: params.effort } : {}),
+        ...(params.model ? { model: params.model } : capability ? { model: capability.model } : {}),
+        ...(params.backend ? { backend: params.backend } : (!params.model && capability ? { backend: capability.backend } : !params.model && dependencies.defaultBackend ? { backend: dependencies.defaultBackend } : {})),
+        ...(params.effort ? { effort: params.effort } : capability ? { effort: capability.effort } : {}),
       });
       if (!resolved.ok) return failure(resolved.reason);
       const { backend, provider, model, effort } = resolved.choice;
+      if (capability && !capability.allowedBackends.includes(backend)) {
+        return failure(`Capability "${capability.name}" cannot run on the ${backend} backend; use ${capability.allowedBackends.join(" or ")}.`);
+      }
       if (!enabled.includes(backend)) {
         return failure(`Backend "${backend}" is not enabled here. Enabled: ${enabled.join(", ")}.`);
       }
@@ -189,6 +205,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       try {
         snapshot = await isolated.spawn({
         backend,
+        ...(capability ? { capability: capability.name } : {}),
         isolation: params.isolation,
         title,
         tools: [...CHILD_TOOLS],
@@ -201,14 +218,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
           ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
         }),
         ...(params.continue ? { continueFrom: params.continue } : {}),
-        systemPrompt: (cwd) => composeChildCharter({
+        systemPrompt: (cwd) => [composeChildCharter({
           resuming: Boolean(params.continue),
           objective: params.objective,
           cwd,
           isolated: isolatedRun,
           ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
           ...(params.constraints ? { constraints: params.constraints } : {}),
-        }),
+        }), ...(capability ? [`<capability_instructions name="${capability.name}">\n${capabilityInstructions(capability)}\n</capability_instructions>`] : [])].join("\n\n"),
         });
       } catch (error) {
         return failure(error instanceof Error ? error.message : String(error));
