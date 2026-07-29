@@ -123,7 +123,7 @@ schemas:
 | Tool | Purpose |
 |---|---|
 | `subagent_spawn` | Start a subagent. `continue` reuses a settled subagent's workspace. |
-| `subagent_wait` | Block until any named subagent finishes; repeatedly collect ready results. |
+| `subagent_wait` | Block until any named subagent finishes and repeatedly collect ready results. Foreground user input releases the wait without cancelling or steering pending agents. |
 | `subagent_check` | Peek at one without blocking or consuming its result. |
 | `subagent_send` | Steer a running subagent. |
 | `subagent_cancel` | Stop subagents, keeping their workspaces. |

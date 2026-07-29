@@ -242,6 +242,26 @@ describe("subagent tool surface", () => {
     assert.match(host.messages[0].content, /finished/);
   });
 
+  it("releases active waits only for foreground input", async () => {
+    const { call, host, ctx } = await harness();
+    const spawned = await call("subagent_spawn", { objective: "HANG: keep going", isolation: "workspace" });
+    const waiting = call("subagent_wait", { ids: [spawned.details.id] });
+    const input = handlerFor(host, "input");
+
+    assert.deepEqual(await input({ source: "extension" }, ctx), { action: "continue" });
+    const extensionOutcome = await Promise.race([
+      waiting.then(() => "released"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("still-waiting"), 10)),
+    ]);
+    assert.equal(extensionOutcome, "still-waiting");
+
+    assert.deepEqual(await input({ source: "interactive" }, ctx), { action: "continue" });
+    const result = await waiting;
+    assert.equal(result.details.reason, "user-interrupted");
+    assert.deepEqual(result.details.pending, [spawned.details.id]);
+    await call("subagent_cancel", { ids: [spawned.details.id] });
+  });
+
   it("cancels a running subagent and keeps its workspace for inspection", async () => {
     const { call, workspaces } = await harness(writingBackend("partial.txt", "half done\n"));
 

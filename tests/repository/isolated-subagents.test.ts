@@ -158,7 +158,7 @@ describe("isolated subagents", () => {
     const { isolated, agents, workspaces } = await harness(writingBackend("partial.txt", "half done\n"));
 
     const snapshot = await isolated.spawn(request({ prompt: "FAIL: ran out of budget" }));
-    const [settled] = await agents.wait([snapshot.id]);
+    const [settled] = (await agents.wait([snapshot.id])).settled;
     await settleQueue();
 
     assert.equal(settled?.status, "error");

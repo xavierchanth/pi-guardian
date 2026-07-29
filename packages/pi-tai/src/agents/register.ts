@@ -79,6 +79,15 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   let runtime: Promise<Runtime> | undefined;
   /** Settled runtime, for callers such as the dashboard that cannot await one. */
   let built: Runtime | undefined;
+  const activeWaitInterruptions = new Set<AbortController>();
+
+  pi.on("input", (event) => {
+    // Extension-generated prompts are internal plumbing, not foreground users.
+    if (event.source !== "extension") {
+      for (const controller of [...activeWaitInterruptions]) controller.abort();
+    }
+    return { action: "continue" };
+  });
 
   /**
    * The runtime needs a model registry and a cwd, which only exist once a
@@ -219,19 +228,31 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     name: "subagent_wait",
     label: "Wait For Subagents",
     description: WAIT_DESCRIPTION,
-    promptSnippet: "Block until any named subagent finishes and return every result ready then",
+    promptSnippet: "Block until any named subagent finishes; foreground input releases the wait",
     parameters: Type.Object({
       ids: Type.Array(Type.String(), { description: "Subagent ids to wait for", minItems: 1, maxItems: 16 }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { agents } = await requireRuntime(ctx);
-      const result = await agents.wait(params.ids, signal);
-      const ready = result.settled.map(renderResult).join("\n\n---\n\n");
-      const pending = result.pending.map((snapshot) => snapshot.id);
-      const remaining = pending.length ? `\n\nStill running: ${pending.join(", ")}.` : "";
-      return success(ready + remaining, {
-        settled: result.settled.map((snapshot) => snapshot.id), pending, reason: result.reason,
-      });
+      const interruption = new AbortController();
+      activeWaitInterruptions.add(interruption);
+      try {
+        const { agents } = await requireRuntime(ctx);
+        const result = await agents.wait(params.ids, signal, interruption.signal);
+        const rendered = result.settled.map(renderResult).join("\n\n---\n\n");
+        const pending = result.pending.map((snapshot) => snapshot.id);
+        const suffix = result.reason === "user-interrupted"
+          ? `Wait interrupted by foreground user input; ${pending.length} subagent(s) remain running and can be collected later${pending.length ? `: ${pending.join(", ")}` : ""}.`
+          : pending.length ? `Still running: ${pending.join(", ")}.` : "";
+        const message = [rendered, suffix].filter(Boolean).join("\n\n");
+        return success(message, {
+          ids: params.ids,
+          settled: result.settled.map((snapshot) => snapshot.id),
+          pending,
+          reason: result.reason,
+        });
+      } finally {
+        activeWaitInterruptions.delete(interruption);
+      }
     },
   });
 
