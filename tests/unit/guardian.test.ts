@@ -693,6 +693,63 @@ test("reviewer session is isolated, tool-free, low-thinking, and strict", async 
   assert.equal(sessionOptions?.thinkingLevel, "low");
 });
 
+test("packaged skills and Pi's own files are read without Guardian review", async () => {
+  const cwd = process.cwd();
+  // These live under node_modules, which git ignores by construction. Ignore
+  // status says nothing about reference material the agent is meant to read.
+  for (const target of [
+    "node_modules/@earendil-works/pi-coding-agent/README.md",
+    "node_modules/@earendil-works/pi-coding-agent/docs",
+    "packages/pi-tai/skills/dpic/SKILL.md",
+  ]) {
+    const decision = await checkFileToolPath("read", { path: target }, cwd);
+    assert.equal(decision.kind, "allow", `${target} should not require review`);
+  }
+});
+
+test("a credential file inside a read-only root still requires review", async () => {
+  const decision = await checkFileToolPath(
+    "read",
+    { path: "node_modules/@earendil-works/pi-coding-agent/.npmrc" },
+    process.cwd(),
+  );
+
+  assert.equal(decision.kind, "review");
+  assert.equal(decision.evidence?.triggers[0], "sensitive-path");
+});
+
+test("the read-only exception does not extend to unrelated ignored files", async () => {
+  const decision = await checkFileToolPath(
+    "read",
+    { path: "node_modules/typescript/package.json" },
+    process.cwd(),
+  );
+
+  assert.equal(decision.kind, "review", "only designated Pi and skill roots are excepted");
+});
+
+test("built-in file tools still cannot write into a read-only root", async () => {
+  const decision = await checkFileToolPath(
+    "write",
+    { path: "node_modules/@earendil-works/pi-coding-agent/README.md" },
+    process.cwd(),
+  );
+
+  assert.notEqual(decision.kind, "allow");
+});
+
+test("pi-tai's own resources are readable from an unrelated working directory", async () => {
+  // Pi-Tai may be checked out, installed under the agent directory, or pulled in
+  // as a dependency, so its location cannot be assumed from the workspace.
+  const [piTaiRoot] = defaultReadCandidates();
+  assert.ok(piTaiRoot.endsWith(join("packages", "pi-tai")), `unexpected root: ${piTaiRoot}`);
+
+  for (const relativePath of ["skills/dpic/SKILL.md", "prompts/dpic.md", "instructions/system.md"]) {
+    const decision = await checkFileToolPath("read", { path: join(piTaiRoot, relativePath) }, tmpdir());
+    assert.equal(decision.kind, "allow", `${relativePath} should be readable from any cwd`);
+  }
+});
+
 test("reviewer reports malformed output, timeout, cancellation, and provider failure", async () => {
   const invalid = createModelReviewer(fakeReviewerDependencies("not json"));
   assert.equal((await invalid(reviewRequest())).kind, "failure");
