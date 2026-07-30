@@ -81,7 +81,7 @@ export function validateGuardianFallbackCorpus(
     fail(source, "cases", "machine-specific absolute paths are not permitted");
   if (/[0-9a-f]{16,}/i.test(serialized))
     fail(source, "cases", "opaque source identifiers are not permitted");
-  for (const match of serialized.matchAll(/https?:\/\/([^/\\\"\s]+)/g)) {
+  for (const match of serialized.matchAll(/https?:\/\/([^/\\"\s]+)/g)) {
     if (match[1] !== "example.invalid")
       fail(source, "cases", "only reserved synthetic URL hosts are permitted");
   }

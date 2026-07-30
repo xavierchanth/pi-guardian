@@ -41,7 +41,7 @@ export function createFileContextTransferStore(agentDir: string): ContextTransfe
       const dest = artifactPath(root, valid.id);
       const tmp = join(root, `.${valid.id}.${process.pid}.${crypto.randomUUID()}.tmp`);
       try {
-        await writeFile(tmp, JSON.stringify(valid) + "\n", { mode: 0o600, flag: "wx" });
+        await writeFile(tmp, `${JSON.stringify(valid)}\n`, { mode: 0o600, flag: "wx" });
         await link(tmp, dest);
       } finally {
         await unlink(tmp).catch(() => {});

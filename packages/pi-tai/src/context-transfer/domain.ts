@@ -1,4 +1,4 @@
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname } from "node:path";
 
 export const CONTEXT_TRANSFER_VERSION = 1 as const;
 export const ID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{8}$/;

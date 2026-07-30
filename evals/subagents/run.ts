@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     results,
   };
   await mkdir(reportDir, { recursive: true });
-  await writeFile(join(reportDir, "report.json"), JSON.stringify(report, null, 2) + "\n");
+  await writeFile(join(reportDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   const rows = results.map((r) => `| SKIPPED | ${r.caseId} | ${r.reason} |`).join("\n");
   await writeFile(
     join(reportDir, "summary.md"),

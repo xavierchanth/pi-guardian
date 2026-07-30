@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import {
   getAgentDir,
+  getMarkdownTheme,
   type ExtensionAPI,
   type ExtensionContext,
-  type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
+import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionPolicyReader } from "../config/register.ts";
 import {
@@ -42,6 +43,7 @@ import {
   SEND_DESCRIPTION,
   SPAWN_DESCRIPTION,
   WAIT_DESCRIPTION,
+  WAIT_GUIDELINES,
   WORKSPACE_GUIDELINES,
   WORKSPACE_STATUS_DESCRIPTION,
   composeChildCharter,
@@ -325,6 +327,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     label: "Wait For Subagents",
     description: WAIT_DESCRIPTION,
     promptSnippet: "Block until any named subagent finishes; foreground input releases the wait",
+    promptGuidelines: [...WAIT_GUIDELINES],
     parameters: Type.Object({
       ids: Type.Array(Type.String(), {
         description: "Subagent ids to wait for",
@@ -332,6 +335,21 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         maxItems: 16,
       }),
     }),
+    renderCall(args, theme) {
+      return new Text(
+        theme.fg("toolTitle", theme.bold("subagent_wait ")) +
+          theme.fg("muted", args.ids.join(", ")),
+        0,
+        0,
+      );
+    },
+    renderResult(result) {
+      const markdown = result.content
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n");
+      return new Markdown(markdown, 0, 0, getMarkdownTheme());
+    },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const interruption = new AbortController();
       activeWaitInterruptions.add(interruption);

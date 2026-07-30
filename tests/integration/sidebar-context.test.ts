@@ -12,6 +12,7 @@ test("persisted /btw entries stay outside context after reload and branch", asyn
     const sm = SessionManager.create(dir, dir);
     sm.appendMessage({ role: "user", content: "ordinary prompt", timestamp: Date.now() });
     const before = sm.getLeafId();
+    assert.ok(before, "the user message establishes a branchable leaf");
     sm.appendMessage({
       role: "assistant",
       content: [{ type: "text", text: "ordinary answer" }],
@@ -44,7 +45,9 @@ test("persisted /btw entries stay outside context after reload and branch", asyn
     assert.doesNotMatch(JSON.stringify(loaded.buildSessionContext().messages), /SECRET_[QA]/);
     const loadedUser = loaded.getEntries().find((entry) => entry.type === "message");
     assert.ok(loadedUser);
-    loaded.branch(loadedUser.id);
+    assert.equal(loadedUser.id, before, "reload preserves the original message ID");
+    loaded.branch(before);
+    assert.equal(loaded.getLeafId(), before, "reload preserves the original branch point ID");
     const branched: BtwEntry = {
       state: "success",
       question: "BRANCH_Q",

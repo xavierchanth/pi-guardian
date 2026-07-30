@@ -1,7 +1,7 @@
 export function normalizeSessionTitle(value: string, maxWords: number): string {
   const cleaned = value
     .replace(/```[\s\S]*?```/g, " ")
-    .replace(/^[\s#>*_`'\"“”‘’\-]+|[\s#>*_`'\"“”‘’.,:;!?\-]+$/g, "")
+    .replace(/^[\s#>*_`'"“”‘’-]+|[\s#>*_`'"“”‘’.,:;!?-]+$/g, "")
     .replace(/[\r\n]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

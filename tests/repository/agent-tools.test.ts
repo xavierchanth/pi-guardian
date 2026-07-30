@@ -137,6 +137,11 @@ describe("subagent tool surface", () => {
     assert.match(guidance, /sequential, not parallel/);
     assert.match(guidance, /`continue` naming the finished subagent/);
     assert.match(guidance, /shared index, manifest, README table, or numbered list/);
+
+    const wait = host.tools.get("subagent_wait");
+    assert.equal(typeof wait.renderCall, "function");
+    assert.equal(typeof wait.renderResult, "function");
+    assert.match(wait.promptGuidelines.join("\n"), /already see subagent_wait results/);
   });
 
   it("offers every harness, so an unavailable one fails with a reason", async () => {
@@ -147,7 +152,7 @@ describe("subagent tool surface", () => {
     assert.deepEqual(backendChoices, ["pi", "claude", "codex"]);
   });
 
-  it("rejects a model that is neither an alias nor a provider\/model id", async () => {
+  it("rejects a model that is neither an alias nor a provider/model id", async () => {
     const { call } = await harness();
 
     const result = await call("subagent_spawn", {

@@ -12,6 +12,7 @@ test("normalizes quotes, Markdown, punctuation, whitespace, and word limits", ()
     "Implement the terminal plugin",
   );
   assert.equal(normalizeSessionTitle("first\nsecond\nthird", 2), "first second");
+  assert.equal(normalizeSessionTitle(`-"Keep internal-hyphens"-`, 3), "Keep internal-hyphens");
 });
 
 test("builds a deterministic heuristic without command prefixes", () => {

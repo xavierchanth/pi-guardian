@@ -18,6 +18,10 @@ export const WAIT_DESCRIPTION =
   "Call again with the remaining ids to collect staggered completions; already-finished agents return immediately. " +
   "Foreground user input releases the wait without stopping or steering subagents, and pending results remain collectable.";
 
+export const WAIT_GUIDELINES: readonly string[] = [
+  "The user can already see subagent_wait results in full. Do not summarize, quote, or restate them; add only your own judgment, decisions, or next actions.",
+];
+
 export const CHECK_DESCRIPTION =
   "Look at a subagent's status and recent output without blocking and without consuming its result.";
 

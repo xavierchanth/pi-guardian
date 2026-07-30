@@ -52,7 +52,7 @@
     "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live",
     "format": "biome format --write && biome format --write",
     "format:check": "biome format",
-    "lint": "biome lint"
+    "lint": "biome lint --error-on-warnings"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

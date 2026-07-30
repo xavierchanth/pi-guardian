@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { RuntimeProcessHarness, initializeParams } from "../../tests/runtime/process-harness.ts";
 

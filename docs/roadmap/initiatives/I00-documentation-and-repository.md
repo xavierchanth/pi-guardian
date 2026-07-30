@@ -26,7 +26,7 @@ These are independent of every cutover and can proceed concurrently with any oth
 
 ### Formatter and linter adoption
 
-Delivered with pinned Biome across first-party TypeScript and JavaScript in `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`, and `fixtures`. The gate checks both formatting and linting. Dependencies, generated protocol and Tauri sources, and build/coverage outputs are explicitly excluded; generated artifacts remain governed by their generators.
+Delivered with pinned Biome across first-party TypeScript and JavaScript in `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`, and `fixtures`. The gate checks both formatting and linting, with Biome warnings denied. Dependencies, generated protocol and Tauri sources, and build/coverage outputs are explicitly excluded; generated artifacts remain governed by their generators.
 
 ### CI gate
 

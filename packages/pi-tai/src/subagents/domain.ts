@@ -46,12 +46,6 @@ export function composePiTaiInstructions(options: ComposeInstructionOptions): st
   return sections.join("\n\n");
 }
 
-function canonicalAgentName(name: string): string {
-  if (name === "thinker") return "orchestrator";
-  if (name === "planner") return "implementation-lead";
-  return name;
-}
-
 function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', "&quot;");
 }

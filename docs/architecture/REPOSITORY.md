@@ -96,7 +96,7 @@ at this revision.
 Biome 2.2.7 is the pinned TypeScript/JavaScript formatter and linter. It is a single low-dependency,
 Node 22-compatible binary with one configuration for deterministic LF, spacing, and lint rules.
 `npm run format`, `format:check`, and `lint` (also exposed by `just`) enforce practical first-party
-TypeScript and JavaScript across `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`,
+TypeScript and JavaScript, with lint warnings denied, across `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`,
 and `fixtures`. The root groups make future additions under those boundaries covered by default.
 Biome explicitly excludes dependencies and generated/build output (`node_modules`, `dist`, `build`,
 `coverage`, `target`, Tauri-generated sources, and the generated runtime protocol binding). The

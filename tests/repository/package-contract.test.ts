@@ -44,6 +44,7 @@ test("context-transfer domain and storage remain Pi-independent", () => {
 test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
   const instructions = readFileSync(join(root, "packages/pi-tai/instructions/system.md"), "utf8");
   assert.ok(instructions.trim().length > 0);
+  assert.match(instructions, /Do not reiterate subagent output the user can already see/);
   // Roles are retired: a subagent is described by its objective and isolation,
   // so there are no agent definition files to ship.
   assert.equal(existsSync(join(root, "packages/pi-tai/agents/worker.md")), false);

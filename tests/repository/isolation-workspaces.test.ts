@@ -425,8 +425,14 @@ describe("managed jj workspaces", () => {
 
     const swept = await manager.sweep(["sa-7"]);
 
-    assert.equal(swept[0]?.disposition, "kept");
-    assert.equal((await manager.list()).length, 1);
+    assert.deepEqual(
+      swept.map(({ id, disposition }) => ({ id, disposition })),
+      [{ id: record.id, disposition: "kept" }],
+    );
+    assert.deepEqual(
+      (await manager.list()).map((entry) => entry.id),
+      [record.id],
+    );
   });
 
   it("cleans up the attachment when workspace creation fails after `workspace add`", async () => {
