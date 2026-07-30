@@ -84,6 +84,7 @@ lines.on("line", (line) => {
       !names.has("subagents") ||
       !names.has("context-export") ||
       !names.has("context-import") ||
+      !names.has("btw") ||
       names.has("init-pi-tai") ||
       names.has("parallelize") ||
       names.has("plan-status") ||

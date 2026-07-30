@@ -5,7 +5,7 @@
 
 ## Outcome
 
-`/btw <question>` takes an exact synchronous snapshot of session entries and leaf, builds Pi's
+`/btw <question>` takes a synchronous snapshot of session entries and leaf, then bounds it to complete conversational and tool groups, builds Pi's
 branch- and compaction-aware context, and makes one tool-free completion with the current session
 model and effort. The exchange is persisted and rendered, but neither question nor answer enters
 later model context.
@@ -21,7 +21,7 @@ Pi registration and rendering remain in `register.ts` and `render.ts`.
 
 - The exact active provider/model is resolved through the model registry and its auth handshake.
   Missing model or auth is a persisted error; there is no fallback.
-- Effort inherits `ctx.getThinkingLevel()`. There is no `SessionPolicy` sidebar configuration.
+- Effort inherits `pi.getThinkingLevel()`. There is no `SessionPolicy` sidebar configuration.
 - Calls use `maxRetries: 0`, a 45-second abort timeout, no tools, and at most two synchronously
   reserved calls per session.
 - Input is bounded from the selected model's context window. Oldest coherent groups are removed;

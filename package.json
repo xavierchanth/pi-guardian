@@ -47,7 +47,7 @@
     "eval:guardian": "node --experimental-strip-types evals/guardian/run.ts",
     "eval:agent-concurrency": "node --experimental-strip-types evals/agent-concurrency/run.ts",
     "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live",
-    "format": "biome format --write",
+    "format": "biome format --write && biome format --write",
     "format:check": "biome format",
     "lint": "biome lint"
   },

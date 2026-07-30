@@ -7,7 +7,8 @@ export function registerBtwRenderer(pi: ExtensionAPI): void {
     const data = entry.data as BtwEntry;
     const container = new Container();
     const result = data.state === "success" ? data.answer ?? "" : data.error ?? "Unknown error";
-    const preview = result.replace(/\s+/g, " ").slice(0, 140) + (result.length > 140 ? "…" : "");
+    const collapsed = result.replace(/\s+/g, " ");
+    const preview = collapsed.slice(0, 140) + (collapsed.length > 140 ? "…" : "");
     container.addChild(new Text(
       theme.fg(data.state === "success" ? "accent" : "error", "by the way") +
       theme.fg("muted", ` — ${preview}`), 0, 0,

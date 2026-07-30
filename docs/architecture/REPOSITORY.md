@@ -70,6 +70,10 @@ proof from silently becoming architecture before its replacement is demonstrated
 | `packages/pi-tai` | **Unresolved: move/split** | Current shipped extension contains presentation and domain behavior. I01 decides movement into `core`/Pi adapter boundaries; retain in place until behavior is covered behind interfaces. |
 | `packages/runtime-protocol` | **Retain** | Generated TypeScript worker DTO package mirrors the Rust source of truth. |
 | `services/pi-runtime` | **Retain, then repair imports** | Executable Pi SDK worker is the intended deployment boundary. Its direct relative imports from `packages/pi-tai` violate the target boundary; I01 must extract stable exports and I03 must switch the service, with tests, before those imports are removed. |
+| `tests` | **Retain** | Cross-boundary integration, runtime, repository, smoke, and focused unit verification belongs outside individual deployables. |
+| `evals` | **Retain** | Opt-in behavioral benchmarks are engineering evidence, not shipped runtime authority. |
+| `fixtures` | **Retain** | Shared protocol and cross-language conformance data must remain consumable by both toolchains. |
+| `scripts` | **Retain** | Repository-level generation, packaging, and verification automation spans package boundaries. |
 
 There are no other top-level children under `apps/`, `bins/`, `crates/`, `packages/`, or `services/`
 at this revision.
@@ -95,6 +99,13 @@ Node 22-compatible binary with one configuration for deterministic LF, spacing, 
 `packages/pi-tai/src/concurrency` and `src/jj` adoption boundary. Expand `biome.json` by reviewed
 subtree; this avoids disguising behavior changes in a repository-wide initial rewrite. Generated,
 dependency, and build directories are excluded both there and in `.gitignore`.
+
+Rust formatting and clippy gating is boundedly deferred: `cargo fmt --all -- --check` currently
+reports pre-existing formatting drift in `crates/event-store` and `crates/host-kernel`. CI must add
+`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings` once that
+bounded debt is repaired in a dedicated Rust-only change, rather than mass-formatting it here.
+`/btw` token accounting is also deferred because integrating its available completion usage into
+session-wide footer/accounting semantics requires a separate, broader change.
 
 ## Distribution and entry points
 
