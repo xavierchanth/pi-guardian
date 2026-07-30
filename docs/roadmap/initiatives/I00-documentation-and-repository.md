@@ -9,7 +9,7 @@ The canonical documentation tree, repository classification, package boundaries,
 
 ## Current gap
 
-The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome now enforces the initial concurrency/JJ formatting and lint boundary, CI runs the full gate plus package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
+The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome enforces the initial concurrency/JJ formatting and lint boundary. Rust formatting, clippy with warnings denied, and workspace tests are enforced by the local repository gate and CI. CI also runs package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
 
 ## Scope
 
@@ -30,7 +30,7 @@ Delivered for `concurrency/` and `jj/` with pinned Biome and mechanical initial 
 
 ### CI gate
 
-Delivered in `.github/workflows/ci.yml`: the repository gate, package dry-run, and isolated extension smoke run with repository-pinned Node and Rust versions. npm's cache is keyed by the lockfile; generated and build output is not cached or tracked.
+Delivered in `.github/workflows/ci.yml`: explicit Rust formatting and clippy gates, the full repository gate (including Rust tests), package dry-run, and isolated extension smoke run with repository-pinned Node and Rust versions. npm's cache is keyed by the lockfile; generated and build output is not cached or tracked.
 
 ## Exit criteria
 
@@ -40,6 +40,6 @@ Delivered in `.github/workflows/ci.yml`: the repository gate, package dry-run, a
 - Root README points to product, architecture, concurrency, and roadmap indexes.
 - Package dry-run contains only intended user/contributor documentation.
 - No obsolete or competing documentation ships as an active authority.
-- A formatter and linter are configured and enforced; `concurrency/` and `jj/` are reformatted.
-- CI runs `just check` on every change.
+- Formatters and linters are configured and enforced; `concurrency/` and `jj/` are reformatted, and the complete Rust workspace is rustfmt-clean and clippy-clean with warnings denied.
+- CI runs the equivalent of `just check` on every change, with explicit Rust formatting and clippy steps.
 - No active document describes behavior that does not exist in code.

@@ -255,7 +255,10 @@ async fn resolved_policy_projection_rebuilds_from_canonical_event() {
     connection
         .execute(
             "UPDATE broker_sessions SET snapshot_json = ?1 WHERE session_id = ?2",
-            rusqlite::params![serde_json::to_string(&snapshot).unwrap(), created.session_id],
+            rusqlite::params![
+                serde_json::to_string(&snapshot).unwrap(),
+                created.session_id
+            ],
         )
         .unwrap();
     drop(connection);
@@ -309,7 +312,10 @@ async fn old_projection_backfills_policy_once_and_keeps_it_durable() {
     connection
         .execute(
             "UPDATE broker_sessions SET snapshot_json = ?1 WHERE session_id = ?2",
-            rusqlite::params![serde_json::to_string(&snapshot).unwrap(), created.session_id],
+            rusqlite::params![
+                serde_json::to_string(&snapshot).unwrap(),
+                created.session_id
+            ],
         )
         .unwrap();
     connection
@@ -321,7 +327,11 @@ async fn old_projection_backfills_policy_once_and_keeps_it_durable() {
     drop(connection);
 
     let recovered = HostKernel::start(config.clone()).unwrap();
-    assert!(recovered.list_sessions().await.unwrap()[0].resolved_policy.is_some());
+    assert!(
+        recovered.list_sessions().await.unwrap()[0]
+            .resolved_policy
+            .is_some()
+    );
     recovered.shutdown().await.unwrap();
     let recovered_again = HostKernel::start(config).unwrap();
     let replay = recovered_again
@@ -398,7 +408,9 @@ async fn restart_recovers_stable_identity_and_replays_durable_events() {
         .await
         .unwrap();
     assert_eq!(
-        before_restart.first().map(|event| event.event_type.as_str()),
+        before_restart
+            .first()
+            .map(|event| event.event_type.as_str()),
         Some("session.policy_resolved")
     );
     assert!(

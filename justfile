@@ -40,9 +40,21 @@ lint:
 check:
     npm run check
 
-# Run the portable Rust workspace tests.
+# Check Rust formatting and lint all workspace targets with warnings denied, then run tests.
 rust-check:
-    cargo test --workspace
+    npm run rust:check
+
+# Apply deterministic Rust formatting across the workspace.
+rust-format:
+    cargo fmt --all
+
+# Check deterministic Rust formatting without changing files.
+rust-format-check:
+    cargo fmt --all -- --check
+
+# Lint all Rust workspace targets with warnings denied.
+rust-clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Regenerate Rust-first TypeScript runtime protocol DTOs.
 protocol-generate:

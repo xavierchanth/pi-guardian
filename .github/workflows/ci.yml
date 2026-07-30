@@ -28,6 +28,10 @@ jobs:
           rustup toolchain install "${{ steps.versions.outputs.rust }}" --profile minimal
           rustup override set "${{ steps.versions.outputs.rust }}"
       - run: npm ci
+      - name: Rust formatting gate
+        run: cargo fmt --all -- --check
+      - name: Rust clippy gate
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Deterministic repository gate
         run: npm run check
       - name: Verify package contents

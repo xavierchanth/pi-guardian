@@ -100,12 +100,12 @@ Node 22-compatible binary with one configuration for deterministic LF, spacing, 
 subtree; this avoids disguising behavior changes in a repository-wide initial rewrite. Generated,
 dependency, and build directories are excluded both there and in `.gitignore`.
 
-Rust formatting and clippy gating is boundedly deferred: `cargo fmt --all -- --check` currently
-reports pre-existing formatting drift in `crates/event-store` and `crates/host-kernel`. CI must add
-`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings` once that
-bounded debt is repaired in a dedicated Rust-only change, rather than mass-formatting it here.
-`/btw` token accounting is also deferred because integrating its available completion usage into
-session-wide footer/accounting semantics requires a separate, broader change.
+Rust formatting and linting are enforced across the complete workspace. The local `npm run check`
+and `just rust-check` gates run `cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, and the Rust workspace tests; CI also runs
+the formatting and clippy commands as explicit gates. `/btw` token accounting remains deferred
+because integrating its available completion usage into session-wide footer/accounting semantics
+requires a separate, broader change.
 
 ## Distribution and entry points
 
