@@ -407,7 +407,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         : "";
       return success(
         `Merged ${summary.changeIds.length} change(s) from ${params.id} using the ${summary.strategy} strategy.${conflicts}`,
-        { merged: true, strategy: summary.strategy, changeIds: summary.changeIds, conflictPaths: summary.conflictPaths },
+        {
+          merged: true,
+          strategy: summary.strategy,
+          changeIds: summary.changeIds,
+          conflictPaths: summary.conflictPaths,
+          parentSimplification: summary.parentSimplification,
+          parentSimplificationReason: summary.parentSimplificationReason,
+        },
       );
     },
   });

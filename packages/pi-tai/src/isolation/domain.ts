@@ -61,12 +61,24 @@ export interface WorkspaceRecord {
   readonly merge?: MergeSummary;
 }
 
+export type ParentSimplificationReason =
+  | "precheck-failed"
+  | "pre-existing-redundancy"
+  | "no-redundancy"
+  | "has-descendants"
+  | "redundant-parents-removed"
+  | `${"postcheck-failed" | "cosmetic-command-failed"}${"" | "-rolled-back" | "-rollback-failed" | "-rollback-skipped-intervening-operation"}`;
+
 export interface MergeSummary {
   readonly strategy: Exclude<MergeStrategy, "auto">;
   /** Change ids folded into the source graph, oldest first. */
   readonly changeIds: readonly string[];
   /** Paths that came back conflicted, if any. Non-empty means user action. */
   readonly conflictPaths: readonly string[];
+  /** Cosmetic cleanup of merge-introduced redundant parent edges. */
+  readonly parentSimplification?: "applied" | "skipped" | "failed";
+  /** Stable, observable explanation for the cosmetic cleanup outcome. */
+  readonly parentSimplificationReason?: ParentSimplificationReason;
 }
 
 export type MergeResult =

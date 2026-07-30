@@ -311,12 +311,64 @@ export class WorkspaceManager {
     // per chain is what keeps them all reachable.
     const heads = await this.jj.headsOf(record.path, changeIds);
     const parents = await this.jj.parentsOfWorkingCopy(target);
+    // User-authored redundant edges are intentional graph shape. A failed probe
+    // is also a reason to leave topology alone, never a reason to fail merging.
+    let redundancyExisted: boolean | undefined;
+    try {
+      const targetBefore = await this.jj.changeIdAt(target, "@");
+      redundancyExisted = await this.jj.hasRedundantParents(target, targetBefore);
+    } catch { /* cosmetic probe failure: conservatively skip */ }
     // `@` keeps every parent it already had and gains the agent head, so repeated
     // merges accumulate rather than replace.
     await this.jj.rebaseWorkingCopyOnto(target, [...parents, ...heads]);
+
+    let parentSimplification: MergeSummary["parentSimplification"] = "skipped";
+    let parentSimplificationReason: NonNullable<MergeSummary["parentSimplificationReason"]> = redundancyExisted === undefined ? "precheck-failed"
+      : redundancyExisted ? "pre-existing-redundancy" : "no-redundancy";
+    if (redundancyExisted === false) {
+      let operationBefore: string | undefined;
+      let simplifyOperation: string | undefined;
+      try {
+        const mergedTarget = await this.jj.changeIdAt(target, "@");
+        if (!(await this.jj.hasRedundantParents(target, mergedTarget))) {
+          parentSimplificationReason = "no-redundancy";
+        } else if (await this.jj.hasDescendants(target, mergedTarget)) {
+          parentSimplificationReason = "has-descendants";
+        } else {
+          operationBefore = await this.jj.currentOperationId(target);
+          await this.jj.simplifyParents(target, mergedTarget);
+          simplifyOperation = await this.jj.currentOperationId(target);
+          const simplifiedTarget = await this.jj.changeIdAt(target, "@");
+          if (await this.jj.hasRedundantParents(target, simplifiedTarget)
+            || !(await this.jj.areAncestorsOf(target, heads, simplifiedTarget))) {
+            throw new Error("postcheck-failed");
+          }
+          parentSimplification = "applied";
+          parentSimplificationReason = "redundant-parents-removed";
+        }
+      } catch (error) {
+        parentSimplification = "failed";
+        const failureReason = error instanceof Error && error.message === "postcheck-failed"
+          ? "postcheck-failed" : "cosmetic-command-failed";
+        parentSimplificationReason = failureReason;
+        // A repository-wide restore is safe only while the operation produced by
+        // our successful simplify is still current. Otherwise unrelated work may
+        // have intervened, and retaining redundant parents is strictly safer.
+        if (operationBefore && simplifyOperation && simplifyOperation !== operationBefore) {
+          try {
+            if (await this.jj.currentOperationId(target) === simplifyOperation) {
+              await this.jj.restoreOperation(target, operationBefore);
+              parentSimplificationReason = `${failureReason}-rolled-back`;
+            } else {
+              parentSimplificationReason = `${failureReason}-rollback-skipped-intervening-operation`;
+            }
+          } catch { parentSimplificationReason = `${failureReason}-rollback-failed`; }
+        }
+      }
+    }
     const conflictPaths = await this.jj.conflictedPaths(target);
     await this.reclaim(record, entries, target);
-    return { strategy: "merge-under", changeIds, conflictPaths };
+    return { strategy: "merge-under", changeIds, conflictPaths, parentSimplification, parentSimplificationReason };
   }
 
   /**

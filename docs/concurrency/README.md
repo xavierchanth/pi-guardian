@@ -42,7 +42,14 @@ whose commits are not descendants of its own root.
   your `@` is empty and single-parent, where it is unambiguously safe. History stays
   flat.
 - **merge-under** — `jj rebase -r @ -d <existing parents> -d <each head>`. Your `@`
-  keeps every parent it had and gains the agent's work.
+  keeps every parent it had and gains the agent's work. Afterwards, when this merge
+  introduced a parent that is already reachable through another parent, the manager
+  runs `jj simplify-parents` against exactly that working-copy change. It skips this
+  cosmetic step if redundancy predated the merge or the change has descendants,
+  verifies every agent head remains reachable, and restores the captured operation
+  if simplification or verification fails. That rollback is skipped if another
+  operation intervened, rather than risking the loss of unrelated work. Cosmetic
+  cleanup never fails the merge.
 
 `auto` tries linear when the preconditions hold, and if the insert produces
 conflicts it restores the pre-merge operation and retries as a merge. That fallback

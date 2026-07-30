@@ -170,6 +170,39 @@ export class JjCli {
     await this.run(cwd, ["rebase", "--revisions", "@", ...destinations]);
   }
 
+  /** Whether one direct parent is also a (strict) ancestor of another direct parent. */
+  async hasRedundantParents(cwd: string, changeId: string): Promise<boolean> {
+    const revision = exact(changeId);
+    const out = await this.read(cwd, [
+      "log", "--revision", `parents(${revision}) & ancestors(parents(${revision})-)`,
+      "--limit", "1", "--no-graph", "--template", '"x"',
+    ]);
+    return out.includes("x");
+  }
+
+  /** True if simplifying this exact commit could rewrite anything below it. */
+  async hasDescendants(cwd: string, changeId: string): Promise<boolean> {
+    const revision = exact(changeId);
+    const out = await this.read(cwd, [
+      "log", "--revision", `(${revision}):: ~ ${revision}`, "--limit", "1", "--no-graph", "--template", '"x"',
+    ]);
+    return out.includes("x");
+  }
+
+  /** Remove redundant edges from this commit only. */
+  async simplifyParents(cwd: string, changeId: string): Promise<void> {
+    await this.run(cwd, ["simplify-parents", "--revision", exact(changeId)]);
+  }
+
+  /** Every supplied head must be reachable from this exact commit. */
+  async areAncestorsOf(cwd: string, headIds: readonly string[], changeId: string): Promise<boolean> {
+    const out = await this.read(cwd, [
+      "log", "--revision", `(${exactAny(headIds)}) ~ ancestors(${exact(changeId)})`,
+      "--limit", "1", "--no-graph", "--template", '"x"',
+    ]);
+    return !out.includes("x");
+  }
+
   /**
    * Moves `changeIds` (and nothing else) to sit immediately below `@`.
    * Run against the source working copy so jj updates it in place rather than

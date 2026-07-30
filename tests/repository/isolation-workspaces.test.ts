@@ -132,7 +132,108 @@ describe("managed jj workspaces", () => {
     assert.equal(result.kind === "merged" && result.summary.strategy, "merge-under");
     assert.equal(await readFile(join(source, "feature.txt"), "utf8"), "agent output\n");
     assert.equal(await readFile(join(source, "wip.txt"), "utf8"), "user work in progress\n");
-    assert.equal((await parentsOf(source, "@")).length, 2, "@ gains the agent head as a parent");
+    assert.equal((await parentsOf(source, "@")).length, 1, "merge-introduced redundant parent is simplified");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplification, "applied");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "redundant-parents-removed");
+  });
+
+  it("does not fail merge-under when a cosmetic topology probe fails", async () => {
+    const { source, workspaceRoot } = await scratchRepository();
+    const cli = new JjCli(new JjProcessExecutor());
+    const manager = new WorkspaceManager({
+      jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
+        hasRedundantParents: async () => { throw new Error("simulated cosmetic failure"); },
+      }) as JjCli,
+      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+    });
+    const record = await manager.create();
+    await commitInWorkspace(record.path, "cosmetic.txt", "kept\n", "cosmetic failure work");
+    await writeFile(join(source, "dirty.txt"), "dirty\n");
+
+    const result = await manager.merge(record.id, "merge-under");
+
+    assert.equal(result.kind, "merged");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "precheck-failed");
+    assert.equal(await readFile(join(source, "cosmetic.txt"), "utf8"), "kept\n");
+  });
+
+  it("rolls back a simplification whose ancestry postcheck fails", async () => {
+    const { source, workspaceRoot } = await scratchRepository();
+    const cli = new JjCli(new JjProcessExecutor());
+    const manager = new WorkspaceManager({
+      jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
+        areAncestorsOf: async () => false,
+      }) as JjCli,
+      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+    });
+    const record = await manager.create();
+    await commitInWorkspace(record.path, "rollback.txt", "kept\n", "rollback work");
+    await writeFile(join(source, "dirty.txt"), "dirty\n");
+
+    const result = await manager.merge(record.id, "merge-under");
+
+    assert.equal(result.kind, "merged", "cosmetic verification never fails the merge");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplification, "failed");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "postcheck-failed-rolled-back");
+    assert.equal((await parentsOf(source, "@")).length, 2, "rollback restores the unsimplified merge parents");
+    assert.equal(await readFile(join(source, "rollback.txt"), "utf8"), "kept\n");
+  });
+
+  it("preserves pre-existing redundant parents and skips simplification", async () => {
+    const { source, workspaceRoot } = await scratchRepository();
+    const base = (await parentsOf(source, "@"))[0]!;
+    await writeFile(join(source, "user.txt"), "user\n");
+    await jj(source, "describe", "--message", "user change");
+    const descendant = (await jj(source, "log", "-r", "@", "--no-graph", "-T", "change_id")).trim();
+    await jj(source, "new", base, descendant);
+    const originalParents = await parentsOf(source, "@");
+    assert.equal(originalParents.length, 2);
+
+    const manager = managerFor(source, workspaceRoot);
+    const record = await manager.create();
+    await commitInWorkspace(record.path, "agent.txt", "agent\n", "agent change");
+    await writeFile(join(source, "dirty.txt"), "dirty\n");
+    const result = await manager.merge(record.id, "merge-under");
+
+    assert.equal(result.kind, "merged");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "pre-existing-redundancy");
+    const finalParents = await parentsOf(source, "@");
+    assert.ok(originalParents.every((parent) => finalParents.includes(parent)), "pre-existing parent edges are preserved");
+  });
+
+  it("skips simplification when the merge target has descendants and does not rewrite them", async () => {
+    const { source, workspaceRoot } = await scratchRepository();
+    const cli = new JjCli(new JjProcessExecutor());
+    let descendantCommitAtProbe: string | undefined;
+    let descendantWorkspace: string | undefined;
+    const manager = new WorkspaceManager({
+      jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
+        hasDescendants: async () => {
+          descendantCommitAtProbe = (await jj(descendantWorkspace!, "log", "-r", "@", "--no-graph", "-T", "commit_id")).trim();
+          return true;
+        },
+        simplifyParents: async () => { throw new Error("simplification must be skipped"); },
+      }) as JjCli,
+      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+    });
+    const record = await manager.create();
+    await commitInWorkspace(record.path, "agent.txt", "agent\n", "agent change");
+    await writeFile(join(source, "dirty.txt"), "dirty\n");
+    descendantWorkspace = join(workspaceRoot, "observer");
+    await jj(source, "workspace", "add", descendantWorkspace, "--name", "observer");
+    await writeFile(join(descendantWorkspace, "observer.txt"), "observer\n");
+    await jj(descendantWorkspace, "describe", "--message", "observer descendant");
+    const descendantChange = (await jj(descendantWorkspace, "log", "-r", "@", "--no-graph", "-T", "change_id")).trim();
+
+    const result = await manager.merge(record.id, "merge-under");
+
+    assert.equal(result.kind, "merged");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
+    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "has-descendants");
+    const descendantCommitAfter = (await jj(source, "log", "-r", descendantChange, "--no-graph", "-T", "commit_id")).trim();
+    assert.equal(descendantCommitAfter, descendantCommitAtProbe, "the cosmetic phase does not rewrite the descendant");
   });
 
   it("keeps the agent's work reviewable as a discrete change after merging under", async () => {
