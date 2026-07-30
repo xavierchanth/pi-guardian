@@ -9,7 +9,7 @@ The canonical documentation tree, repository classification, package boundaries,
 
 ## Current gap
 
-The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Remaining work is repository engineering: classify proof-era Host layers, enforce package contents, add formatting and linting, and run the deterministic gate in CI.
+The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome now enforces the initial concurrency/JJ formatting and lint boundary, CI runs the full gate plus package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
 
 ## Scope
 
@@ -24,13 +24,13 @@ The indexed documentation tree is established, obsolete competing plans have bee
 
 These are independent of every cutover and can proceed concurrently with any other initiative.
 
-### Add a formatter and linter, then reformat `concurrency/` and `jj/`
+### Formatter and linter adoption
 
-No TypeScript formatter or linter is configured. Add one deterministic toolchain and apply it to the dense concurrency and JJ modules before enforcing it repository-wide. Keep this mechanical change separate from behavior changes so review remains meaningful.
+Delivered for `concurrency/` and `jj/` with pinned Biome and mechanical initial formatting. The gate checks both formatting and linting. Adoption outside those subtrees remains incremental so future mechanical changes stay reviewable.
 
-### Add CI running `just check`
+### CI gate
 
-There is no `.github/` directory. `npm run check` already chains `protocol:check → typecheck → test → test:rust`. For a project whose premise is agent-generated changes gated by deterministic checks, having the gate and not running it automatically is a conspicuous hole.
+Delivered in `.github/workflows/ci.yml`: the repository gate, package dry-run, and isolated extension smoke run with repository-pinned Node and Rust versions. npm's cache is keyed by the lockfile; generated and build output is not cached or tracked.
 
 ## Exit criteria
 

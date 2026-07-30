@@ -44,6 +44,58 @@ pi-tai/
 
 Exact names may change without changing dependency direction or authority.
 
+## Current component disposition
+
+This inventory is the canonical I00 classification. “Unresolved” is intentional: it prevents a
+proof from silently becoming architecture before its replacement is demonstrated.
+
+| Component | Disposition | Rationale or bounded next action |
+|---|---|---|
+| `apps/host` | **Retain** | Desktop/Tauri packaging and Host UI remain a product boundary. The proof-era UI/runtime composition is unresolved pending I10's client-contract review; do not remove it before a replacement lifecycle smoke exists. |
+| `bins/acp` | **Retain** | Thin ACP adapter is a distinct client boundary; I04 must verify it contains no session authority. |
+| `bins/ctl` | **Retain** | Rust diagnostics/administration client has a distinct operational role. |
+| `crates/broker` | **Unresolved: merge or retain** | It is currently used by `host-kernel` and `host-server`, but may duplicate the eventual session service. I02 must map its aggregate/API to the canonical session aggregate and record a merge plan or a distinct responsibility. |
+| `crates/config` | **Retain** | Shared typed Host configuration is independently testable. Revisit only if I01/I03 show it is a forwarding layer. |
+| `crates/event-store` | **Retain** | Durable storage adapter is distinct from session policy and transport. |
+| `crates/host-kernel` | **Retain** | Host orchestration boundary; I02 must remove any authority duplicated by `broker`, not the boundary itself. |
+| `crates/host-lifecycle` | **Unresolved: merge or retain** | Proof-era lifecycle boundary may remain a platform-neutral service. I10 must compare it with Tauri lifecycle code and merge forwarding-only code. |
+| `crates/host-platform` | **Unresolved: merge or retain** | Proof-era platform adapters are plausible but not yet justified independently. I10 must inventory native implementations and ownership. |
+| `crates/host-protocol` | **Retain** | Rust client↔Host wire contract and generated-language source boundary. |
+| `crates/host-server` | **Retain** | Local server/transport composition is distinct from the session domain. |
+| `crates/local-ipc` | **Retain** | Local IPC is an independently testable transport. |
+| `crates/runtime-protocol` | **Retain** | Rust-first Host↔worker contract is separate from the client protocol. |
+| `crates/runtime-supervisor` | **Retain** | Worker process supervision is a Host responsibility distinct from runtime behavior. |
+| `packages/host-client` | **Retain for now** | Shared typed client exists; I04 must confirm both ACP and desktop use it before treating the extraction as final. |
+| `packages/host-protocol` | **Retain** | Generated TypeScript client↔Host DTO package mirrors the Rust source of truth. |
+| `packages/pi-tai` | **Unresolved: move/split** | Current shipped extension contains presentation and domain behavior. I01 decides movement into `core`/Pi adapter boundaries; retain in place until behavior is covered behind interfaces. |
+| `packages/runtime-protocol` | **Retain** | Generated TypeScript worker DTO package mirrors the Rust source of truth. |
+| `services/pi-runtime` | **Retain, then repair imports** | Executable Pi SDK worker is the intended deployment boundary. Its direct relative imports from `packages/pi-tai` violate the target boundary; I01 must extract stable exports and I03 must switch the service, with tests, before those imports are removed. |
+
+There are no other top-level children under `apps/`, `bins/`, `crates/`, `packages/`, or `services/`
+at this revision.
+
+### Decisions deliberately not inferred from proof code
+
+- **Broker versus session service:** unresolved as described above; present call sites prove use, not
+  a distinct long-term responsibility.
+- **Persisted versus wire events:** wire DTOs are not persistence schema. Existing sharing is
+  unresolved technical debt; I02 must either introduce a versioned persisted event type and mapper,
+  or document and test an intentional coupling before I00 can be complete.
+- **Proof-era Tauri, ACP, and runtime layers:** retain operational entry points while I04/I10 classify
+  forwarding and duplicated-authority internals. No wholesale removal is authorized by I00.
+- **Generated desktop output:** `apps/*/src-tauri/gen/`, app `dist/`, repository `dist/`, runtime
+  packaging output, and dependencies/build output are ignored and must be produced in release jobs,
+  not tracked. A future exception requires a documented packaging constraint and reproducibility test.
+
+## Engineering toolchain
+
+Biome 2.2.7 is the pinned TypeScript/JavaScript formatter and linter. It is a single low-dependency,
+Node 22-compatible binary with one configuration for deterministic LF, spacing, and lint rules.
+`npm run format`, `format:check`, and `lint` (also exposed by `just`) currently enforce the initial
+`packages/pi-tai/src/concurrency` and `src/jj` adoption boundary. Expand `biome.json` by reviewed
+subtree; this avoids disguising behavior changes in a repository-wide initial rewrite. Generated,
+dependency, and build directories are excluded both there and in `.gitignore`.
+
 ## Distribution and entry points
 
 Pi terminal presentation, the Host-backed `pi-tai-client`, and any Pi client adapter ship as one

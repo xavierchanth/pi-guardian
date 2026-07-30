@@ -24,7 +24,19 @@ alias pi := pi-tai
 setup:
     npm ci
 
-# Run TypeScript, Node, and Rust checks.
+# Apply the repository's deterministic TypeScript formatting.
+format:
+    npm run format
+
+# Check deterministic formatting without changing files.
+format-check:
+    npm run format:check
+
+# Run the repository TypeScript linter.
+lint:
+    npm run lint
+
+# Run formatting, linting, TypeScript, Node, and Rust checks.
 check:
     npm run check
 

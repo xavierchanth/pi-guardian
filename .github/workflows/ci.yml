@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read toolchain versions
+        id: versions
+        shell: bash
+        run: |
+          echo "node=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(sed -n 's/^rust-version = "\([^"]*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+          cache: npm
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install "${{ steps.versions.outputs.rust }}" --profile minimal
+          rustup override set "${{ steps.versions.outputs.rust }}"
+      - run: npm ci
+      - name: Deterministic repository gate
+        run: npm run check
+      - name: Verify package contents
+        run: npm run package:check
+      - name: Isolated extension smoke
+        run: npm run smoke:isolated

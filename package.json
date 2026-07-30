@@ -40,13 +40,16 @@
     "runtime:package-compare": "npm run runtime:smoke",
     "desktop:dev": "npm run dev --workspace @pi-tai/host-ui",
     "desktop:build": "npm run build --workspace @pi-tai/host-ui",
-    "check": "npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
+    "check": "npm run format:check && npm run lint && npm run protocol:check && npm run typecheck && npm test && npm run test:rust",
     "package:check": "npm pack --dry-run",
     "smoke:isolated": "node tests/smoke/isolated-load.mjs",
     "eval:subagents": "node --experimental-strip-types evals/subagents/run.ts",
     "eval:guardian": "node --experimental-strip-types evals/guardian/run.ts",
     "eval:agent-concurrency": "node --experimental-strip-types evals/agent-concurrency/run.ts",
-    "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live"
+    "eval:agent-concurrency:live": "node --experimental-strip-types evals/agent-concurrency/run.ts --live",
+    "format": "biome format --write",
+    "format:check": "biome format",
+    "lint": "biome lint"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -55,6 +58,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.2.7",
     "@earendil-works/pi-ai": "^0.80.10",
     "@earendil-works/pi-coding-agent": "^0.80.10",
     "@earendil-works/pi-tui": "^0.80.10",

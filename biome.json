@@ -1,0 +1,39 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.2.7/schema.json",
+  "files": {
+    "includes": [
+      "packages/pi-tai/src/concurrency/**/*.ts",
+      "packages/pi-tai/src/jj/**/*.ts",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/target",
+      "!apps/*/src-tauri/gen"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": { "noCommaOperator": "off" },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "off"
+      },
+      "suspicious": { "noExplicitAny": "off" }
+    }
+  }
+}
