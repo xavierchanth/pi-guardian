@@ -25,7 +25,10 @@ const timeout = setTimeout(() => {
 
 const lines = createInterface({ input: child.stdout });
 const shippedPrompt = await readFile(resolve(root, "packages/pi-tai/src/agents/prompt.ts"), "utf8");
-if (!shippedPrompt.includes('capability: \\"researcher\\"') || !shippedPrompt.includes("subagent_spawn")) {
+if (
+  !shippedPrompt.includes('capability: \\"researcher\\"') ||
+  !shippedPrompt.includes("subagent_spawn")
+) {
   throw new Error("shipped extension does not prompt researcher delegation");
 }
 

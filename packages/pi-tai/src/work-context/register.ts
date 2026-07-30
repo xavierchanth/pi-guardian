@@ -1,9 +1,5 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  Theme,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import {
@@ -20,10 +16,7 @@ import {
   createPiSessionWorkContextStore,
   type WorkContextStore,
 } from "./persistence.ts";
-import {
-  collapsedWorkContextText,
-  fullWorkContextText,
-} from "./presentation.ts";
+import { collapsedWorkContextText, fullWorkContextText } from "./presentation.ts";
 
 const PlanItemSchema = Type.Object({
   content: Type.String({ description: "Concise plan step" }),
@@ -45,11 +38,7 @@ class PlanStatusView {
   private readonly text: Text;
   private readonly close: () => void;
 
-  constructor(
-    snapshot: WorkContextSnapshot,
-    theme: Theme,
-    close: () => void,
-  ) {
+  constructor(snapshot: WorkContextSnapshot, theme: Theme, close: () => void) {
     this.close = close;
     this.text = new Text(
       [
@@ -65,11 +54,7 @@ class PlanStatusView {
   }
 
   handleInput(data: string): void {
-    if (
-      matchesKey(data, "escape") ||
-      matchesKey(data, "return") ||
-      matchesKey(data, "ctrl+c")
-    ) {
+    if (matchesKey(data, "escape") || matchesKey(data, "return") || matchesKey(data, "ctrl+c")) {
       this.close();
     }
   }
@@ -105,8 +90,8 @@ export function registerWorkContext(
         ctx.ui.notify("/plan-status requires interactive TUI mode.", "error");
         return;
       }
-      await ctx.ui.custom<void>((_tui, theme, _keybindings, done) =>
-        new PlanStatusView(snapshot, theme, () => done()),
+      await ctx.ui.custom<void>(
+        (_tui, theme, _keybindings, done) => new PlanStatusView(snapshot, theme, () => done()),
       );
     },
   });
@@ -134,8 +119,7 @@ export function registerWorkContext(
     },
     renderCall(args, theme) {
       return new Text(
-        theme.fg("toolTitle", theme.bold("update_plan ")) +
-          theme.fg("muted", args.goal),
+        theme.fg("toolTitle", theme.bold("update_plan ")) + theme.fg("muted", args.goal),
         0,
         0,
       );
@@ -143,11 +127,7 @@ export function registerWorkContext(
     renderResult(result, { expanded }, theme) {
       const snapshot = parseWorkContextDetails(result.details);
       if (!snapshot) {
-        return new Text(
-          theme.fg("error", "Invalid work-context result"),
-          0,
-          0,
-        );
+        return new Text(theme.fg("error", "Invalid work-context result"), 0, 0);
       }
       return new Text(
         expanded

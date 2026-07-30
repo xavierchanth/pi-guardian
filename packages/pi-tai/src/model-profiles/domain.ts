@@ -1,4 +1,12 @@
-export const THINKING_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const THINKING_EFFORTS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 export type ThinkingEffort = (typeof THINKING_EFFORTS)[number];
 
 export interface ModelProfile {

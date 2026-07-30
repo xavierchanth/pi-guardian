@@ -2,10 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BackendRegistry } from "../../packages/pi-tai/src/agents/backend.ts";
 import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
-import { applyEvent, contextUtilisation, emptySnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
+import {
+  applyEvent,
+  contextUtilisation,
+  emptySnapshot,
+} from "../../packages/pi-tai/src/agents/domain.ts";
 import { SubagentManager } from "../../packages/pi-tai/src/agents/manager.ts";
 
-function managerWith(backends: StubBackend[], options: { maxRunning?: number; onSettled?: (snapshot: any) => void } = {}) {
+function managerWith(
+  backends: StubBackend[],
+  options: { maxRunning?: number; onSettled?: (snapshot: any) => void } = {},
+) {
   const registry = new BackendRegistry(backends);
   return new SubagentManager({
     registry,
@@ -38,7 +45,10 @@ describe("subagent manager", () => {
 
     assert.equal(result.reason, "user-interrupted");
     assert.deepEqual(result.settled, []);
-    assert.deepEqual(result.pending.map(({ id }) => id), [first.id, second.id]);
+    assert.deepEqual(
+      result.pending.map(({ id }) => id),
+      [first.id, second.id],
+    );
     assert.equal(manager.get(first.id)?.status, "running");
     assert.equal(manager.get(second.id)?.status, "running");
   });
@@ -54,8 +64,14 @@ describe("subagent manager", () => {
     interruption.abort();
     const result = await waiting;
 
-    assert.deepEqual(result.settled.map(({ id }) => id), [first.id]);
-    assert.deepEqual(result.pending.map(({ id }) => id), [second.id]);
+    assert.deepEqual(
+      result.settled.map(({ id }) => id),
+      [first.id],
+    );
+    assert.deepEqual(
+      result.pending.map(({ id }) => id),
+      [second.id],
+    );
     assert.equal(manager.delivery.size, 0, "the returned partial result was consumed");
     assert.equal(manager.get(second.id)?.status, "running");
   });
@@ -139,7 +155,10 @@ describe("subagent manager", () => {
     const second = await manager.spawn(request({ prompt: "also background" }));
     await settleQueue();
     assert.equal(manager.delivery.size, 1);
-    assert.deepEqual(manager.delivery.drain().map((result) => result.id), [second.id]);
+    assert.deepEqual(
+      manager.delivery.drain().map((result) => result.id),
+      [second.id],
+    );
   });
 
   it("collects staggered completions with durable wait-any snapshots", async () => {
@@ -150,15 +169,24 @@ describe("subagent manager", () => {
     const waiting = manager.wait([first.id, second.id]);
     await manager.cancel([first.id]);
     const one = await waiting;
-    assert.deepEqual(one.settled.map((entry) => entry.id), [first.id]);
-    assert.deepEqual(one.pending.map((entry) => entry.id), [second.id]);
+    assert.deepEqual(
+      one.settled.map((entry) => entry.id),
+      [first.id],
+    );
+    assert.deepEqual(
+      one.pending.map((entry) => entry.id),
+      [second.id],
+    );
     assert.equal(one.reason, "settled");
     assert.equal(manager.delivery.size, 0, "only the returned result was consumed");
 
     await manager.cancel([second.id]); // settles between wait calls
     assert.equal(manager.delivery.size, 1);
     const two = await manager.wait([first.id, second.id]);
-    assert.deepEqual(two.settled.map((entry) => entry.id), [first.id, second.id]);
+    assert.deepEqual(
+      two.settled.map((entry) => entry.id),
+      [first.id, second.id],
+    );
     assert.deepEqual(two.pending, []);
     assert.equal(manager.delivery.size, 0);
   });
@@ -171,7 +199,10 @@ describe("subagent manager", () => {
 
     await manager.cancel([first.id, second.id]);
     const result = await waiting;
-    assert.deepEqual(result.settled.map((entry) => entry.id), [first.id, second.id]);
+    assert.deepEqual(
+      result.settled.map((entry) => entry.id),
+      [first.id, second.id],
+    );
     assert.deepEqual(result.pending, []);
   });
 
@@ -179,16 +210,26 @@ describe("subagent manager", () => {
     const manager = managerWith([new StubBackend()]);
     const spawned = await manager.spawn(request());
     await settleQueue();
-    await assert.rejects(manager.wait([spawned.id, "missing-a", "missing-b"]), /missing-a, missing-b/);
+    await assert.rejects(
+      manager.wait([spawned.id, "missing-a", "missing-b"]),
+      /missing-a, missing-b/,
+    );
     assert.equal(manager.delivery.size, 1);
     const result = await manager.wait([spawned.id, spawned.id]);
-    assert.deepEqual(result.settled.map((entry) => entry.id), [spawned.id]);
+    assert.deepEqual(
+      result.settled.map((entry) => entry.id),
+      [spawned.id],
+    );
     assert.deepEqual(result.pending, []);
   });
 
   it("runs the settle hook exactly once per subagent", async () => {
     const settledIds: string[] = [];
-    const manager = managerWith([new StubBackend()], { onSettled: (snapshot) => { settledIds.push(snapshot.id); } });
+    const manager = managerWith([new StubBackend()], {
+      onSettled: (snapshot) => {
+        settledIds.push(snapshot.id);
+      },
+    });
 
     const spawned = await manager.spawn(request());
     await manager.wait([spawned.id]);
@@ -221,7 +262,11 @@ describe("subagent manager", () => {
     assert.equal(settled?.id, spawned.id, "the follow-up keeps the same subagent id");
     assert.equal(settled?.finalText, "done: what about the auth case?");
     assert.equal(backend.spawned.length, 2, "a follow-up is a second run, not a held process");
-    assert.equal(backend.spawned[1]?.resumeToken, `stub-session-${spawned.id}`, "context carries via the resume token");
+    assert.equal(
+      backend.spawned[1]?.resumeToken,
+      `stub-session-${spawned.id}`,
+      "context carries via the resume token",
+    );
   });
 
   it("frees the concurrency slot again after a resumed run settles", async () => {
@@ -239,14 +284,20 @@ describe("subagent manager", () => {
   it("refuses to continue a settled subagent on a harness that cannot resume", async () => {
     const backend = new StubBackend();
     (backend as { capabilities: Record<string, boolean> }).capabilities = {
-      steering: false, modelSelection: true, reasoningEffort: false, resumable: false,
+      steering: false,
+      modelSelection: true,
+      reasoningEffort: false,
+      resumable: false,
     };
     const manager = managerWith([backend]);
 
     const spawned = await manager.spawn(request());
     await manager.wait([spawned.id]);
 
-    await assert.rejects(manager.send(spawned.id, "follow up"), /cannot continue it; spawn a new subagent/);
+    await assert.rejects(
+      manager.send(spawned.id, "follow up"),
+      /cannot continue it; spawn a new subagent/,
+    );
   });
 
   it("refuses backends that are not registered, naming what is available", async () => {
@@ -261,7 +312,10 @@ describe("subagent manager", () => {
       new StubBackend({ name: "claude", available: { ok: false, reason: "SDK not installed" } }),
     ]);
 
-    await assert.rejects(manager.spawn(request({ backend: "claude" })), /unavailable: SDK not installed/);
+    await assert.rejects(
+      manager.spawn(request({ backend: "claude" })),
+      /unavailable: SDK not installed/,
+    );
   });
 
   it("does not consume a concurrency slot when the spawn itself fails", async () => {
@@ -275,7 +329,13 @@ describe("subagent manager", () => {
 });
 
 describe("snapshot folding", () => {
-  const base = emptySnapshot({ id: "sa-1", backend: "pi", title: "t", cwd: "/tmp", createdAt: "now" });
+  const base = emptySnapshot({
+    id: "sa-1",
+    backend: "pi",
+    title: "t",
+    cwd: "/tmp",
+    createdAt: "now",
+  });
 
   it("accumulates streaming deltas into the latest text", () => {
     const streamed = ["Hel", "lo"].reduce(
@@ -288,15 +348,27 @@ describe("snapshot folding", () => {
   });
 
   it("reports context utilisation only when the window is known", () => {
-    const withoutWindow = applyEvent(base, { type: "usage", inputTokens: 10, outputTokens: 10 }, "now");
-    const withWindow = applyEvent(base, { type: "usage", inputTokens: 50, outputTokens: 50, contextWindow: 1_000 }, "now");
+    const withoutWindow = applyEvent(
+      base,
+      { type: "usage", inputTokens: 10, outputTokens: 10 },
+      "now",
+    );
+    const withWindow = applyEvent(
+      base,
+      { type: "usage", inputTokens: 50, outputTokens: 50, contextWindow: 1_000 },
+      "now",
+    );
 
     assert.equal(contextUtilisation(withoutWindow), undefined);
     assert.equal(contextUtilisation(withWindow), 10);
   });
 
   it("bounds error text so one broken child cannot flood the parent", () => {
-    const settled = applyEvent(base, { type: "run_settled", outcome: "failed", error: "x".repeat(10_000) }, "now");
+    const settled = applyEvent(
+      base,
+      { type: "run_settled", outcome: "failed", error: "x".repeat(10_000) },
+      "now",
+    );
 
     assert.ok(Buffer.byteLength(settled.errorText ?? "", "utf8") <= 4096 + 3);
   });

@@ -1,10 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPiTaiConfig, type LoadedPiTaiConfig } from "./load.ts";
-import {
-  FIELD_DESCRIPTORS,
-  type ConfigProvenance,
-  type FieldOrigin,
-} from "./provenance.ts";
+import { FIELD_DESCRIPTORS, type ConfigProvenance, type FieldOrigin } from "./provenance.ts";
 import {
   DEFAULT_PI_TAI_CONFIG,
   type ClientPreferences,
@@ -52,9 +48,14 @@ export function createPinnedPiTaiConfigService(
 
 export function createPiTaiConfigService(agentDir?: string): PiTaiConfigService {
   let current: ResolvedPiTaiConfig = DEFAULT_PI_TAI_CONFIG;
-  let provenance: ConfigProvenance = Object.freeze(Object.fromEntries(
-    Object.keys(FIELD_DESCRIPTORS).map((path) => [path, { layer: "default" } satisfies FieldOrigin]),
-  ));
+  let provenance: ConfigProvenance = Object.freeze(
+    Object.fromEntries(
+      Object.keys(FIELD_DESCRIPTORS).map((path) => [
+        path,
+        { layer: "default" } satisfies FieldOrigin,
+      ]),
+    ),
+  );
   return {
     sessionPolicy: () => current.sessionPolicy,
     clientPreferences: () => current.clientPreferences,
@@ -73,10 +74,7 @@ export function createPiTaiConfigService(agentDir?: string): PiTaiConfigService 
   };
 }
 
-export function registerPiTaiConfig(
-  pi: ExtensionAPI,
-  service: PiTaiConfigService,
-): void {
+export function registerPiTaiConfig(pi: ExtensionAPI, service: PiTaiConfigService): void {
   let lastWarningKey: string | undefined;
   pi.on("session_start", (_event, ctx) => {
     const loaded = service.reload(ctx);

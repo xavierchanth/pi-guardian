@@ -19,13 +19,11 @@ async function exists(entry) {
   }
 }
 
-const scanRoots = (
-  requestedScanRoots.length > 0 ? requestedScanRoots : defaultScanRoots
-).map((entry) => path.resolve(root, entry));
+const scanRoots = (requestedScanRoots.length > 0 ? requestedScanRoots : defaultScanRoots).map(
+  (entry) => path.resolve(root, entry),
+);
 const presentScanRoots = (
-  await Promise.all(
-    scanRoots.map(async (entry) => ((await exists(entry)) ? entry : null)),
-  )
+  await Promise.all(scanRoots.map(async (entry) => ((await exists(entry)) ? entry : null)))
 ).filter(Boolean);
 const documentationRoots = (
   await Promise.all(
@@ -107,9 +105,7 @@ function display(file) {
 }
 
 function isExternal(destination) {
-  return (
-    /^[a-z][a-z0-9+.-]*:/iu.test(destination) || destination.startsWith("//")
-  );
+  return /^[a-z][a-z0-9+.-]*:/iu.test(destination) || destination.startsWith("//");
 }
 
 function isDocumentationPage(file) {
@@ -125,18 +121,14 @@ const files = [
       .map((entry) => path.resolve(entry)),
   ),
 ].sort();
-const incoming = new Map(
-  files.filter(isDocumentationPage).map((file) => [file, new Set()]),
-);
+const incoming = new Map(files.filter(isDocumentationPage).map((file) => [file, new Set()]));
 const parsed = new Map();
 const errors = [];
 
 for (const file of files) {
   const markdown = await readFile(file, "utf8");
   const lines = proseLines(markdown);
-  const headings = lines
-    .map((line) => line.match(/^(#{1,6})\s+(.+?)\s*#*$/u))
-    .filter(Boolean);
+  const headings = lines.map((line) => line.match(/^(#{1,6})\s+(.+?)\s*#*$/u)).filter(Boolean);
   const h1Count = headings.filter((heading) => heading[1].length === 1).length;
   if (h1Count !== 1) {
     errors.push(`${display(file)}: expected exactly one H1; found ${h1Count}`);
@@ -146,9 +138,7 @@ for (const file of files) {
   for (const heading of headings) {
     const level = heading[1].length;
     if (previousLevel > 0 && level > previousLevel + 1) {
-      errors.push(
-        `${display(file)}: heading level jumps from H${previousLevel} to H${level}`,
-      );
+      errors.push(`${display(file)}: heading level jumps from H${previousLevel} to H${level}`);
     }
     previousLevel = level;
   }
@@ -165,9 +155,7 @@ for (const [file, document] of parsed) {
 
     const [rawTarget, rawFragment] = rawDestination.split("#", 2);
     const decodedTarget = decodeURIComponent(rawTarget.split("?", 1)[0]);
-    let target = decodedTarget
-      ? path.resolve(path.dirname(file), decodedTarget)
-      : file;
+    let target = decodedTarget ? path.resolve(path.dirname(file), decodedTarget) : file;
 
     try {
       if ((await stat(target)).isDirectory()) target = path.join(target, "README.md");

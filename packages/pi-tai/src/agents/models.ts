@@ -45,9 +45,9 @@ export const BACKEND_DEFAULTS: Record<BackendName, Omit<ModelChoice, "backend">>
  * at this trust boundary so the rest of the agent subsystem receives only valid
  * provider/model/harness combinations.
  */
-export const MODEL_CATALOG = parseModelCatalog(JSON.parse(
-  readFileSync(new URL("./models.json", import.meta.url), "utf8"),
-));
+export const MODEL_CATALOG = parseModelCatalog(
+  JSON.parse(readFileSync(new URL("./models.json", import.meta.url), "utf8")),
+);
 
 export const MODEL_ALIASES: Readonly<Record<string, ModelAlias>> = Object.freeze(
   Object.fromEntries(MODEL_CATALOG.aliases.map((alias) => [alias.name, alias])),
@@ -67,9 +67,14 @@ export function parseModelCatalog(input: unknown): ModelCatalog {
   const aliases = root.aliases.map((value, index): ModelAlias => {
     const path = `aliases[${index}]`;
     const item = record(value, path);
-    exactKeys(item, ["name", "backend", "provider", "model", "effort", "allowedBackends", "purpose"], path);
+    exactKeys(
+      item,
+      ["name", "backend", "provider", "model", "effort", "allowedBackends", "purpose"],
+      path,
+    );
     const name = text(item.name, `${path}.name`).toLowerCase();
-    if (!/^[a-z][a-z0-9-]*$/.test(name)) throw new Error(`${path}.name must be lowercase kebab-case.`);
+    if (!/^[a-z][a-z0-9-]*$/.test(name))
+      throw new Error(`${path}.name must be lowercase kebab-case.`);
     if (names.has(name)) throw new Error(`Duplicate model alias "${name}".`);
     names.add(name);
 
@@ -83,17 +88,28 @@ export function parseModelCatalog(input: unknown): ModelCatalog {
     if (!Array.isArray(item.allowedBackends) || item.allowedBackends.length === 0) {
       throw new Error(`${path}.allowedBackends must be a non-empty array.`);
     }
-    const allowedBackends = [...new Set(item.allowedBackends.map((entry, allowedIndex) =>
-      backendName(entry, `${path}.allowedBackends[${allowedIndex}]`)))];
+    const allowedBackends = [
+      ...new Set(
+        item.allowedBackends.map((entry, allowedIndex) =>
+          backendName(entry, `${path}.allowedBackends[${allowedIndex}]`),
+        ),
+      ),
+    ];
     if (!allowedBackends.includes(backend)) {
       throw new Error(`${path}.backend must appear in allowedBackends.`);
     }
     const required = constrainedBackends(provider, model);
     if (required && !sameBackends(allowedBackends, required)) {
-      throw new Error(`${path}.allowedBackends must be exactly ${required.join(", ")} for ${provider}/${model}.`);
+      throw new Error(
+        `${path}.allowedBackends must be exactly ${required.join(", ")} for ${provider}/${model}.`,
+      );
     }
     return Object.freeze({
-      name, backend, provider, model, effort,
+      name,
+      backend,
+      provider,
+      model,
+      effort,
       allowedBackends: Object.freeze(allowedBackends),
       purpose: text(item.purpose, `${path}.purpose`),
     });
@@ -133,7 +149,10 @@ export function resolveModel(input: {
   const backend = input.backend ?? "pi";
   const defaults = BACKEND_DEFAULTS[backend];
   if (!input.model) {
-    return { ok: true, choice: { backend, ...defaults, ...(input.effort ? { effort: input.effort } : {}) } };
+    return {
+      ok: true,
+      choice: { backend, ...defaults, ...(input.effort ? { effort: input.effort } : {}) },
+    };
   }
 
   const separator = input.model.indexOf("/");
@@ -172,7 +191,8 @@ function sameBackends(left: readonly BackendName[], right: readonly BackendName[
 }
 
 function record(value: unknown, path: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path} must be an object.`);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`${path} must be an object.`);
   return value as Record<string, unknown>;
 }
 
@@ -187,7 +207,8 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[], path
 }
 
 function text(value: unknown, path: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${path} must be a non-empty string.`);
+  if (typeof value !== "string" || !value.trim())
+    throw new Error(`${path} must be a non-empty string.`);
   return value.trim();
 }
 
@@ -198,7 +219,11 @@ function backendName(value: unknown, path: string): BackendName {
   return value as BackendName;
 }
 
-function incompatible(model: string, backend: BackendName, allowed: readonly BackendName[]): ResolveModelResult {
+function incompatible(
+  model: string,
+  backend: BackendName,
+  allowed: readonly BackendName[],
+): ResolveModelResult {
   return {
     ok: false,
     reason: `Model "${model}" cannot run on the ${backend} backend; use ${allowed.join(" or ")}.`,

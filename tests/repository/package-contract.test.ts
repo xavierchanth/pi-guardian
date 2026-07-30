@@ -30,9 +30,7 @@ test("root manifest is a discoverable Pi package", () => {
 
 test("source uses the current Pi distribution imports", () => {
   const files = walkSource(join(root, "packages"));
-  const legacy = files.filter((file) =>
-    readFileSync(file, "utf8").includes("@mariozechner/"),
-  );
+  const legacy = files.filter((file) => readFileSync(file, "utf8").includes("@mariozechner/"));
   assert.deepEqual(legacy, []);
 });
 
@@ -78,36 +76,58 @@ test("checkpoint prompt accepts additional instructions", () => {
 
 test("the subagent tool surface is the nine-tool set", () => {
   const source = readFileSync(join(root, "packages/pi-tai/src/agents/register.ts"), "utf8");
-  const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)].map((match) => match[1]).sort();
+  const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)]
+    .map((match) => match[1])
+    .sort();
   assert.deepEqual(registered, [
-    "subagent_cancel", "subagent_check", "subagent_list", "subagent_send", "subagent_spawn",
-    "subagent_wait", "workspace_discard", "workspace_merge", "workspace_status"
+    "subagent_cancel",
+    "subagent_check",
+    "subagent_list",
+    "subagent_send",
+    "subagent_spawn",
+    "subagent_wait",
+    "workspace_discard",
+    "workspace_merge",
+    "workspace_status",
   ]);
-  assert.equal(existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")), false,
-    "the retired 47-tool registrar is gone");
+  assert.equal(
+    existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")),
+    false,
+    "the retired 47-tool registrar is gone",
+  );
 });
 
 test("the packaged capability catalog and instruction assets agree", () => {
-  const catalog = JSON.parse(readFileSync(
-    join(root, "packages/pi-tai/src/agents/capabilities.json"),
-    "utf8",
-  )) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
+  const catalog = JSON.parse(
+    readFileSync(join(root, "packages/pi-tai/src/agents/capabilities.json"), "utf8"),
+  ) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
   assert.equal(catalog.version, 1);
-  assert.deepEqual(catalog.capabilities?.map((entry) => entry.name), ["researcher"]);
+  assert.deepEqual(
+    catalog.capabilities?.map((entry) => entry.name),
+    ["researcher"],
+  );
   for (const capability of catalog.capabilities ?? []) {
     assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
-    assert.ok(existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)));
+    assert.ok(
+      existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)),
+    );
   }
 });
 
 test("the packaged model catalog declares every supported alias", () => {
-  const catalog = JSON.parse(readFileSync(
-    join(root, "packages/pi-tai/src/agents/models.json"),
-    "utf8",
-  )) as { version?: number; aliases?: Array<{ name?: string }> };
+  const catalog = JSON.parse(
+    readFileSync(join(root, "packages/pi-tai/src/agents/models.json"), "utf8"),
+  ) as { version?: number; aliases?: Array<{ name?: string }> };
   assert.equal(catalog.version, 1);
   assert.deepEqual(catalog.aliases?.map((entry) => entry.name).sort(), [
-    "fable", "glm", "kimi", "luna", "opus", "sol", "sonnet", "terra",
+    "fable",
+    "glm",
+    "kimi",
+    "luna",
+    "opus",
+    "sol",
+    "sonnet",
+    "terra",
   ]);
 });
 
@@ -198,7 +218,14 @@ test("package composes only the reporting-only pi-cmux modules", () => {
     .map((match) => match[1])
     .sort();
   assert.deepEqual(imports, ["cmux-notify.ts", "cmux-sidebar.ts", "i18n.ts"]);
-  for (const excluded of ["index", "cmux-review", "cmux-continue", "cmux-split", "cmux-open", "cmux-zoxide"]) {
+  for (const excluded of [
+    "index",
+    "cmux-review",
+    "cmux-continue",
+    "cmux-split",
+    "cmux-open",
+    "cmux-zoxide",
+  ]) {
     assert.doesNotMatch(source, new RegExp(`pi-cmux/extensions/${excluded}(?:\\.ts)?["']`));
   }
 });

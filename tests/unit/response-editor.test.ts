@@ -55,10 +55,10 @@ test("response extraction ignores preview text and accepts a missing closing tag
 });
 
 test("response extraction uses the shipped final closing tag", () => {
-  assert.deepEqual(
-    extractResponse("<response>\nLiteral </response> in my reply\n</response>"),
-    { kind: "response", text: "Literal </response> in my reply" },
-  );
+  assert.deepEqual(extractResponse("<response>\nLiteral </response> in my reply\n</response>"), {
+    kind: "response",
+    text: "Literal </response> in my reply",
+  });
 });
 
 test("response extraction returns the whole document without an opening tag", () => {
@@ -70,15 +70,25 @@ test("response extraction returns the whole document without an opening tag", ()
 
 test("last assistant text skips tool-only turns and non-text blocks", () => {
   const entries = [
-    { type: "message", message: { role: "assistant", content: [
-      { type: "text", text: "First block" },
-      { type: "thinking", thinking: "hidden" },
-      { type: "text", text: "Second block" },
-    ] } },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "First block" },
+          { type: "thinking", thinking: "hidden" },
+          { type: "text", text: "Second block" },
+        ],
+      },
+    },
     { type: "message", message: { role: "toolResult", content: [] } },
-    { type: "message", message: { role: "assistant", content: [
-      { type: "toolCall", id: "call-1", name: "read", arguments: {} },
-    ] } },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }],
+      },
+    },
   ] as unknown as SessionEntry[];
 
   assert.equal(findLastAssistantText(entries), "First block\nSecond block");
@@ -105,7 +115,10 @@ test("NeoVim detection handles paths, Windows names, and env wrappers", () => {
   assert.equal(isNeovimInvocation({ executable: "/opt/homebrew/bin/nvim", args: [] }), true);
   assert.equal(isNeovimInvocation({ executable: "C:\\tools\\nvim.exe", args: [] }), true);
   assert.equal(
-    isNeovimInvocation({ executable: "/usr/bin/env", args: ["NVIM_APPNAME=clean", "nvim", "--clean"] }),
+    isNeovimInvocation({
+      executable: "/usr/bin/env",
+      args: ["NVIM_APPNAME=clean", "nvim", "--clean"],
+    }),
     true,
   );
   assert.equal(isNeovimInvocation({ executable: "vim", args: [] }), false);

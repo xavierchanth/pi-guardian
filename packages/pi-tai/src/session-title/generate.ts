@@ -11,12 +11,7 @@ export interface GenerateTitleInput {
 
 export type TitleGenerator = (input: GenerateTitleInput) => Promise<string>;
 
-export const generateModelTitle: TitleGenerator = async ({
-  prompt,
-  config,
-  ctx,
-  signal,
-}) => {
+export const generateModelTitle: TitleGenerator = async ({ prompt, config, ctx, signal }) => {
   if (!config.provider || !config.model) {
     throw new Error("Session-title provider and model must both be configured.");
   }

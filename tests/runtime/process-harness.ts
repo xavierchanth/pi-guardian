@@ -12,7 +12,9 @@ export class RuntimeProcessHarness {
   private readonly events = new EventEmitter();
   private buffer = Buffer.alloc(0);
 
-  constructor(options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[]; cwd?: string } = {}) {
+  constructor(
+    options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[]; cwd?: string } = {},
+  ) {
     this.child = spawn(
       options.executable ?? process.execPath,
       options.args ?? ["--experimental-strip-types", bootstrap],
@@ -24,7 +26,9 @@ export class RuntimeProcessHarness {
     );
     this.child.stdout.on("data", (chunk: Buffer) => this.push(chunk));
     this.child.stderr.setEncoding("utf8");
-    this.child.stderr.on("data", (chunk) => { this.stderr += chunk; });
+    this.child.stderr.on("data", (chunk) => {
+      this.stderr += chunk;
+    });
     this.child.once("exit", (code, signal) => this.events.emit("exit", { code, signal }));
   }
 
@@ -48,7 +52,9 @@ export class RuntimeProcessHarness {
       };
       const onExit = (exit: unknown) => {
         cleanup();
-        reject(new Error(`worker exited before expected frame: ${JSON.stringify(exit)}\n${this.stderr}`));
+        reject(
+          new Error(`worker exited before expected frame: ${JSON.stringify(exit)}\n${this.stderr}`),
+        );
       };
       const timeout = setTimeout(() => {
         cleanup();

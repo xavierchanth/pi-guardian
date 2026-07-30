@@ -67,8 +67,16 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
 export class InMemoryWorkspaceRegistry implements WorkspaceRegistryPort {
   private readonly records = new Map<WorkspaceId, WorkspaceRecord>();
 
-  async list(): Promise<WorkspaceRecord[]> { return [...this.records.values()]; }
-  async get(id: WorkspaceId): Promise<WorkspaceRecord | undefined> { return this.records.get(id); }
-  async put(record: WorkspaceRecord): Promise<void> { this.records.set(record.id, record); }
-  async remove(id: WorkspaceId): Promise<void> { this.records.delete(id); }
+  async list(): Promise<WorkspaceRecord[]> {
+    return [...this.records.values()];
+  }
+  async get(id: WorkspaceId): Promise<WorkspaceRecord | undefined> {
+    return this.records.get(id);
+  }
+  async put(record: WorkspaceRecord): Promise<void> {
+    this.records.set(record.id, record);
+  }
+  async remove(id: WorkspaceId): Promise<void> {
+    this.records.delete(id);
+  }
 }

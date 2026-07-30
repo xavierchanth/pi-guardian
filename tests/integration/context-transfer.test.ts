@@ -15,7 +15,9 @@ function harness(options: { summarize?: () => Promise<string | undefined>; ids?:
   const records = new Map<string, ContextTransferArtifact>();
   const store: ContextTransferStore = {
     root: "/memory/pi-tai/context-exports",
-    async exists(id) { return records.has(id); },
+    async exists(id) {
+      return records.has(id);
+    },
     async save(artifact) {
       if (records.has(artifact.id)) throw new Error("exists");
       records.set(artifact.id, artifact);
@@ -28,19 +30,33 @@ function harness(options: { summarize?: () => Promise<string | undefined>; ids?:
     async prune() {},
   };
   const pi = {
-    registerCommand(name: string, command: any) { commands.set(name, command); },
-    registerMessageRenderer(type: string) { renderers.push(type); },
-    sendMessage(message: any, sendOptions: any) { messages.push({ message, options: sendOptions }); },
-    getThinkingLevel() { return "medium"; },
-    appendEntry() { mutations.push("appendEntry"); },
-    sendUserMessage() { mutations.push("sendUserMessage"); },
+    registerCommand(name: string, command: any) {
+      commands.set(name, command);
+    },
+    registerMessageRenderer(type: string) {
+      renderers.push(type);
+    },
+    sendMessage(message: any, sendOptions: any) {
+      messages.push({ message, options: sendOptions });
+    },
+    getThinkingLevel() {
+      return "medium";
+    },
+    appendEntry() {
+      mutations.push("appendEntry");
+    },
+    sendUserMessage() {
+      mutations.push("sendUserMessage");
+    },
   };
   const ids = options.ids ?? ["ABCD2345"];
   registerContextTransfer(pi as never, "/memory", {
     store,
-    summarize: async () => options.summarize ? options.summarize() : "Transferred summary",
+    summarize: async () => (options.summarize ? options.summarize() : "Transferred summary"),
     createId: () => ids.shift() ?? "ABCD2345",
-    copy: async (text) => { copies.push(text); },
+    copy: async (text) => {
+      copies.push(text);
+    },
     now: () => new Date("2025-01-01T00:00:00.000Z"),
   });
   const ctx = {
@@ -52,12 +68,26 @@ function harness(options: { summarize?: () => Promise<string | undefined>; ids?:
       getLeafId: () => undefined,
     },
     ui: {
-      notify(message: string, type: string) { notifications.push({ message, type }); },
-      setStatus(_key: string, value: unknown) { statuses.push(value); },
+      notify(message: string, type: string) {
+        notifications.push({ message, type });
+      },
+      setStatus(_key: string, value: unknown) {
+        statuses.push(value);
+      },
     },
     async waitForIdle() {},
   };
-  return { commands, messages, renderers, notifications, statuses, copies, mutations, records, ctx };
+  return {
+    commands,
+    messages,
+    renderers,
+    notifications,
+    statuses,
+    copies,
+    mutations,
+    records,
+    ctx,
+  };
 }
 
 describe("context transfer commands", () => {
@@ -83,7 +113,12 @@ describe("context transfer commands", () => {
       id: "ABCD2345",
       createdAt: "2025-01-01T00:00:00.000Z",
       summary: "old",
-      source: { cwd: "/old", sessionId: "old", model: { provider: "p", id: "m" }, piTaiVersion: "0.1.0" },
+      source: {
+        cwd: "/old",
+        sessionId: "old",
+        model: { provider: "p", id: "m" },
+        piTaiVersion: "0.1.0",
+      },
     });
     await state.commands.get("context-export")!.handler("", state.ctx);
     await state.commands.get("context-import")!.handler("BCDE3456", state.ctx);

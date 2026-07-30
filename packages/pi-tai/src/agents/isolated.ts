@@ -17,7 +17,8 @@ export interface IsolatedSubagentsOptions {
   readonly sourcePath: string;
 }
 
-export interface IsolatedSpawnRequest extends Omit<SpawnRequest, "cwd" | "workspaceId" | "systemPrompt"> {
+export interface IsolatedSpawnRequest
+  extends Omit<SpawnRequest, "cwd" | "workspaceId" | "systemPrompt"> {
   /**
    * `workspace` runs the child in a managed jj workspace it owns exclusively.
    * `shared` runs it in the user's working copy — read-only work only.
@@ -58,22 +59,33 @@ export class IsolatedSubagents {
    */
   async spawn(request: IsolatedSpawnRequest): Promise<SubagentSnapshot> {
     const { isolation, systemPrompt, continueFrom, parent, ...rest } = request;
-    const render = (cwd: string) => (typeof systemPrompt === "function" ? systemPrompt(cwd) : systemPrompt);
+    const render = (cwd: string) =>
+      typeof systemPrompt === "function" ? systemPrompt(cwd) : systemPrompt;
     if (isolation === "shared") {
-      return this.agents.spawn({ ...rest, cwd: this.sourcePath, systemPrompt: render(this.sourcePath) });
+      return this.agents.spawn({
+        ...rest,
+        cwd: this.sourcePath,
+        systemPrompt: render(this.sourcePath),
+      });
     }
     const reused = continueFrom ? this.owned.get(continueFrom) : undefined;
     if (continueFrom && !reused) {
-      throw new Error(`Subagent ${continueFrom} has no workspace to continue; it may already have been merged or discarded.`);
+      throw new Error(
+        `Subagent ${continueFrom} has no workspace to continue; it may already have been merged or discarded.`,
+      );
     }
     if (reused && this.agents.get(continueFrom!)?.status === "running") {
-      throw new Error(`Subagent ${continueFrom} is still running; cancel it before sending another subagent into its workspace.`);
+      throw new Error(
+        `Subagent ${continueFrom} is still running; cancel it before sending another subagent into its workspace.`,
+      );
     }
     const existing = reused ? await this.workspaces.get(reused) : undefined;
-    const workspace = existing ?? await this.workspaces.create({
-      label: request.title,
-      ...(parent ? { parent } : {}),
-    });
+    const workspace =
+      existing ??
+      (await this.workspaces.create({
+        label: request.title,
+        ...(parent ? { parent } : {}),
+      }));
     try {
       const snapshot = await this.agents.spawn({
         ...rest,
@@ -101,7 +113,10 @@ export class IsolatedSubagents {
     const workspaceId = this.requireWorkspace(subagentId);
     const snapshot = this.agents.get(subagentId);
     if (snapshot?.status === "running") {
-      return { kind: "blocked", reason: `Subagent ${subagentId} is still running; wait or cancel it first.` };
+      return {
+        kind: "blocked",
+        reason: `Subagent ${subagentId} is still running; wait or cancel it first.`,
+      };
     }
     const result = await this.workspaces.merge(workspaceId, strategy);
     if (result.kind !== "blocked") this.owned.delete(subagentId);
@@ -117,7 +132,8 @@ export class IsolatedSubagents {
 
   /** Live owners, so a workspace sweep does not reclaim work in progress. */
   activeOwners(): string[] {
-    return this.agents.list()
+    return this.agents
+      .list()
       .filter((snapshot) => snapshot.status === "running")
       .map((snapshot) => snapshot.id);
   }

@@ -9,7 +9,7 @@ The canonical documentation tree, repository classification, package boundaries,
 
 ## Current gap
 
-The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome enforces the initial concurrency/JJ formatting and lint boundary. Rust formatting, clippy with warnings denied, and workspace tests are enforced by the local repository gate and CI. CI also runs package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
+The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome enforces practical first-party TypeScript and JavaScript repository-wide. Rust formatting, clippy with warnings denied, and workspace tests are enforced by the local repository gate and CI. CI also runs package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
 
 ## Scope
 
@@ -26,7 +26,7 @@ These are independent of every cutover and can proceed concurrently with any oth
 
 ### Formatter and linter adoption
 
-Delivered for `concurrency/` and `jj/` with pinned Biome and mechanical initial formatting. The gate checks both formatting and linting. Adoption outside those subtrees remains incremental so future mechanical changes stay reviewable.
+Delivered with pinned Biome across first-party TypeScript and JavaScript in `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`, and `fixtures`. The gate checks both formatting and linting. Dependencies, generated protocol and Tauri sources, and build/coverage outputs are explicitly excluded; generated artifacts remain governed by their generators.
 
 ### CI gate
 
@@ -40,6 +40,6 @@ Delivered in `.github/workflows/ci.yml`: explicit Rust formatting and clippy gat
 - Root README points to product, architecture, concurrency, and roadmap indexes.
 - Package dry-run contains only intended user/contributor documentation.
 - No obsolete or competing documentation ships as an active authority.
-- Formatters and linters are configured and enforced; `concurrency/` and `jj/` are reformatted, and the complete Rust workspace is rustfmt-clean and clippy-clean with warnings denied.
+- Formatters and linters are configured and enforced across practical first-party TypeScript and JavaScript, and the complete Rust workspace is rustfmt-clean and clippy-clean with warnings denied.
 - CI runs the equivalent of `just check` on every change, with explicit Rust formatting and clippy steps.
 - No active document describes behavior that does not exist in code.

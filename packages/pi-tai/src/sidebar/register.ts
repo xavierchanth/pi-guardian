@@ -15,15 +15,16 @@ export function registerBtw(pi: ExtensionAPI): void {
   pi.registerCommand("btw", {
     description: "Ask a one-off question using the current session context",
     handler: async (args, ctx) => {
-      const question = args.trim() || (ctx.hasUI
-        ? await ctx.ui.input("by the way", "Ask a one-off question…")
-        : undefined);
+      const question =
+        args.trim() ||
+        (ctx.hasUI ? await ctx.ui.input("by the way", "Ask a one-off question…") : undefined);
       if (!question?.trim()) {
         if (ctx.hasUI) ctx.ui.notify("Enter a question for /btw.", "warning");
         return;
       }
       if (inFlight >= BTW_MAX_IN_FLIGHT) {
-        if (ctx.hasUI) ctx.ui.notify("Too many by-the-way questions are already running.", "warning");
+        if (ctx.hasUI)
+          ctx.ui.notify("Too many by-the-way questions are already running.", "warning");
         return;
       }
       // Reservation and snapshot are synchronous: concurrent commands cannot exceed the cap or
@@ -54,12 +55,30 @@ export function registerBtw(pi: ExtensionAPI): void {
           effort,
           signal: controller.signal,
         });
-        data = { state: "success", question: question.trim(), answer: result.answer, model: modelName, timestamp: new Date().toISOString(), truncation: { input: result.inputTruncated, output: result.outputTruncated } };
+        data = {
+          state: "success",
+          question: question.trim(),
+          answer: result.answer,
+          model: modelName,
+          timestamp: new Date().toISOString(),
+          truncation: { input: result.inputTruncated, output: result.outputTruncated },
+        };
       } catch (error) {
         const message = controller.signal.aborted
-          ? (controller.signal.reason instanceof Error ? controller.signal.reason.message : "Cancelled")
-          : error instanceof Error ? error.message : String(error);
-        data = { state: "error", question: question.trim(), error: message, model: modelName, timestamp: new Date().toISOString(), truncation: { input: false, output: false } };
+          ? controller.signal.reason instanceof Error
+            ? controller.signal.reason.message
+            : "Cancelled"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+        data = {
+          state: "error",
+          question: question.trim(),
+          error: message,
+          model: modelName,
+          timestamp: new Date().toISOString(),
+          truncation: { input: false, output: false },
+        };
       } finally {
         clearTimeout(timer);
         controllers.delete(controller);

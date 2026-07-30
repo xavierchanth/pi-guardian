@@ -3,11 +3,7 @@ import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  fauxAssistantMessage,
-  fauxProvider,
-  type FauxProviderHandle,
-} from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import {
   ModelRuntime,
   SessionManager,
@@ -32,7 +28,11 @@ async function createPrivateChild(root: string, name: string): Promise<PrivateCh
   const cwd = join(root, name, "workspace");
   const agentDir = join(root, name, "agent");
   const sessionDir = join(root, "private-child-sessions", name);
-  await Promise.all([mkdir(cwd, { recursive: true }), mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true })]);
+  await Promise.all([
+    mkdir(cwd, { recursive: true }),
+    mkdir(agentDir, { recursive: true }),
+    mkdir(sessionDir, { recursive: true }),
+  ]);
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
     modelsPath: null,
@@ -79,10 +79,14 @@ async function createPrivateChild(root: string, name: string): Promise<PrivateCh
     modelRuntime,
     settingsManager,
     resourceLoaderOptions: {
-      extensionFactories: [{
-        name: `private-child-bridge-${name}`,
-        factory: (pi) => { bridge = pi; },
-      }],
+      extensionFactories: [
+        {
+          name: `private-child-bridge-${name}`,
+          factory: (pi) => {
+            bridge = pi;
+          },
+        },
+      ],
       noSkills: true,
       noPromptTemplates: true,
       noThemes: true,
@@ -144,35 +148,58 @@ test("two private AgentSession children run concurrently and receive typed custo
 
     left.faux.setResponses([
       fauxAssistantMessage(`active ${"streaming ".repeat(100)}`),
-      (context) => fauxAssistantMessage(
-        JSON.stringify(context.messages).includes("active-steer") ? "active-steer-seen" : "active-steer-missing",
-      ),
+      (context) =>
+        fauxAssistantMessage(
+          JSON.stringify(context.messages).includes("active-steer")
+            ? "active-steer-seen"
+            : "active-steer-missing",
+        ),
     ]);
     const activePrompt = left.session.prompt("start active turn");
     await delay(10);
-    left.bridge.sendMessage({
-      customType: "pi-tai-child-event",
-      content: "active-steer",
-      display: false,
-      details: { childContextId: "child-left" },
-    }, { deliverAs: "steer", triggerTurn: true });
+    left.bridge.sendMessage(
+      {
+        customType: "pi-tai-child-event",
+        content: "active-steer",
+        display: false,
+        details: { childContextId: "child-left" },
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
     await activePrompt;
     assert.match(assistantText(left.session), /active-steer-seen/);
 
-    left.faux.setResponses([(context) => fauxAssistantMessage(
-      JSON.stringify(context.messages).includes("continue-left") ? "left-custom-seen" : "left-custom-missing",
-    )]);
-    left.bridge.sendMessage({
-      customType: "pi-tai-parent-message",
-      content: "continue-left",
-      display: false,
-      details: { parentContextId: "root" },
-    }, { deliverAs: "steer", triggerTurn: true });
+    left.faux.setResponses([
+      (context) =>
+        fauxAssistantMessage(
+          JSON.stringify(context.messages).includes("continue-left")
+            ? "left-custom-seen"
+            : "left-custom-missing",
+        ),
+    ]);
+    left.bridge.sendMessage(
+      {
+        customType: "pi-tai-parent-message",
+        content: "continue-left",
+        display: false,
+        details: { parentContextId: "root" },
+      },
+      { deliverAs: "steer", triggerTurn: true },
+    );
     await delay(10);
     await left.session.waitForIdle();
     assert.match(assistantText(left.session), /left-custom-seen/);
-    assert.ok(left.session.messages.some((message) => message.role === "custom" && message.customType === "pi-tai-parent-message"));
-    assert.equal(left.session.messages.some((message) => message.role === "user" && JSON.stringify(message).includes("continue-left")), false);
+    assert.ok(
+      left.session.messages.some(
+        (message) => message.role === "custom" && message.customType === "pi-tai-parent-message",
+      ),
+    );
+    assert.equal(
+      left.session.messages.some(
+        (message) => message.role === "user" && JSON.stringify(message).includes("continue-left"),
+      ),
+      false,
+    );
 
     assert.equal(left.services.settingsManager.getCompactionEnabled(), true);
     assert.equal(right.services.settingsManager.getCompactionEnabled(), true);
@@ -180,7 +207,10 @@ test("two private AgentSession children run concurrently and receive typed custo
     assert.equal(right.compactionThresholdPercent, 90);
     assert.notEqual(left.services.settingsManager, right.services.settingsManager);
 
-    const visibleRootSessions = await SessionManager.list(join(root, "left", "workspace"), rootSessionDir);
+    const visibleRootSessions = await SessionManager.list(
+      join(root, "left", "workspace"),
+      rootSessionDir,
+    );
     assert.deepEqual(visibleRootSessions, []);
     assert.ok(left.session.sessionFile?.startsWith(left.sessionDir));
     assert.ok(right.session.sessionFile?.startsWith(right.sessionDir));

@@ -31,11 +31,7 @@ function harness(options: { configured?: boolean; existingName?: string } = {}) 
   return { handlers, names, pi, service };
 }
 
-async function emit(
-  state: { handlers: Map<string, Handler[]> },
-  event: string,
-  value: any = {},
-) {
+async function emit(state: { handlers: Map<string, Handler[]> }, event: string, value: any = {}) {
   for (const handler of state.handlers.get(event) ?? []) await handler(value, fakeContext());
 }
 

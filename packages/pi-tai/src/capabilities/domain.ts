@@ -56,14 +56,16 @@ export function reconstructCapabilityState(
 
 export function formatCapabilitySnapshot(snapshot: CapabilitySnapshot): string {
   if (snapshot.capabilities.length === 0) return "No Pi-Tai capabilities are registered.";
-  return snapshot.capabilities.map((capability) => {
-    const state = !capability.available
-      ? `unavailable${capability.reason ? `: ${capability.reason}` : ""}`
-      : capability.toolsExposed
-        ? "on"
-        : capability.serviceEnabled
-          ? "internal"
-          : "off";
-    return `${capability.id}: ${state}`;
-  }).join("\n");
+  return snapshot.capabilities
+    .map((capability) => {
+      const state = !capability.available
+        ? `unavailable${capability.reason ? `: ${capability.reason}` : ""}`
+        : capability.toolsExposed
+          ? "on"
+          : capability.serviceEnabled
+            ? "internal"
+            : "off";
+      return `${capability.id}: ${state}`;
+    })
+    .join("\n");
 }

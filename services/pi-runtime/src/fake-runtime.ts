@@ -25,7 +25,9 @@ export class FakeRuntimePort implements RuntimePort {
   private thinking: ThinkingInfo = { level: "off" };
   private hostServices?: HostServicePort;
 
-  bindHostServices(services: HostServicePort): void { this.hostServices = services; }
+  bindHostServices(services: HostServicePort): void {
+    this.hostServices = services;
+  }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     return {
@@ -42,7 +44,10 @@ export class FakeRuntimePort implements RuntimePort {
     await mkdir(params.sessionDir, { recursive: true });
     const sessionId = randomUUID();
     const sessionFile = join(params.sessionDir, `${sessionId}.jsonl`);
-    await writeFile(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: params.cwd })}\n`);
+    await writeFile(
+      sessionFile,
+      `${JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: params.cwd })}\n`,
+    );
     this.session = { sessionId, sessionFile, cwd: params.cwd };
     emit({ event: "session.ready", data: this.session, sessionId });
     return this.session;
@@ -50,7 +55,8 @@ export class FakeRuntimePort implements RuntimePort {
 
   async openSession(params: SessionOpenParams, emit: RuntimeEventSink): Promise<SessionInfo> {
     await this.disposeSession();
-    const firstLine = (await import("node:fs/promises")).readFile(params.sessionFile, "utf8")
+    const firstLine = (await import("node:fs/promises"))
+      .readFile(params.sessionFile, "utf8")
       .then((contents) => contents.split("\n", 1)[0]);
     const header = JSON.parse(await firstLine) as { id?: unknown; cwd?: unknown };
     if (typeof header.id !== "string" || typeof header.cwd !== "string") {
@@ -71,10 +77,11 @@ export class FakeRuntimePort implements RuntimePort {
     const controller = new AbortController();
     this.active = { turnId: params.turnId, controller };
     const session = this.session;
-    const completion = this.runPrompt(session, params, commandId, controller.signal, emit)
-      .finally(() => {
+    const completion = this.runPrompt(session, params, commandId, controller.signal, emit).finally(
+      () => {
         if (this.active?.turnId === params.turnId) this.active = undefined;
-      });
+      },
+    );
     return { accepted: true, completion };
   }
 
@@ -102,19 +109,31 @@ export class FakeRuntimePort implements RuntimePort {
     return this.thinking;
   }
 
-  async setCapability(params: SessionSetCapabilityParams, emit: RuntimeEventSink): Promise<RuntimeCapabilities> {
+  async setCapability(
+    params: SessionSetCapabilityParams,
+    emit: RuntimeEventSink,
+  ): Promise<RuntimeCapabilities> {
     const capabilities = await this.capabilities();
-    capabilities.sessionCapabilities = [{
-      id: params.capabilityId,
-      available: true,
-      serviceEnabled: params.enabled,
-      toolsExposed: params.enabled,
-    }];
-    emit({ event: "session.capabilities_changed", sessionId: this.session?.sessionId, data: { capabilities } });
+    capabilities.sessionCapabilities = [
+      {
+        id: params.capabilityId,
+        available: true,
+        serviceEnabled: params.enabled,
+        toolsExposed: params.enabled,
+      },
+    ];
+    emit({
+      event: "session.capabilities_changed",
+      sessionId: this.session?.sessionId,
+      data: { capabilities },
+    });
     return capabilities;
   }
 
-  async relocateWorkspace(params: SessionRelocateWorkspaceParams, emit: RuntimeEventSink): Promise<SessionInfo> {
+  async relocateWorkspace(
+    params: SessionRelocateWorkspaceParams,
+    emit: RuntimeEventSink,
+  ): Promise<SessionInfo> {
     if (!this.session) throw new Error("No session is loaded.");
     this.session = { ...this.session, cwd: join(this.session.cwd, params.name) };
     emit({ event: "session.replaced", sessionId: this.session.sessionId, data: this.session });
@@ -148,9 +167,30 @@ export class FakeRuntimePort implements RuntimePort {
       await this.hostServices.request("core.transact", {
         transactionId: `transaction-${params.turnId}`,
         expectedRevision: 0,
-        events: [{ eventId: `event-${params.turnId}`, type: "test.recorded", payload: { turnId: params.turnId } }],
+        events: [
+          {
+            eventId: `event-${params.turnId}`,
+            type: "test.recorded",
+            payload: { turnId: params.turnId },
+          },
+        ],
         state: { version: 1, contexts: [] },
-        projection: { version: 1, rootSessionId: session.sessionId, revision: 1, generatedAt: "now", children: [], inactiveChildCount: 0, tasks: [], inactiveTaskCount: 0, workspaces: [], activeClaimCount: 0, unansweredQuestionCount: 0, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, telemetryGapCount: 0, truncated: false },
+        projection: {
+          version: 1,
+          rootSessionId: session.sessionId,
+          revision: 1,
+          generatedAt: "now",
+          children: [],
+          inactiveChildCount: 0,
+          tasks: [],
+          inactiveTaskCount: 0,
+          workspaces: [],
+          activeClaimCount: 0,
+          unansweredQuestionCount: 0,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+          telemetryGapCount: 0,
+          truncated: false,
+        },
       });
     }
     const chunks = params.text.includes("slow") ? ["slow", " response"] : ["faux", " response"];
@@ -158,7 +198,23 @@ export class FakeRuntimePort implements RuntimePort {
       await wait(params.text.includes("slow") ? 100 : 1, signal);
       emit({ ...base, event: "assistant.text_delta", data: { delta } });
     }
-    emit({ ...base, event: "message.end", data: { role: "assistant", messageId: `message-${params.turnId}`, provider: "pi-tai", model: "faux", usage: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 } } } });
+    emit({
+      ...base,
+      event: "message.end",
+      data: {
+        role: "assistant",
+        messageId: `message-${params.turnId}`,
+        provider: "pi-tai",
+        model: "faux",
+        usage: {
+          input: 2,
+          output: 3,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        },
+      },
+    });
     emit({ ...base, event: "turn.end", data: {} });
     emit({ ...base, event: "agent.end", data: {} });
     emit({ ...base, event: "session.idle", data: {} });
@@ -168,9 +224,13 @@ export class FakeRuntimePort implements RuntimePort {
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timeout);
-      reject(new Error("Turn cancelled."));
-    }, { once: true });
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(new Error("Turn cancelled."));
+      },
+      { once: true },
+    );
   });
 }

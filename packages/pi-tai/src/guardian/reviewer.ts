@@ -47,8 +47,8 @@ export interface ReviewerDependencies {
 export function resolveReviewerModel(registry: ModelRegistry): ReviewerModel | undefined {
   const registered = registry.find("openai-codex", "codex-auto-review");
   if (registered) return registered;
-  const template = registry.find("openai-codex", "gpt-5.4-mini")
-    ?? registry.find("openai-codex", "gpt-5.4");
+  const template =
+    registry.find("openai-codex", "gpt-5.4-mini") ?? registry.find("openai-codex", "gpt-5.4");
   if (!template) return undefined;
   return {
     ...template,
@@ -79,17 +79,22 @@ export function createModelReviewer(dependencies: ReviewerDependencies = {}) {
 
     try {
       const sessionPromise = createIsolatedSession(request, model, dependencies);
-      void sessionPromise.then((created) => {
-        if (signal.aborted && created !== session) created.dispose();
-      }, () => undefined);
+      void sessionPromise.then(
+        (created) => {
+          if (signal.aborted && created !== session) created.dispose();
+        },
+        () => undefined,
+      );
       session = await raceAbort(sessionPromise, signal);
       await raceAbort(
-        session.prompt(buildReviewPrompt(
-          request.messages,
-          request.action,
-          request.workContext,
-          request.reviewEvidence,
-        )),
+        session.prompt(
+          buildReviewPrompt(
+            request.messages,
+            request.action,
+            request.workContext,
+            request.reviewEvidence,
+          ),
+        ),
         signal,
         session,
       );
@@ -120,8 +125,9 @@ async function createIsolatedSession(
     compaction: { enabled: false },
     retry: { enabled: false },
   });
-  const resourceLoader = (dependencies.createResourceLoader
-    ?? ((options) => new DefaultResourceLoader(options)))({
+  const resourceLoader = (
+    dependencies.createResourceLoader ?? ((options) => new DefaultResourceLoader(options))
+  )({
     cwd: request.cwd,
     agentDir: getAgentDir(),
     settingsManager,
@@ -196,7 +202,7 @@ function latestAssistantText(session: AgentSession): string {
       throw new Error(message.errorMessage || "reviewer provider error");
     }
     const text = message.content
-      .flatMap((content) => content.type === "text" ? [content.text] : [])
+      .flatMap((content) => (content.type === "text" ? [content.text] : []))
       .join("\n");
     if (!text) throw new Error("reviewer returned no decision");
     return text;

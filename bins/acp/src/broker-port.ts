@@ -17,7 +17,11 @@ export interface BrokerPort {
     sessions: BrokerSessionSummary[];
     nextCursor?: string;
   }>;
-  resume(input: { clientId: string; sessionId: string; cwd: string }): Promise<BrokerSessionSummary>;
+  resume(input: {
+    clientId: string;
+    sessionId: string;
+    cwd: string;
+  }): Promise<BrokerSessionSummary>;
   close(input: { clientId: string; sessionId: string }): Promise<void>;
   prompt(input: { clientId: string; sessionId: string; text: string }): Promise<void>;
   cancel(input: { clientId: string; sessionId: string }): Promise<void>;

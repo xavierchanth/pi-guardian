@@ -49,9 +49,15 @@ export function parseCapabilityCatalog(input: unknown): CapabilityCatalog {
     if (!Array.isArray(item.allowedBackends) || !item.allowedBackends.length) {
       throw new Error(`${path}.allowedBackends must be a non-empty array.`);
     }
-    const allowedBackends = [...new Set(item.allowedBackends.map((value, allowedIndex) =>
-      backendName(value, `${path}.allowedBackends[${allowedIndex}]`)))];
-    if (!allowedBackends.includes(backend)) throw new Error(`${path}.backend must appear in allowedBackends.`);
+    const allowedBackends = [
+      ...new Set(
+        item.allowedBackends.map((value, allowedIndex) =>
+          backendName(value, `${path}.allowedBackends[${allowedIndex}]`),
+        ),
+      ),
+    ];
+    if (!allowedBackends.includes(backend))
+      throw new Error(`${path}.backend must appear in allowedBackends.`);
 
     return Object.freeze({
       name,
@@ -68,19 +74,25 @@ export function parseCapabilityCatalog(input: unknown): CapabilityCatalog {
   return Object.freeze({ version: 1, capabilities: Object.freeze(capabilities) });
 }
 
-export const CAPABILITY_CATALOG = parseCapabilityCatalog(JSON.parse(
-  readFileSync(new URL("./capabilities.json", import.meta.url), "utf8"),
-));
+export const CAPABILITY_CATALOG = parseCapabilityCatalog(
+  JSON.parse(readFileSync(new URL("./capabilities.json", import.meta.url), "utf8")),
+);
 export const CAPABILITIES = Object.freeze(
-  Object.fromEntries(CAPABILITY_CATALOG.capabilities.map((capability) => [capability.name, capability])),
+  Object.fromEntries(
+    CAPABILITY_CATALOG.capabilities.map((capability) => [capability.name, capability]),
+  ),
 ) as Readonly<Record<CapabilityName, Capability>>;
 
 export function capabilityInstructions(capability: Capability): string {
-  return readFileSync(new URL(`./capabilities/${capability.instructions}`, import.meta.url), "utf8").trim();
+  return readFileSync(
+    new URL(`./capabilities/${capability.instructions}`, import.meta.url),
+    "utf8",
+  ).trim();
 }
 
 function object(value: unknown, path: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path} must be an object.`);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`${path} must be an object.`);
   return value as Record<string, unknown>;
 }
 
@@ -95,7 +107,8 @@ function exact(value: Record<string, unknown>, keys: readonly string[], path: st
 }
 
 function text(value: unknown, path: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${path} must be a non-empty string.`);
+  if (typeof value !== "string" || !value.trim())
+    throw new Error(`${path} must be a non-empty string.`);
   return value.trim();
 }
 

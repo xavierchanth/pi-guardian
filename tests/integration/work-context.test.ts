@@ -29,15 +29,19 @@ test("registered update_plan reconstructs state and supports on-demand TUI prese
   registerWorkContext(pi);
   assert.equal(tool.name, "update_plan");
   assert.match(tool.description, /multiple meaningful steps/);
-  assert.ok(tool.promptGuidelines.some((line: string) => line.includes("materially changing scope")));
+  assert.ok(
+    tool.promptGuidelines.some((line: string) => line.includes("materially changing scope")),
+  );
   assert.equal(commands.has("plan-status"), true);
   assert.equal(handlers.has("message_end"), false);
   assert.equal(handlers.has("before_agent_start"), false);
 
-  const active = workContextDetails(validateWorkContextUpdate({
-    goal: "Ship a terminal refresh with a deliberately long goal",
-    plan: [{ content: "Implement the visual", status: "in_progress" }],
-  }));
+  const active = workContextDetails(
+    validateWorkContextUpdate({
+      goal: "Ship a terminal refresh with a deliberately long goal",
+      plan: [{ content: "Implement the visual", status: "in_progress" }],
+    }),
+  );
   let branch: unknown[] = [toolResult(active)];
   const ctx = {
     mode: "tui",
@@ -78,23 +82,28 @@ test("registered update_plan reconstructs state and supports on-demand TUI prese
   await commands.get("plan-status").handler("", ctx);
   assert.equal(customViews, 1);
 
-  const pending = workContextDetails(validateWorkContextUpdate({
-    goal: "Alternate",
-    plan: [{ content: "Other", status: "pending" }],
-  }));
+  const pending = workContextDetails(
+    validateWorkContextUpdate({
+      goal: "Alternate",
+      plan: [{ content: "Other", status: "pending" }],
+    }),
+  );
   branch = [toolResult(pending)];
   await emit(handlers, "session_tree", ctx);
-  await assert.rejects(() => tool.execute(
-    "call",
-    {
-      goal: "Alternate",
-      plan: [{ content: "Other", status: "completed" }],
-    },
-    undefined,
-    undefined,
-    ctx,
-  ), /must be in_progress/);
-
+  await assert.rejects(
+    () =>
+      tool.execute(
+        "call",
+        {
+          goal: "Alternate",
+          plan: [{ content: "Other", status: "completed" }],
+        },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    /must be in_progress/,
+  );
 });
 
 test("plan-status reports when no work context exists", async () => {
@@ -110,7 +119,11 @@ test("plan-status reports when no work context exists", async () => {
   registerWorkContext(pi);
   await commands.get("plan-status").handler("", {
     mode: "tui",
-    ui: { notify(message: string) { notifications.push(message); } },
+    ui: {
+      notify(message: string) {
+        notifications.push(message);
+      },
+    },
   });
   assert.deepEqual(notifications, ["No active work context."]);
 });
@@ -129,11 +142,7 @@ function toolResult(details: unknown) {
   };
 }
 
-async function emit(
-  handlers: Map<string, Handler[]>,
-  event: string,
-  ctx: any,
-): Promise<void> {
+async function emit(handlers: Map<string, Handler[]>, event: string, ctx: any): Promise<void> {
   for (const handler of handlers.get(event) ?? []) {
     await handler({}, ctx);
   }

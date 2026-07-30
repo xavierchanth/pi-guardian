@@ -66,7 +66,8 @@ export class WorkspaceManager {
     if (!parent) return this.sourcePath;
     const record = await this.registry.get(parent);
     if (!record) throw new Error(`Unknown parent workspace ${parent}.`);
-    if (record.phase !== "active") throw new Error(`Parent workspace ${record.name} is ${record.phase}, not active.`);
+    if (record.phase !== "active")
+      throw new Error(`Parent workspace ${record.name} is ${record.phase}, not active.`);
     return record.path;
   }
 
@@ -134,10 +135,16 @@ export class WorkspaceManager {
       const record = await this.registry.get(id);
       if (!record) return { kind: "blocked", reason: `Unknown workspace ${id}.` } as const;
       if (record.phase !== "active") {
-        return { kind: "blocked", reason: `Workspace ${record.name} is ${record.phase}, not active.` } as const;
+        return {
+          kind: "blocked",
+          reason: `Workspace ${record.name} is ${record.phase}, not active.`,
+        } as const;
       }
       if (!(await pathExists(record.path))) {
-        return { kind: "blocked", reason: `Workspace directory ${record.path} is missing; run a sweep.` } as const;
+        return {
+          kind: "blocked",
+          reason: `Workspace directory ${record.path} is missing; run a sweep.`,
+        } as const;
       }
 
       const head = await this.jj.changeIdAt(record.path, "@");
@@ -157,9 +164,10 @@ export class WorkspaceManager {
 
       const target = await this.sourceFor(record.parent);
       const chosen = strategy === "auto" ? await this.chooseStrategy(target) : strategy;
-      const summary = chosen === "linear"
-        ? await this.mergeLinear(record, content, entries, target)
-        : await this.mergeUnder(record, content, entries, target);
+      const summary =
+        chosen === "linear"
+          ? await this.mergeLinear(record, content, entries, target)
+          : await this.mergeUnder(record, content, entries, target);
       return {
         kind: "merged",
         record: { ...record, phase: "merged", updatedAt: this.clock(), merge: summary },
@@ -193,7 +201,11 @@ export class WorkspaceManager {
   async pendingChanges(id: WorkspaceId): Promise<ChangeEntry[] | undefined> {
     const record = await this.registry.get(id);
     if (!record || record.phase !== "active" || !(await pathExists(record.path))) return undefined;
-    const entries = await this.jj.range(record.path, record.baseChangeIds, await this.jj.changeIdAt(record.path, "@"));
+    const entries = await this.jj.range(
+      record.path,
+      record.baseChangeIds,
+      await this.jj.changeIdAt(record.path, "@"),
+    );
     return entries.filter((entry) => !entry.empty);
   }
 
@@ -203,7 +215,11 @@ export class WorkspaceManager {
       const record = await this.registry.get(id);
       if (!record) throw new Error(`Unknown workspace ${id}.`);
       const entries = (await pathExists(record.path))
-        ? await this.jj.range(record.path, record.baseChangeIds, await this.jj.changeIdAt(record.path, "@"))
+        ? await this.jj.range(
+            record.path,
+            record.baseChangeIds,
+            await this.jj.changeIdAt(record.path, "@"),
+          )
         : [];
       await this.reclaim(record, entries);
       return { discardedChangeIds: entries.map((entry) => entry.changeId) };
@@ -226,20 +242,39 @@ export class WorkspaceManager {
 
       for (const record of records) {
         if (record.phase === "incident") {
-          results.push({ id: record.id, name: record.name, disposition: "needs_attention", reason: record.incident?.reason ?? "Incident record." });
+          results.push({
+            id: record.id,
+            name: record.name,
+            disposition: "needs_attention",
+            reason: record.incident?.reason ?? "Incident record.",
+          });
           continue;
         }
         if (record.owner && live.has(record.owner)) {
-          results.push({ id: record.id, name: record.name, disposition: "kept", reason: "Owner is still running." });
+          results.push({
+            id: record.id,
+            name: record.name,
+            disposition: "kept",
+            reason: "Owner is still running.",
+          });
           continue;
         }
         if (!(await pathExists(record.path))) {
           await this.detach(record.name, record.path, await this.sourceFor(record.parent));
           await this.registry.remove(record.id);
-          results.push({ id: record.id, name: record.name, disposition: "reclaimed", reason: "Workspace directory no longer exists." });
+          results.push({
+            id: record.id,
+            name: record.name,
+            disposition: "reclaimed",
+            reason: "Workspace directory no longer exists.",
+          });
           continue;
         }
-        const entries = await this.jj.range(record.path, record.baseChangeIds, await this.jj.changeIdAt(record.path, "@"));
+        const entries = await this.jj.range(
+          record.path,
+          record.baseChangeIds,
+          await this.jj.changeIdAt(record.path, "@"),
+        );
         if (entries.some((entry) => !entry.empty)) {
           results.push({
             id: record.id,
@@ -250,7 +285,12 @@ export class WorkspaceManager {
           continue;
         }
         await this.reclaim(record, entries);
-        results.push({ id: record.id, name: record.name, disposition: "reclaimed", reason: "Workspace was empty." });
+        results.push({
+          id: record.id,
+          name: record.name,
+          disposition: "reclaimed",
+          reason: "Workspace was empty.",
+        });
       }
 
       // Attachments this module created but never recorded — the classic crash-between
@@ -259,7 +299,12 @@ export class WorkspaceManager {
         if (!name.startsWith(MANAGED_WORKSPACE_PREFIX) || known.has(name)) continue;
         const path = join(this.workspaceRoot, name);
         await this.detach(name, path, this.sourcePath);
-        results.push({ id: name, name, disposition: "reclaimed", reason: "Untracked managed workspace." });
+        results.push({
+          id: name,
+          name,
+          disposition: "reclaimed",
+          reason: "Untracked managed workspace.",
+        });
       }
       return results;
     });
@@ -317,14 +362,20 @@ export class WorkspaceManager {
     try {
       const targetBefore = await this.jj.changeIdAt(target, "@");
       redundancyExisted = await this.jj.hasRedundantParents(target, targetBefore);
-    } catch { /* cosmetic probe failure: conservatively skip */ }
+    } catch {
+      /* cosmetic probe failure: conservatively skip */
+    }
     // `@` keeps every parent it already had and gains the agent head, so repeated
     // merges accumulate rather than replace.
     await this.jj.rebaseWorkingCopyOnto(target, [...parents, ...heads]);
 
     let parentSimplification: MergeSummary["parentSimplification"] = "skipped";
-    let parentSimplificationReason: NonNullable<MergeSummary["parentSimplificationReason"]> = redundancyExisted === undefined ? "precheck-failed"
-      : redundancyExisted ? "pre-existing-redundancy" : "no-redundancy";
+    let parentSimplificationReason: NonNullable<MergeSummary["parentSimplificationReason"]> =
+      redundancyExisted === undefined
+        ? "precheck-failed"
+        : redundancyExisted
+          ? "pre-existing-redundancy"
+          : "no-redundancy";
     if (redundancyExisted === false) {
       let operationBefore: string | undefined;
       let simplifyOperation: string | undefined;
@@ -339,8 +390,10 @@ export class WorkspaceManager {
           await this.jj.simplifyParents(target, mergedTarget);
           simplifyOperation = await this.jj.currentOperationId(target);
           const simplifiedTarget = await this.jj.changeIdAt(target, "@");
-          if (await this.jj.hasRedundantParents(target, simplifiedTarget)
-            || !(await this.jj.areAncestorsOf(target, heads, simplifiedTarget))) {
+          if (
+            (await this.jj.hasRedundantParents(target, simplifiedTarget)) ||
+            !(await this.jj.areAncestorsOf(target, heads, simplifiedTarget))
+          ) {
             throw new Error("postcheck-failed");
           }
           parentSimplification = "applied";
@@ -348,35 +401,49 @@ export class WorkspaceManager {
         }
       } catch (error) {
         parentSimplification = "failed";
-        const failureReason = error instanceof Error && error.message === "postcheck-failed"
-          ? "postcheck-failed" : "cosmetic-command-failed";
+        const failureReason =
+          error instanceof Error && error.message === "postcheck-failed"
+            ? "postcheck-failed"
+            : "cosmetic-command-failed";
         parentSimplificationReason = failureReason;
         // A repository-wide restore is safe only while the operation produced by
         // our successful simplify is still current. Otherwise unrelated work may
         // have intervened, and retaining redundant parents is strictly safer.
         if (operationBefore && simplifyOperation && simplifyOperation !== operationBefore) {
           try {
-            if (await this.jj.currentOperationId(target) === simplifyOperation) {
+            if ((await this.jj.currentOperationId(target)) === simplifyOperation) {
               await this.jj.restoreOperation(target, operationBefore);
               parentSimplificationReason = `${failureReason}-rolled-back`;
             } else {
               parentSimplificationReason = `${failureReason}-rollback-skipped-intervening-operation`;
             }
-          } catch { parentSimplificationReason = `${failureReason}-rollback-failed`; }
+          } catch {
+            parentSimplificationReason = `${failureReason}-rollback-failed`;
+          }
         }
       }
     }
     const conflictPaths = await this.jj.conflictedPaths(target);
     await this.reclaim(record, entries, target);
-    return { strategy: "merge-under", changeIds, conflictPaths, parentSimplification, parentSimplificationReason };
+    return {
+      strategy: "merge-under",
+      changeIds,
+      conflictPaths,
+      parentSimplification,
+      parentSimplificationReason,
+    };
   }
 
   /**
    * Detaches a workspace and abandons whatever empty scaffolding it leaves in the
    * graph. Detaching first matters: jj refuses to abandon a live working copy.
    */
-  private async reclaim(record: WorkspaceRecord, entries: readonly ChangeEntry[], target?: string): Promise<void> {
-    const source = target ?? await this.sourceFor(record.parent);
+  private async reclaim(
+    record: WorkspaceRecord,
+    entries: readonly ChangeEntry[],
+    target?: string,
+  ): Promise<void> {
+    const source = target ?? (await this.sourceFor(record.parent));
     await this.detach(record.name, record.path, source);
     for (const entry of entries) {
       if (!entry.empty) continue;
@@ -394,7 +461,9 @@ export class WorkspaceManager {
     try {
       await this.jj.workspaceForget(source, name);
     } catch (error) {
-      throw new Error(`Failed to detach workspace ${name}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `Failed to detach workspace ${name}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     await rm(path, { recursive: true, force: true });
   }
@@ -407,7 +476,10 @@ export class WorkspaceManager {
 }
 
 function slug(label: string | undefined): string {
-  const cleaned = (label ?? "agent").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const cleaned = (label ?? "agent")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   return cleaned.slice(0, 24) || "agent";
 }
 

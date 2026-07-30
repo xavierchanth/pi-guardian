@@ -8,7 +8,7 @@ import {
 
 test("normalizes quotes, Markdown, punctuation, whitespace, and word limits", () => {
   assert.equal(
-    normalizeSessionTitle('  **“Implement   the terminal plugin system!”**  ', 4),
+    normalizeSessionTitle("  **“Implement   the terminal plugin system!”**  ", 4),
     "Implement the terminal plugin",
   );
   assert.equal(normalizeSessionTitle("first\nsecond\nthird", 2), "first second");

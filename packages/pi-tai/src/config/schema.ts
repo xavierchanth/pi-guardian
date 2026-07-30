@@ -1,16 +1,6 @@
-import {
-  DEFAULT_MODEL_PROFILES,
-  type ModelProfile,
-} from "../model-profiles/domain.ts";
+import { DEFAULT_MODEL_PROFILES, type ModelProfile } from "../model-profiles/domain.ts";
 
-export const TITLE_EFFORTS = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
+export const TITLE_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export type TitleEffort = (typeof TITLE_EFFORTS)[number];
 

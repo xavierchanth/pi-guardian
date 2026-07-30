@@ -30,7 +30,8 @@ export class SessionCapabilityController {
   }
 
   register(descriptor: CapabilityDescriptor): void {
-    if (this.descriptors.has(descriptor.id)) throw new Error(`Capability already registered: ${descriptor.id}`);
+    if (this.descriptors.has(descriptor.id))
+      throw new Error(`Capability already registered: ${descriptor.id}`);
     this.descriptors.set(descriptor.id, descriptor);
     this.availability.set(descriptor.id, { available: true });
   }
@@ -47,7 +48,9 @@ export class SessionCapabilityController {
     const availability = descriptor.probe ? await descriptor.probe() : { available: true };
     this.availability.set(id, availability);
     if (!availability.available) {
-      throw new Error(`Capability ${id} is unavailable${availability.reason ? `: ${availability.reason}` : "."}`);
+      throw new Error(
+        `Capability ${id} is unavailable${availability.reason ? `: ${availability.reason}` : "."}`,
+      );
     }
     const leases = this.leases.get(id) ?? new Map<CapabilityOwner, CapabilityLease>();
     leases.set(lease.owner, { ...lease });
@@ -93,8 +96,8 @@ export class SessionCapabilityController {
       available: availability.available,
       ...(availability.reason ? { reason: availability.reason } : {}),
       serviceEnabled: leases.length > 0,
-      toolsExposed: !this.suppressedTools.has(id)
-        && leases.some((lease) => lease.exposure === "model-tools"),
+      toolsExposed:
+        !this.suppressedTools.has(id) && leases.some((lease) => lease.exposure === "model-tools"),
       leases: leases.map((lease) => ({ ...lease })),
     };
   }
@@ -119,17 +122,19 @@ export class SessionCapabilityController {
 
   isToolExposed(id: string): boolean {
     const leases = [...(this.leases.get(id)?.values() ?? [])];
-    return !this.suppressedTools.has(id)
-      && leases.some((lease) => lease.exposure === "model-tools");
+    return (
+      !this.suppressedTools.has(id) && leases.some((lease) => lease.exposure === "model-tools")
+    );
   }
 
   promptLayers(): string[] {
     const layers: string[] = [];
     for (const [id, descriptor] of this.descriptors) {
       if (!this.isToolExposed(id) || !descriptor.promptLayer) continue;
-      const layer = typeof descriptor.promptLayer === "function"
-        ? descriptor.promptLayer()
-        : descriptor.promptLayer;
+      const layer =
+        typeof descriptor.promptLayer === "function"
+          ? descriptor.promptLayer()
+          : descriptor.promptLayer;
       if (layer.trim()) layers.push(layer.trim());
     }
     return layers;

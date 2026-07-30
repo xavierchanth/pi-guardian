@@ -15,7 +15,13 @@ class MemoryWritable extends EventEmitter {
     return true;
   }
   frames(): any[] {
-    return this.lines.flatMap((chunk) => chunk.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)));
+    return this.lines.flatMap((chunk) =>
+      chunk
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+    );
   }
 }
 
@@ -50,8 +56,12 @@ test("JSONL reader uses LF framing and keeps Unicode separators inside JSON stri
   const values: unknown[] = [];
   const malformed: string[] = [];
   const reader = new JsonlReader({
-    onValue(value) { values.push(value); },
-    onMalformed(reason) { malformed.push(reason); },
+    onValue(value) {
+      values.push(value);
+    },
+    onMalformed(reason) {
+      malformed.push(reason);
+    },
   });
   reader.push(`${JSON.stringify({ text: "one\u2028two" })}\r\n`);
   reader.push("not-json\n");
@@ -71,12 +81,10 @@ test("worker enforces initialization, unique IDs, and unsupported command respon
   await output.frames();
 
   const responses = output.frames().filter((frame) => frame.kind === "response");
-  assert.deepEqual(responses.map((frame) => frame.error?.code ?? "ok"), [
-    "initialization_required",
-    "ok",
-    "duplicate_command_id",
-    "unsupported_command",
-  ]);
+  assert.deepEqual(
+    responses.map((frame) => frame.error?.code ?? "ok"),
+    ["initialization_required", "ok", "duplicate_command_id", "unsupported_command"],
+  );
 });
 
 test("worker rejects session creation without pinned policy", async () => {
@@ -84,12 +92,14 @@ test("worker rejects session creation without pinned policy", async () => {
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    faux: true,
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      faux: true,
+    }),
+  );
   const response = output.frames().find((frame) => frame.id === "create");
   assert.equal(response.error?.code, "invalid_params");
 });
@@ -106,7 +116,10 @@ test("worker rejects a protocol v1 supervisor after the required-policy version 
       protocol: { minVersion: 1, maxVersion: 1 },
     },
   });
-  assert.equal(output.frames().find((frame) => frame.id === "old-init")?.error?.code, "protocol_version_mismatch");
+  assert.equal(
+    output.frames().find((frame) => frame.id === "old-init")?.error?.code,
+    "protocol_version_mismatch",
+  );
 });
 
 test("worker exposes typed capability mutation and workspace relocation", async () => {
@@ -114,25 +127,37 @@ test("worker exposes typed capability mutation and workspace relocation", async 
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    ...pinnedPolicyParams,
-    faux: true,
-  }));
-  await worker.handleValue(command("enable", "session.set_capability", {
-    capabilityId: "jj-workspaces",
-    enabled: true,
-  }));
-  await worker.handleValue(command("relocate", "session.relocate_workspace", {
-    backend: "jj",
-    name: "focused",
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      ...pinnedPolicyParams,
+      faux: true,
+    }),
+  );
+  await worker.handleValue(
+    command("enable", "session.set_capability", {
+      capabilityId: "jj-workspaces",
+      enabled: true,
+    }),
+  );
+  await worker.handleValue(
+    command("relocate", "session.relocate_workspace", {
+      backend: "jj",
+      name: "focused",
+    }),
+  );
   const frames = output.frames();
-  assert.ok(frames.some((frame) => frame.id === "enable" && frame.result.sessionCapabilities[0].toolsExposed));
+  assert.ok(
+    frames.some(
+      (frame) => frame.id === "enable" && frame.result.sessionCapabilities[0].toolsExposed,
+    ),
+  );
   assert.ok(frames.some((frame) => frame.event === "session.capabilities_changed"));
-  assert.ok(frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")));
+  assert.ok(
+    frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")),
+  );
 });
 
 test("worker accepts a prompt without blocking cancellation and returns to idle", async () => {
@@ -140,13 +165,15 @@ test("worker accepts a prompt without blocking cancellation and returns to idle"
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    ...pinnedPolicyParams,
-    faux: true,
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      ...pinnedPolicyParams,
+      faux: true,
+    }),
+  );
   await worker.handleValue(command("prompt", "session.prompt", { turnId: "turn-1", text: "slow" }));
   assert.equal(worker.currentState(), "turn_active");
   await worker.handleValue(command("cancel", "session.cancel", { turnId: "turn-1" }));

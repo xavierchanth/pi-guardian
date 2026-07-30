@@ -1,11 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SessionPolicyReader } from "../config/register.ts";
 import type { TitleGenerator } from "./generate.ts";
-import {
-  heuristicSessionTitle,
-  isMeaningfulPrompt,
-  normalizeSessionTitle,
-} from "./normalize.ts";
+import { heuristicSessionTitle, isMeaningfulPrompt, normalizeSessionTitle } from "./normalize.ts";
 
 export function registerSessionTitle(
   pi: ExtensionAPI,
@@ -52,10 +48,10 @@ export function registerSessionTitle(
       }
     }
 
-    if (controller?.signal.aborted || activeGeneration !== generation || pi.getSessionName()) return;
+    if (controller?.signal.aborted || activeGeneration !== generation || pi.getSessionName())
+      return;
     const title =
-      normalizeSessionTitle(raw, config.maxWords) ||
-      heuristicSessionTitle(prompt, config.maxWords);
+      normalizeSessionTitle(raw, config.maxWords) || heuristicSessionTitle(prompt, config.maxWords);
     pi.setSessionName(title);
   });
 

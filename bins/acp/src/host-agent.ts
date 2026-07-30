@@ -25,11 +25,7 @@ export function createHostBackedAcpAgent(
     });
   }
 
-  async function attach(
-    client: AgentContext,
-    sessionId: string,
-    replayFromStart: boolean,
-  ) {
+  async function attach(client: AgentContext, sessionId: string, replayFromStart: boolean) {
     subscriptions.get(sessionId)?.();
     const dispose = await port.subscribe(
       { clientId, sessionId, replayFromStart },
@@ -66,9 +62,8 @@ export function createHostBackedAcpAgent(
       });
     })
     .onRequest(methods.agent.initialize, ({ params }) => ({
-      protocolVersion: params.protocolVersion === PROTOCOL_VERSION
-        ? params.protocolVersion
-        : PROTOCOL_VERSION,
+      protocolVersion:
+        params.protocolVersion === PROTOCOL_VERSION ? params.protocolVersion : PROTOCOL_VERSION,
       info: { name: "pi-tai-acp", title: "Pi-Tai", version: "0.1.0" },
       capabilities: { session: {} },
     }))
@@ -128,17 +123,19 @@ export function createHostBackedAcpAgent(
 }
 
 function promptText(blocks: ContentBlock[]): string {
-  return blocks.map((block) => {
-    if (block.type === "text" && typeof block.text === "string") return block.text;
-    if (
-      block.type === "resource_link"
-      && typeof block.name === "string"
-      && typeof block.uri === "string"
-    ) {
-      return `[Resource: ${block.name}] ${block.uri}`;
-    }
-    throw new Error(`Unsupported ACP prompt content: ${block.type}`);
-  }).join("\n\n");
+  return blocks
+    .map((block) => {
+      if (block.type === "text" && typeof block.text === "string") return block.text;
+      if (
+        block.type === "resource_link" &&
+        typeof block.name === "string" &&
+        typeof block.uri === "string"
+      ) {
+        return `[Resource: ${block.name}] ${block.uri}`;
+      }
+      throw new Error(`Unsupported ACP prompt content: ${block.type}`);
+    })
+    .join("\n\n");
 }
 
 function mapBrokerEvent(event: BrokerSessionEvent): SessionUpdate {

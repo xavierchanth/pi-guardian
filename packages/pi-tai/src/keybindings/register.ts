@@ -1,10 +1,4 @@
-import {
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -18,10 +12,7 @@ export interface ProvisionKeybindingsResult {
   warning?: string;
 }
 
-export function registerFirstPartyKeybindings(
-  pi: ExtensionAPI,
-  agentDir: string,
-): void {
+export function registerFirstPartyKeybindings(pi: ExtensionAPI, agentDir: string): void {
   const result = provisionFirstPartyKeybindings(agentDir);
   if (!result.warning) return;
 
@@ -30,9 +21,7 @@ export function registerFirstPartyKeybindings(
   });
 }
 
-export function provisionFirstPartyKeybindings(
-  agentDir: string,
-): ProvisionKeybindingsResult {
+export function provisionFirstPartyKeybindings(agentDir: string): ProvisionKeybindingsResult {
   const path = join(agentDir, "keybindings.json");
   const loaded = readKeybindings(path);
   if (loaded.warning) return { changed: false, path, warning: loaded.warning };
@@ -41,7 +30,10 @@ export function provisionFirstPartyKeybindings(
   const configured = normalizeKeys(keybindings[THINKING_CYCLE_KEYBINDING]);
   const next = configured
     .filter((key) => key.toLowerCase() !== PROFILE_CYCLE_SHORTCUT)
-    .filter((key, index, keys) => keys.findIndex((entry) => entry.toLowerCase() === key.toLowerCase()) === index);
+    .filter(
+      (key, index, keys) =>
+        keys.findIndex((entry) => entry.toLowerCase() === key.toLowerCase()) === index,
+    );
   if (!next.some((key) => key.toLowerCase() === THINKING_CYCLE_SHORTCUT)) {
     next.push(THINKING_CYCLE_SHORTCUT);
   }

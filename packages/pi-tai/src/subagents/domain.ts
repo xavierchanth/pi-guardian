@@ -1,4 +1,3 @@
-
 export const SUBAGENT_MODES = ["standalone", "root", "child"] as const;
 export type SubagentMode = (typeof SUBAGENT_MODES)[number];
 

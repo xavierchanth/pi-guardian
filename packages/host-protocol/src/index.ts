@@ -106,10 +106,7 @@ export function currentProtocolRange(): ProtocolRange {
   };
 }
 
-export function negotiateProtocol(
-  client: ProtocolRange,
-  host: ProtocolRange,
-): number {
+export function negotiateProtocol(client: ProtocolRange, host: ProtocolRange): number {
   const minimum = Math.max(client.minVersion, host.minVersion);
   const maximum = Math.min(client.maxVersion, host.maxVersion);
   if (minimum <= maximum) return maximum;
@@ -131,7 +128,10 @@ export function parseClientHello(value: unknown): ClientHello {
 
 export function parseHostHello(value: unknown): HostHello {
   const input = record(value, "host hello");
-  if (!Array.isArray(input.capabilities) || input.capabilities.some((item) => typeof item !== "string")) {
+  if (
+    !Array.isArray(input.capabilities) ||
+    input.capabilities.some((item) => typeof item !== "string")
+  ) {
     throw new ProtocolDecodeError("capabilities must be an array of strings");
   }
   return {
@@ -148,16 +148,11 @@ export function parseHostCommand(value: unknown): HostCommand {
     requestId: string(input.requestId, "requestId"),
     operationId: string(input.operationId, "operationId"),
     clientId: string(input.clientId, "clientId"),
-    ...(input.sessionId === undefined
-      ? {}
-      : { sessionId: string(input.sessionId, "sessionId") }),
+    ...(input.sessionId === undefined ? {} : { sessionId: string(input.sessionId, "sessionId") }),
     ...(input.expectedRevision === undefined
       ? {}
       : {
-          expectedRevision: safeInteger(
-            input.expectedRevision,
-            "expectedRevision",
-          ),
+          expectedRevision: safeInteger(input.expectedRevision, "expectedRevision"),
         }),
     kind: string(input.kind, "kind"),
     payload: input.payload,
@@ -171,10 +166,7 @@ export function parseHostEvent(value: unknown): HostEvent {
     sessionId: string(input.sessionId, "sessionId"),
     sequence: safeInteger(input.sequence, "sequence"),
     revision: safeInteger(input.revision, "revision"),
-    runtimeGeneration: safeInteger(
-      input.runtimeGeneration,
-      "runtimeGeneration",
-    ),
+    runtimeGeneration: safeInteger(input.runtimeGeneration, "runtimeGeneration"),
     timestamp: string(input.timestamp, "timestamp"),
     type: string(input.type, "type"),
     payload: input.payload,

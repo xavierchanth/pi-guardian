@@ -18,12 +18,16 @@ import {
   type JjProbeResult,
 } from "../../packages/pi-tai/src/jj/executor.ts";
 
-const CHANGE_TEMPLATE = 'change_id ++ "|" ++ parents.map(|c| c.change_id()).join(",") ++ "|" ++ if(empty, "empty", "nonempty") ++ "|" ++ if(conflict, "conflicted", "clean") ++ "|" ++ description.first_line() ++ "\\n"';
+const CHANGE_TEMPLATE =
+  'change_id ++ "|" ++ parents.map(|c| c.change_id()).join(",") ++ "|" ++ if(empty, "empty", "nonempty") ++ "|" ++ if(conflict, "conflicted", "clean") ++ "|" ++ description.first_line() ++ "\\n"';
 const WORKSPACE_TEMPLATE = 'name ++ "|" ++ target.change_id() ++ "\\n"';
 const TEST_CONFIG = [
-  "--config", 'user.name="Pi-Tai Test"',
-  "--config", 'user.email="pi-tai@example.invalid"',
-  "--config", "signing.behavior=drop",
+  "--config",
+  'user.name="Pi-Tai Test"',
+  "--config",
+  'user.email="pi-tai@example.invalid"',
+  "--config",
+  "signing.behavior=drop",
 ] as const;
 
 export interface JjFixtureSnapshot {
@@ -93,10 +97,18 @@ export class RealJjFixture {
     return { changeIds, workingCopyChangeId: await this.currentChangeId(this.repoPath) };
   }
 
-  async addWorkspace(name: string, revision: string, path = join(this.root, "workspaces", name)): Promise<AbsolutePath> {
+  async addWorkspace(
+    name: string,
+    revision: string,
+    path = join(this.root, "workspaces", name),
+  ): Promise<AbsolutePath> {
     const workspacePath = absolutePath(path);
     await mkdir(join(this.root, "workspaces"), { recursive: true });
-    await this.run(this.repoPath, ["workspace", "add", workspacePath, "--name", name, "--revision", revision], "write");
+    await this.run(
+      this.repoPath,
+      ["workspace", "add", workspacePath, "--name", name, "--revision", revision],
+      "write",
+    );
     this.workspacePaths.set(name, workspacePath);
     return workspacePath;
   }
@@ -112,36 +124,79 @@ export class RealJjFixture {
   }
 
   async currentChangeId(cwd: string): Promise<ChangeId> {
-    const output = await this.run(cwd, ["log", "--revision", "@", "--no-graph", "--template", 'change_id ++ "\\n"']);
+    const output = await this.run(cwd, [
+      "log",
+      "--revision",
+      "@",
+      "--no-graph",
+      "--template",
+      'change_id ++ "\\n"',
+    ]);
     return changeId(singleLine(output, "working-copy Change ID"));
   }
 
   async snapshot(): Promise<JjFixtureSnapshot> {
-    const operationId = singleLine(await this.run(this.repoPath, [
-      "--ignore-working-copy", "operation", "log", "--limit", "1", "--no-graph", "--template", 'id ++ "\\n"',
-    ]), "operation ID");
-    const workspaceRows = rows(await this.run(this.repoPath, [
-      "--ignore-working-copy", "workspace", "list", "--template", WORKSPACE_TEMPLATE,
-    ])).map((row) => {
-      const [name, id] = row.split("|");
-      if (!name || !id) throw new Error(`Invalid workspace row: ${row}`);
-      const path = this.workspacePaths.get(name);
-      if (!path) throw new Error(`Fixture does not know path for workspace ${name}.`);
-      return { name, targetChangeId: changeId(id), path };
-    }).sort((left, right) => left.name.localeCompare(right.name));
+    const operationId = singleLine(
+      await this.run(this.repoPath, [
+        "--ignore-working-copy",
+        "operation",
+        "log",
+        "--limit",
+        "1",
+        "--no-graph",
+        "--template",
+        'id ++ "\\n"',
+      ]),
+      "operation ID",
+    );
+    const workspaceRows = rows(
+      await this.run(this.repoPath, [
+        "--ignore-working-copy",
+        "workspace",
+        "list",
+        "--template",
+        WORKSPACE_TEMPLATE,
+      ]),
+    )
+      .map((row) => {
+        const [name, id] = row.split("|");
+        if (!name || !id) throw new Error(`Invalid workspace row: ${row}`);
+        const path = this.workspacePaths.get(name);
+        if (!path) throw new Error(`Fixture does not know path for workspace ${name}.`);
+        return { name, targetChangeId: changeId(id), path };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
 
     const changes = [];
-    for (const row of rows(await this.run(this.repoPath, [
-      "--ignore-working-copy", "log", "--revision", "all()", "--no-graph", "--template", CHANGE_TEMPLATE,
-    ]))) {
+    for (const row of rows(
+      await this.run(this.repoPath, [
+        "--ignore-working-copy",
+        "log",
+        "--revision",
+        "all()",
+        "--no-graph",
+        "--template",
+        CHANGE_TEMPLATE,
+      ]),
+    )) {
       const [id, parents, state, conflict, description = ""] = row.split("|", 5);
-      if (!id || (state !== "empty" && state !== "nonempty") || (conflict !== "clean" && conflict !== "conflicted")) {
+      if (
+        !id ||
+        (state !== "empty" && state !== "nonempty") ||
+        (conflict !== "clean" && conflict !== "conflicted")
+      ) {
         throw new Error(`Invalid change row: ${row}`);
       }
       const exact = `exactly(change_id(${changeId(id)}), 1)`;
-      const changedPaths = rows(await this.run(this.repoPath, [
-        "--ignore-working-copy", "diff", "--revision", exact, "--name-only",
-      ])).sort();
+      const changedPaths = rows(
+        await this.run(this.repoPath, [
+          "--ignore-working-copy",
+          "diff",
+          "--revision",
+          exact,
+          "--name-only",
+        ]),
+      ).sort();
       changes.push({
         changeId: changeId(id),
         parentChangeIds: parents ? parents.split(",").map(changeId) : [],
@@ -169,7 +224,12 @@ export class RealJjFixture {
     this.retained = true;
     const marker = join(this.root, "RETAINED.txt");
     await writeFile(marker, `${testName}\n`);
-    const operationLog = await this.run(this.repoPath, ["--ignore-working-copy", "operation", "log", "--no-graph"]);
+    const operationLog = await this.run(this.repoPath, [
+      "--ignore-working-copy",
+      "operation",
+      "log",
+      "--no-graph",
+    ]);
     await writeFile(join(this.root, "operation-log.txt"), operationLog);
     return { path: this.root, operationLog };
   }
@@ -180,7 +240,11 @@ export class RealJjFixture {
 
   private async writeFiles(cwd: string, files: Readonly<Record<string, string>>): Promise<void> {
     for (const [relativePath, content] of Object.entries(files)) {
-      if (!relativePath || relativePath.startsWith("/") || relativePath.split(/[\\/]/).includes("..")) {
+      if (
+        !relativePath ||
+        relativePath.startsWith("/") ||
+        relativePath.split(/[\\/]/).includes("..")
+      ) {
         throw new Error(`Invalid fixture-relative path: ${relativePath}`);
       }
       const path = join(cwd, relativePath);
@@ -193,9 +257,13 @@ export class RealJjFixture {
 class FixtureJjExecutor implements JjExecutor {
   private readonly delegate: JjExecutor;
 
-  constructor(delegate: JjExecutor) { this.delegate = delegate; }
+  constructor(delegate: JjExecutor) {
+    this.delegate = delegate;
+  }
 
-  probe(signal?: AbortSignal): Promise<JjProbeResult> { return this.delegate.probe(signal); }
+  probe(signal?: AbortSignal): Promise<JjProbeResult> {
+    return this.delegate.probe(signal);
+  }
 
   execute(request: JjExecutionRequest): Promise<JjExecutionResult> {
     return this.delegate.execute({ ...request, args: [...TEST_CONFIG, ...request.args] });
@@ -207,7 +275,11 @@ async function hashWorkingCopy(root: string): Promise<string> {
   const files = await listFiles(root);
   for (const path of files) {
     const name = relative(root, path);
-    hash.update(name).update("\0").update(await readFile(path)).update("\0");
+    hash
+      .update(name)
+      .update("\0")
+      .update(await readFile(path))
+      .update("\0");
   }
   return hash.digest("hex");
 }
@@ -227,7 +299,10 @@ async function listFiles(root: string): Promise<string[]> {
 }
 
 function rows(output: string): string[] {
-  return output.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  return output
+    .split(/\r?\n/)
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function singleLine(output: string, label: string): string {

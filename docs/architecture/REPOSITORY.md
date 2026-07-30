@@ -95,10 +95,13 @@ at this revision.
 
 Biome 2.2.7 is the pinned TypeScript/JavaScript formatter and linter. It is a single low-dependency,
 Node 22-compatible binary with one configuration for deterministic LF, spacing, and lint rules.
-`npm run format`, `format:check`, and `lint` (also exposed by `just`) currently enforce the initial
-`packages/pi-tai/src/concurrency` and `src/jj` adoption boundary. Expand `biome.json` by reviewed
-subtree; this avoids disguising behavior changes in a repository-wide initial rewrite. Generated,
-dependency, and build directories are excluded both there and in `.gitignore`.
+`npm run format`, `format:check`, and `lint` (also exposed by `just`) enforce practical first-party
+TypeScript and JavaScript across `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`,
+and `fixtures`. The root groups make future additions under those boundaries covered by default.
+Biome explicitly excludes dependencies and generated/build output (`node_modules`, `dist`, `build`,
+`coverage`, `target`, Tauri-generated sources, and the generated runtime protocol binding). The
+protocol generator and its check own `packages/runtime-protocol/src/generated.ts`; formatting that
+artifact separately would make generated output drift from its source of truth.
 
 Rust formatting and linting are enforced across the complete workspace. The local `npm run check`
 and `just rust-check` gates run `cargo fmt --all -- --check`,

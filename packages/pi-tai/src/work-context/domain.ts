@@ -53,9 +53,7 @@ export function validateWorkContextUpdate(
       (candidate) => planItemIdentity(candidate.content) === identity,
     );
     if (!prior || (prior.status !== "in_progress" && prior.status !== "completed")) {
-      throw new Error(
-        `Plan item must be in_progress before completed: ${item.content}`,
-      );
+      throw new Error(`Plan item must be in_progress before completed: ${item.content}`);
     }
   }
 

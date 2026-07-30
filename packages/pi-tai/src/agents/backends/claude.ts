@@ -1,4 +1,9 @@
-import { EventChannel, type AvailabilityResult, type SubagentBackend, type SubagentSession } from "../backend.ts";
+import {
+  EventChannel,
+  type AvailabilityResult,
+  type SubagentBackend,
+  type SubagentSession,
+} from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
 
 /**
@@ -27,7 +32,10 @@ export interface ClaudeBackendOptions {
 
 /** The slice of `@anthropic-ai/claude-agent-sdk` this backend uses. */
 export interface ClaudeSdk {
-  query(input: { prompt: string | AsyncIterable<unknown>; options?: Record<string, unknown> }): ClaudeQuery;
+  query(input: {
+    prompt: string | AsyncIterable<unknown>;
+    options?: Record<string, unknown>;
+  }): ClaudeQuery;
 }
 
 export interface ClaudeQuery extends AsyncIterable<unknown> {
@@ -44,7 +52,12 @@ export class ClaudeBackend implements SubagentBackend {
   // use: a subagent gets one self-contained task rather than a conversation.
   // Steering needs streaming-input mode; resuming does not, and a fresh run per
   // turn keeps no process alive between them.
-  readonly capabilities = { steering: false, modelSelection: true, reasoningEffort: false, resumable: true };
+  readonly capabilities = {
+    steering: false,
+    modelSelection: true,
+    reasoningEffort: false,
+    resumable: true,
+  };
   private readonly options: ClaudeBackendOptions;
   private readonly load: () => Promise<ClaudeSdk>;
 
@@ -59,8 +72,9 @@ export class ClaudeBackend implements SubagentBackend {
     } catch (error) {
       return {
         ok: false,
-        reason: `@anthropic-ai/claude-agent-sdk is not installed (${error instanceof Error ? error.message : String(error)}). `
-          + "Install it to enable the claude backend.",
+        reason:
+          `@anthropic-ai/claude-agent-sdk is not installed (${error instanceof Error ? error.message : String(error)}). ` +
+          "Install it to enable the claude backend.",
       };
     }
     // Credentials are deliberately not checked here. The SDK resolves them from
@@ -86,7 +100,9 @@ export class ClaudeBackend implements SubagentBackend {
         // checkout is the boundary, so it works without interactive approval.
         permissionMode: this.options.permissionMode ?? "bypassPermissions",
         abortController: abort,
-        ...(task.model ?? this.options.defaultModel ? { model: task.model ?? this.options.defaultModel } : {}),
+        ...((task.model ?? this.options.defaultModel)
+          ? { model: task.model ?? this.options.defaultModel }
+          : {}),
         ...(this.options.allowedTools ? { allowedTools: [...this.options.allowedTools] } : {}),
         ...(this.options.maxTurns ? { maxTurns: this.options.maxTurns } : {}),
         // Continues the prior conversation with its context intact.
@@ -141,7 +157,9 @@ class ClaudeSubagentSession implements SubagentSession {
   }
 
   async send(): Promise<void> {
-    throw new Error("The claude backend does not support steering; cancel and respawn with a revised task.");
+    throw new Error(
+      "The claude backend does not support steering; cancel and respawn with a revised task.",
+    );
   }
 
   async interrupt(): Promise<void> {
@@ -215,9 +233,15 @@ function translate(message: unknown): SubagentEvent[] {
     case "result": {
       const failed = frame.is_error === true || (frame.subtype ?? "success") !== "success";
       const text = typeof frame.result === "string" ? frame.result : "";
-      events.push(failed
-        ? { type: "run_settled", outcome: "failed", error: text || `Claude run ended with ${frame.subtype ?? "an error"}.` }
-        : { type: "run_settled", outcome: "completed", ...(text ? { text } : {}) });
+      events.push(
+        failed
+          ? {
+              type: "run_settled",
+              outcome: "failed",
+              error: text || `Claude run ended with ${frame.subtype ?? "an error"}.`,
+            }
+          : { type: "run_settled", outcome: "completed", ...(text ? { text } : {}) },
+      );
       return events;
     }
     default:
@@ -228,11 +252,16 @@ function translate(message: unknown): SubagentEvent[] {
 function contentBlocks(content: unknown): Record<string, unknown>[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   if (!Array.isArray(content)) return [];
-  return content.filter((block): block is Record<string, unknown> => typeof block === "object" && block !== null);
+  return content.filter(
+    (block): block is Record<string, unknown> => typeof block === "object" && block !== null,
+  );
 }
 
 function usageEvent(usage: Record<string, number>): SubagentEvent {
-  const input = numeric(usage.input_tokens) + numeric(usage.cache_read_input_tokens) + numeric(usage.cache_creation_input_tokens);
+  const input =
+    numeric(usage.input_tokens) +
+    numeric(usage.cache_read_input_tokens) +
+    numeric(usage.cache_creation_input_tokens);
   return { type: "usage", inputTokens: input, outputTokens: numeric(usage.output_tokens) };
 }
 

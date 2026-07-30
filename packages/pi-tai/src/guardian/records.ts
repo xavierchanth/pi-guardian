@@ -61,14 +61,16 @@ function toRecord(
   input: GuardianReviewRecordInput,
 ): GuardianReviewRecord {
   const decision = input.result.kind === "decision" ? input.result.decision : undefined;
-  const category = input.result.kind === "decision"
-    ? input.result.decision.outcome === "human_execution_required" ? "human_execution_required" : "denied"
-    : input.result.kind === "failure"
-      ? "failed"
-      : input.result.kind;
-  const reason = input.result.kind === "decision"
-    ? input.result.decision.reason
-    : input.result.reason;
+  const category =
+    input.result.kind === "decision"
+      ? input.result.decision.outcome === "human_execution_required"
+        ? "human_execution_required"
+        : "denied"
+      : input.result.kind === "failure"
+        ? "failed"
+        : input.result.kind;
+  const reason =
+    input.result.kind === "decision" ? input.result.decision.reason : input.result.reason;
   return {
     version: 1,
     id,

@@ -1,8 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  parseWorkContextDetails,
-  type WorkContextSnapshot,
-} from "./domain.ts";
+import { parseWorkContextDetails, type WorkContextSnapshot } from "./domain.ts";
 
 export const UPDATE_PLAN_TOOL_NAME = "update_plan";
 
@@ -26,9 +23,7 @@ export function createPiSessionWorkContextStore(): WorkContextStore {
   };
 }
 
-export function latestWorkContext(
-  branch: readonly unknown[],
-): WorkContextSnapshot | undefined {
+export function latestWorkContext(branch: readonly unknown[]): WorkContextSnapshot | undefined {
   let latest: WorkContextSnapshot | undefined;
   for (const entry of branch) {
     if (!isRecord(entry) || entry.type !== "message") continue;

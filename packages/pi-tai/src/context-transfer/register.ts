@@ -98,12 +98,15 @@ export function registerContextTransfer(
         await ctx.waitForIdle();
         const id = validateId(args);
         const artifact = await store.load(id);
-        pi.sendMessage({
-          customType: CONTEXT_IMPORT_TYPE,
-          content: frameImportedContext(artifact),
-          display: true,
-          details: { id, summary: artifact.summary },
-        }, { triggerTurn: true });
+        pi.sendMessage(
+          {
+            customType: CONTEXT_IMPORT_TYPE,
+            content: frameImportedContext(artifact),
+            display: true,
+            details: { id, summary: artifact.summary },
+          },
+          { triggerTurn: true },
+        );
       } catch (error) {
         ctx.ui.notify(`Context import failed: ${describe(error)}`, "error");
       }

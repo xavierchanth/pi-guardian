@@ -61,8 +61,10 @@ export async function checkFileToolPath(
     const lexicalAgentDirectory = resolve(agentDirectory);
     const target = await canonicalizeTarget(cwd, requestedPath);
 
-    if (contains(lexicalWorkspace, target.lexicalPath)
-      && !contains(workspace, target.canonicalPath)) {
+    if (
+      contains(lexicalWorkspace, target.lexicalPath) &&
+      !contains(workspace, target.canonicalPath)
+    ) {
       return deny(
         target.canonicalPath,
         `File tool target escapes the workspace through a symlink: ${target.canonicalPath}.`,
@@ -70,20 +72,22 @@ export async function checkFileToolPath(
     }
 
     const lexicallyInAgentDirectory = contains(lexicalAgentDirectory, target.lexicalPath);
-    if (canonicalAgentDirectory && lexicallyInAgentDirectory
-      && !contains(canonicalAgentDirectory, target.canonicalPath)) {
+    if (
+      canonicalAgentDirectory &&
+      lexicallyInAgentDirectory &&
+      !contains(canonicalAgentDirectory, target.canonicalPath)
+    ) {
       return deny(
         target.canonicalPath,
         `File tool target escapes Pi agent state through a symlink: ${target.canonicalPath}.`,
       );
     }
-    if (canonicalAgentDirectory
-      && (lexicallyInAgentDirectory || contains(canonicalAgentDirectory, target.canonicalPath))) {
+    if (
+      canonicalAgentDirectory &&
+      (lexicallyInAgentDirectory || contains(canonicalAgentDirectory, target.canonicalPath))
+    ) {
       const logicalPath = lexicallyInAgentDirectory
-        ? resolve(
-          canonicalAgentDirectory,
-          relative(lexicalAgentDirectory, target.lexicalPath),
-        )
+        ? resolve(canonicalAgentDirectory, relative(lexicalAgentDirectory, target.lexicalPath))
         : target.canonicalPath;
       return classifyPiAgentPath(
         toolName,
@@ -94,7 +98,9 @@ export async function checkFileToolPath(
       );
     }
 
-    const withinWritableBoundary = allowedRoots.some((root) => contains(root, target.canonicalPath));
+    const withinWritableBoundary = allowedRoots.some((root) =>
+      contains(root, target.canonicalPath),
+    );
     const withinReadBoundary = readRoots.some((root) => contains(root, target.canonicalPath));
     if (!withinWritableBoundary && !withinReadBoundary) {
       return deny(
@@ -140,10 +146,12 @@ export function defaultReadCandidates(): string[] {
   const runtimePackageRoot = findPiPackageRoot(process.argv[1]);
   return [
     piTaiPackageRoot(),
-    ...["skills", "extensions", "prompts", "themes", "npm", "git"]
-      .map((directory) => join(agentDir, directory)),
-    ...["AGENTS.md", "settings.json", "trust.json", "models-store.json"]
-      .map((file) => join(agentDir, file)),
+    ...["skills", "extensions", "prompts", "themes", "npm", "git"].map((directory) =>
+      join(agentDir, directory),
+    ),
+    ...["AGENTS.md", "settings.json", "trust.json", "models-store.json"].map((file) =>
+      join(agentDir, file),
+    ),
     join(homedir(), ".agents", "skills"),
     resolve(dirname(piPackageEntry), ".."),
     ...(runtimePackageRoot ? [runtimePackageRoot] : []),
@@ -185,11 +193,19 @@ async function classifyPiAgentPath(
     );
   }
   if (contains(contextExportsPath, logicalPath)) {
-    return review(target, requestedPath, "pi-session", "The target is a private context-transfer summary from another session.");
+    return review(
+      target,
+      requestedPath,
+      "pi-session",
+      "The target is a private context-transfer summary from another session.",
+    );
   }
-  if ((toolName === "grep" || toolName === "find")
-    && [authPath, modelsPath, sessionsPath, contextExportsPath].some((protectedPath) =>
-      contains(logicalPath, protectedPath))) {
+  if (
+    (toolName === "grep" || toolName === "find") &&
+    [authPath, modelsPath, sessionsPath, contextExportsPath].some((protectedPath) =>
+      contains(logicalPath, protectedPath),
+    )
+  ) {
     return review(
       target,
       requestedPath,
@@ -241,7 +257,10 @@ function sensitiveTrigger(
       ? relative(boundaryRoot, path)
       : path;
     const normalized = pathForClassification.replaceAll("\\", "/");
-    const segments = normalized.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
+    const segments = normalized
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => segment.toLowerCase());
     const name = basename(path).toLowerCase();
 
     if (segments.includes(".git") || segments.includes(".jj")) {
@@ -252,21 +271,38 @@ function sensitiveTrigger(
     }
 
     const secretDirectories = new Set([
-      ".ssh", ".aws", ".gnupg", ".kube", ".docker", "secrets", "credentials",
+      ".ssh",
+      ".aws",
+      ".gnupg",
+      ".kube",
+      ".docker",
+      "secrets",
+      "credentials",
     ]);
     const dotenvExemptions = new Set([".env.example", ".env.sample", ".env.template"]);
     const exactSensitiveNames = new Set([
-      ".npmrc", ".pypirc", ".netrc", ".git-credentials", "auth.json",
-      "credentials", "credentials.json", "credentials.yaml", "credentials.yml",
-      "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+      ".npmrc",
+      ".pypirc",
+      ".netrc",
+      ".git-credentials",
+      "auth.json",
+      "credentials",
+      "credentials.json",
+      "credentials.yaml",
+      "credentials.yml",
+      "id_rsa",
+      "id_dsa",
+      "id_ecdsa",
+      "id_ed25519",
     ]);
     const privateKeyExtensions = [".key", ".pem", ".p12", ".pfx", ".jks"];
-    const isDotenv = (name === ".env" || name.startsWith(".env."))
-      && !dotenvExemptions.has(name);
-    if (segments.some((segment) => secretDirectories.has(segment))
-      || exactSensitiveNames.has(name)
-      || privateKeyExtensions.some((extension) => name.endsWith(extension))
-      || isDotenv) {
+    const isDotenv = (name === ".env" || name.startsWith(".env.")) && !dotenvExemptions.has(name);
+    if (
+      segments.some((segment) => secretDirectories.has(segment)) ||
+      exactSensitiveNames.has(name) ||
+      privateKeyExtensions.some((extension) => name.endsWith(extension)) ||
+      isDotenv
+    ) {
       return {
         trigger: "sensitive-path",
         detail: "The target name or directory commonly contains secrets or credentials.",
@@ -367,8 +403,10 @@ async function pathExists(path: string): Promise<boolean> {
 
 function contains(root: string, target: string): boolean {
   const remainder = relative(root, target);
-  return remainder === ""
-    || (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder));
+  return (
+    remainder === "" ||
+    (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
+  );
 }
 
 function stripAtPrefix(path: string): string {

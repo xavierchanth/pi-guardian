@@ -69,9 +69,9 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
 
   const body: DashboardRow[] = input.snapshots.length
     ? input.snapshots.map((snapshot, index) => ({
-      text: entryText(snapshot, index === selected, inner, input.now),
-      tone: rowTone(snapshot, index === selected),
-    }))
+        text: entryText(snapshot, index === selected, inner, input.now),
+        tone: rowTone(snapshot, index === selected),
+      }))
     : [{ text: truncateToWidth(DASHBOARD_EMPTY, inner, "..."), tone: "muted" }];
 
   return [
@@ -79,7 +79,12 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
     ...body.map((row) => ({ text: frame(row.text, inner), tone: row.tone })),
     { text: frame("", inner), tone: "border" },
     ...(input.notice
-      ? [{ text: frame(truncateToWidth(input.notice, inner, "..."), inner), tone: "error" as const }]
+      ? [
+          {
+            text: frame(truncateToWidth(input.notice, inner, "..."), inner),
+            tone: "error" as const,
+          },
+        ]
       : []),
     { text: frame(truncateToWidth(DASHBOARD_HINT, inner, "..."), inner), tone: "muted" },
     { text: bottomBorder(input.width), tone: "border" },
@@ -120,7 +125,14 @@ export function renderSubagentDetail(input: DetailInput): DetailRender {
     `CWD: ${s.cwd}`,
     `Workspace: ${s.workspaceId ?? "--"}`,
     `Started: ${s.createdAt}  Settled: ${s.settledAt ?? "--"}`,
-    ...(s.liveTools.length ? ["Tools:", ...s.liveTools.map((tool) => `  ${tool.state} ${tool.name}${tool.preview ? ` — ${tool.preview}` : ""}`)] : ["Tools: none"]),
+    ...(s.liveTools.length
+      ? [
+          "Tools:",
+          ...s.liveTools.map(
+            (tool) => `  ${tool.state} ${tool.name}${tool.preview ? ` — ${tool.preview}` : ""}`,
+          ),
+        ]
+      : ["Tools: none"]),
     ...(s.errorText ? [`Error: ${s.errorText}`] : []),
     "",
     `Current snapshot output (${s.status === "running" ? "live/latest" : "settled/final"}; not a durable full transcript)`,
@@ -130,16 +142,40 @@ export function renderSubagentDetail(input: DetailInput): DetailRender {
   const content = [...fields, ...body, position];
   const rows: DashboardRow[] = [
     { text: topBorder(input.width, `Subagent ${s.id}`), tone: "border" },
-    ...content.map((text) => ({ text: frame(truncateToWidth(text, inner, "..."), inner), tone: "text" as const })),
-    ...(input.notice ? [{ text: frame(truncateToWidth(input.notice, inner, "..."), inner), tone: "error" as const }] : []),
+    ...content.map((text) => ({
+      text: frame(truncateToWidth(text, inner, "..."), inner),
+      tone: "text" as const,
+    })),
+    ...(input.notice
+      ? [
+          {
+            text: frame(truncateToWidth(input.notice, inner, "..."), inner),
+            tone: "error" as const,
+          },
+        ]
+      : []),
     { text: frame(truncateToWidth(DETAIL_HINT, inner, "..."), inner), tone: "muted" },
     { text: bottomBorder(input.width), tone: "border" },
   ];
   return { rows, scroll, maxScroll };
 }
 
-export function scrollDetail(current: number, command: "down" | "up" | "pageDown" | "pageUp" | "top" | "bottom", max: number, page = DETAIL_BODY_HEIGHT): number {
-  const delta = command === "down" ? 1 : command === "up" ? -1 : command === "pageDown" ? page : command === "pageUp" ? -page : 0;
+export function scrollDetail(
+  current: number,
+  command: "down" | "up" | "pageDown" | "pageUp" | "top" | "bottom",
+  max: number,
+  page = DETAIL_BODY_HEIGHT,
+): number {
+  const delta =
+    command === "down"
+      ? 1
+      : command === "up"
+        ? -1
+        : command === "pageDown"
+          ? page
+          : command === "pageUp"
+            ? -page
+            : 0;
   if (command === "top") return 0;
   if (command === "bottom") return Math.max(0, max);
   return Math.min(Math.max(0, current + delta), Math.max(0, max));
@@ -150,7 +186,12 @@ export function dashboardText(rows: readonly DashboardRow[]): string[] {
   return rows.map((row) => row.text);
 }
 
-function entryText(snapshot: SubagentSnapshot, selected: boolean, width: number, now: number): string {
+function entryText(
+  snapshot: SubagentSnapshot,
+  selected: boolean,
+  width: number,
+  now: number,
+): string {
   const left = `${selected ? "›" : " "} ${STATUS_GLYPH[snapshot.status]} ${snapshot.title} ${snapshot.id}`;
   const context = contextUtilisation(snapshot);
   const right = [

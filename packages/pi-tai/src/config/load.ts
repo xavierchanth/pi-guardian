@@ -140,7 +140,14 @@ function readConfig(
   if (layer === "project") rejectPrivilegedProjectValues(value, path, warnings);
 
   for (const key of Object.keys(value)) {
-    if (key !== "sessionTitle" && key !== "ansiTheme" && key !== "notifications" && key !== "cmux" && key !== "compaction" && key !== "modelProfiles") {
+    if (
+      key !== "sessionTitle" &&
+      key !== "ansiTheme" &&
+      key !== "notifications" &&
+      key !== "cmux" &&
+      key !== "compaction" &&
+      key !== "modelProfiles"
+    ) {
       warnings.push(`Unknown top-level key ${key} in ${path}.`);
     }
   }
@@ -165,9 +172,7 @@ function rejectPrivilegedProjectValues(
 ): void {
   for (const [dottedPath, descriptor] of Object.entries(FIELD_DESCRIPTORS)) {
     if (!descriptor.privileged) continue;
-    const rawPath = dottedPath
-      .replace(/^sessionPolicy\.|^clientPreferences\./, "")
-      .split(".");
+    const rawPath = dottedPath.replace(/^sessionPolicy\.|^clientPreferences\./, "").split(".");
     const key = rawPath.pop();
     if (!key) continue;
     let owner: unknown = value;
@@ -177,7 +182,9 @@ function rejectPrivilegedProjectValues(
     }
     if (!isRecord(owner) || owner[key] === undefined) continue;
     delete owner[key];
-    warnings.push(`Ignored privileged ${dottedPath} from ${path}: privileged fields cannot be set by a project.`);
+    warnings.push(
+      `Ignored privileged ${dottedPath} from ${path}: privileged fields cannot be set by a project.`,
+    );
   }
 }
 
@@ -212,7 +219,8 @@ function originFor(
   globalDigest: string | undefined,
   globalPath: string,
 ): FieldOrigin {
-  if (projectValue !== undefined) return { layer: projectLayer, path: projectPath, digest: projectDigest };
+  if (projectValue !== undefined)
+    return { layer: projectLayer, path: projectPath, digest: projectDigest };
   if (globalValue !== undefined) return { layer: "user", path: globalPath, digest: globalDigest };
   return { layer: "default" };
 }
@@ -237,7 +245,13 @@ function parseSessionTitle(
     return undefined;
   }
 
-  warnUnknown(value, new Set(["provider", "model", "effort", "maxWords", "fallback"]), "sessionTitle", path, warnings);
+  warnUnknown(
+    value,
+    new Set(["provider", "model", "effort", "maxWords", "fallback"]),
+    "sessionTitle",
+    path,
+    warnings,
+  );
   const result: Partial<SessionTitleConfig> = {};
   assignNonEmptyString(value, "provider", result, path, warnings);
   assignNonEmptyString(value, "model", result, path, warnings);
@@ -250,7 +264,11 @@ function parseSessionTitle(
     }
   }
   if (value.maxWords !== undefined) {
-    if (Number.isInteger(value.maxWords) && (value.maxWords as number) >= 1 && (value.maxWords as number) <= 20) {
+    if (
+      Number.isInteger(value.maxWords) &&
+      (value.maxWords as number) >= 1 &&
+      (value.maxWords as number) <= 20
+    ) {
       result.maxWords = value.maxWords as number;
     } else {
       warnings.push(`Invalid sessionTitle.maxWords in ${path}: expected an integer from 1 to 20.`);
@@ -274,15 +292,27 @@ function parseAnsiTheme(
     return undefined;
   }
 
-  warnUnknown(value, new Set(["darkTheme", "lightTheme", "pollIntervalMs"]), "ansiTheme", path, warnings);
+  warnUnknown(
+    value,
+    new Set(["darkTheme", "lightTheme", "pollIntervalMs"]),
+    "ansiTheme",
+    path,
+    warnings,
+  );
   const result: Partial<AnsiThemeConfig> = {};
   assignNonEmptyString(value, "darkTheme", result, path, warnings);
   assignNonEmptyString(value, "lightTheme", result, path, warnings);
   if (value.pollIntervalMs !== undefined) {
-    if (Number.isInteger(value.pollIntervalMs) && (value.pollIntervalMs as number) >= 250 && (value.pollIntervalMs as number) <= 60_000) {
+    if (
+      Number.isInteger(value.pollIntervalMs) &&
+      (value.pollIntervalMs as number) >= 250 &&
+      (value.pollIntervalMs as number) <= 60_000
+    ) {
       result.pollIntervalMs = value.pollIntervalMs as number;
     } else {
-      warnings.push(`Invalid ansiTheme.pollIntervalMs in ${path}: expected an integer from 250 to 60000.`);
+      warnings.push(
+        `Invalid ansiTheme.pollIntervalMs in ${path}: expected an integer from 250 to 60000.`,
+      );
     }
   }
   return result;
@@ -352,14 +382,16 @@ function parseCompaction(
   }
   if (value.thresholdPercent !== undefined) {
     if (
-      typeof value.thresholdPercent === "number"
-      && Number.isFinite(value.thresholdPercent)
-      && value.thresholdPercent >= 1
-      && value.thresholdPercent <= 100
+      typeof value.thresholdPercent === "number" &&
+      Number.isFinite(value.thresholdPercent) &&
+      value.thresholdPercent >= 1 &&
+      value.thresholdPercent <= 100
     ) {
       result.thresholdPercent = value.thresholdPercent;
     } else {
-      warnings.push(`Invalid compaction.thresholdPercent in ${path}: expected a number from 1 to 100.`);
+      warnings.push(
+        `Invalid compaction.thresholdPercent in ${path}: expected a number from 1 to 100.`,
+      );
     }
   }
   return result;
@@ -383,7 +415,13 @@ function parseModelProfiles(
       warnings.push(`Invalid modelProfiles[${index}] in ${path}: expected an object.`);
       return undefined;
     }
-    warnUnknown(entry, new Set(["name", "provider", "model", "effort"]), `modelProfiles[${index}]`, path, warnings);
+    warnUnknown(
+      entry,
+      new Set(["name", "provider", "model", "effort"]),
+      `modelProfiles[${index}]`,
+      path,
+      warnings,
+    );
     const name = profileString(entry.name);
     const provider = profileString(entry.provider);
     const model = profileString(entry.model);

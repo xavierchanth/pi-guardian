@@ -20,13 +20,35 @@ export function mapAgentSessionEvent(
     case "message_start":
       return { ...base, event: "message.start", data: { role: event.message.role } };
     case "message_end": {
-      const message = event.message as typeof event.message & { id?: string; timestamp?: number; provider?: string; model?: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } } };
+      const message = event.message as typeof event.message & {
+        id?: string;
+        timestamp?: number;
+        provider?: string;
+        model?: string;
+        usage?: {
+          input: number;
+          output: number;
+          cacheRead: number;
+          cacheWrite: number;
+          cost: {
+            input: number;
+            output: number;
+            cacheRead: number;
+            cacheWrite: number;
+            total: number;
+          };
+        };
+      };
       return {
         ...base,
         event: "message.end",
         data: {
           role: message.role,
-          ...(message.id ? { messageId: message.id } : message.timestamp ? { messageId: String(message.timestamp) } : {}),
+          ...(message.id
+            ? { messageId: message.id }
+            : message.timestamp
+              ? { messageId: String(message.timestamp) }
+              : {}),
           ...(message.provider ? { provider: message.provider } : {}),
           ...(message.model ? { model: message.model } : {}),
           ...(message.usage ? { usage: message.usage } : {}),

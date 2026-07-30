@@ -7,24 +7,17 @@ export interface WorkContextProgress {
   allComplete: boolean;
 }
 
-export function workContextProgress(
-  snapshot: WorkContextSnapshot,
-): WorkContextProgress {
-  const completed = snapshot.plan.filter(
-    (item) => item.status === "completed",
-  ).length;
+export function workContextProgress(snapshot: WorkContextSnapshot): WorkContextProgress {
+  const completed = snapshot.plan.filter((item) => item.status === "completed").length;
   return {
     completed,
     total: snapshot.plan.length,
-    active: snapshot.plan.find((item) => item.status === "in_progress")
-      ?.content,
+    active: snapshot.plan.find((item) => item.status === "in_progress")?.content,
     allComplete: snapshot.plan.length > 0 && completed === snapshot.plan.length,
   };
 }
 
-export function workContextStatusLines(
-  snapshot: WorkContextSnapshot,
-): [string, string] {
+export function workContextStatusLines(snapshot: WorkContextSnapshot): [string, string] {
   const progress = workContextProgress(snapshot);
   const plan =
     progress.total === 0
@@ -37,9 +30,7 @@ export function workContextStatusLines(
   return [`Goal: ${snapshot.goal}`, plan];
 }
 
-export function collapsedWorkContextText(
-  snapshot: WorkContextSnapshot,
-): string {
+export function collapsedWorkContextText(snapshot: WorkContextSnapshot): string {
   const progress = workContextProgress(snapshot);
   if (progress.total === 0) return "✓ Goal updated · No active steps";
   if (progress.active) {
@@ -62,12 +53,7 @@ export function fullWorkContextText(snapshot: WorkContextSnapshot): string {
   );
 
   for (const item of snapshot.plan) {
-    const marker =
-      item.status === "completed"
-        ? "x"
-        : item.status === "in_progress"
-          ? ">"
-          : " ";
+    const marker = item.status === "completed" ? "x" : item.status === "in_progress" ? ">" : " ";
     const priority = item.priority ? ` [${item.priority}]` : "";
     lines.push(`[${marker}] ${item.content}${priority}`);
   }

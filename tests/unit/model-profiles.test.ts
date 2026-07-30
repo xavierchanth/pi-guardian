@@ -10,11 +10,9 @@ import {
 
 type CommandHandler = (args: string, ctx: any) => Promise<void>;
 
-function createHarness(options: {
-  model?: unknown;
-  canSelect?: boolean;
-  appliedEffort?: string;
-} = {}) {
+function createHarness(
+  options: { model?: unknown; canSelect?: boolean; appliedEffort?: string } = {},
+) {
   const commands = new Map<string, CommandHandler>();
   const shortcuts = new Map<string, (ctx: any) => Promise<void>>();
   const notifications: Array<{ message: string; level: string }> = [];
@@ -43,7 +41,9 @@ function createHarness(options: {
     model: { provider: "openai-codex", id: "gpt-5.6-sol" },
     modelRegistry: { find: () => options.model },
     ui: {
-      notify(message: string, level: string) { notifications.push({ message, level }); },
+      notify(message: string, level: string) {
+        notifications.push({ message, level });
+      },
       select: async () => undefined,
     },
   };
@@ -51,7 +51,14 @@ function createHarness(options: {
     sessionPolicy: () => DEFAULT_SESSION_POLICY,
   };
   return {
-    pi, ctx, config, commands, shortcuts, notifications, selectedModels, selectedEfforts,
+    pi,
+    ctx,
+    config,
+    commands,
+    shortcuts,
+    notifications,
+    selectedModels,
+    selectedEfforts,
   };
 }
 

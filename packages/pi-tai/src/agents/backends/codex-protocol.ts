@@ -1,12 +1,24 @@
 /** Typed subset of the Codex 0.145.0 app-server protocol used by this backend. */
 export interface CodexRequests {
-  "initialize": { params: { clientInfo: { name: string; version: string } }; result: Record<string, unknown> };
-  "modelProvider/capabilities/read": { params: Record<string, never>; result: ModelProviderCapabilities };
-  "configRequirements/read": { params: Record<string, never>; result: ConfigRequirementsReadResponse };
+  initialize: {
+    params: { clientInfo: { name: string; version: string } };
+    result: Record<string, unknown>;
+  };
+  "modelProvider/capabilities/read": {
+    params: Record<string, never>;
+    result: ModelProviderCapabilities;
+  };
+  "configRequirements/read": {
+    params: Record<string, never>;
+    result: ConfigRequirementsReadResponse;
+  };
   "thread/start": { params: Record<string, unknown>; result: Record<string, unknown> };
   "thread/resume": { params: { threadId: string }; result: Record<string, unknown> };
   "turn/start": { params: Record<string, unknown>; result: Record<string, unknown> };
-  "turn/interrupt": { params: { threadId: string; turnId: string }; result: Record<string, unknown> };
+  "turn/interrupt": {
+    params: { threadId: string; turnId: string };
+    result: Record<string, unknown>;
+  };
 }
 
 export interface ModelProviderCapabilities {
@@ -36,11 +48,19 @@ export function researchAvailability(
   config: ConfigRequirementsReadResponse,
 ): ResearchAvailability {
   if (capabilities.webSearch !== true) {
-    return { ok: false, kind: "unsupported", reason: "Codex app-server does not support native web search for this model provider." };
+    return {
+      ok: false,
+      kind: "unsupported",
+      reason: "Codex app-server does not support native web search for this model provider.",
+    };
   }
   const allowed = config.requirements?.allowedWebSearchModes;
   if (allowed && !allowed.includes("live")) {
-    return { ok: false, kind: "policy", reason: "Codex policy blocks live web search (allowedWebSearchModes does not include live)." };
+    return {
+      ok: false,
+      kind: "policy",
+      reason: "Codex policy blocks live web search (allowedWebSearchModes does not include live).",
+    };
   }
   return { ok: true };
 }

@@ -69,9 +69,7 @@ export function renderFooterRows(snapshot: FooterSnapshot, width: number): Foote
   if (snapshot.usage.cacheRead) usage.push(`R${formatTokens(snapshot.usage.cacheRead)}`);
   if (snapshot.usage.cacheWrite) usage.push(`W${formatTokens(snapshot.usage.cacheWrite)}`);
   if (snapshot.usage.cost || snapshot.usingSubscription) {
-    usage.push(
-      `$${snapshot.usage.cost.toFixed(3)}${snapshot.usingSubscription ? " (sub)" : ""}`,
-    );
+    usage.push(`$${snapshot.usage.cost.toFixed(3)}${snapshot.usingSubscription ? " (sub)" : ""}`);
   }
 
   return [
@@ -117,8 +115,6 @@ function layoutRow(
 
   const availableLeft = Math.max(0, width - rightWidth - 2);
   const renderedLeft = truncateToWidth(left, availableLeft, "...");
-  const padding = " ".repeat(
-    Math.max(2, width - visibleWidth(renderedLeft) - rightWidth),
-  );
+  const padding = " ".repeat(Math.max(2, width - visibleWidth(renderedLeft) - rightWidth));
   return { left: renderedLeft, padding, right, leftColor };
 }

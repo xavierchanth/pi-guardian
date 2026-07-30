@@ -1,8 +1,18 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
-import { EventChannel, type AvailabilityResult, type SubagentBackend, type SubagentSession } from "../backend.ts";
+import {
+  EventChannel,
+  type AvailabilityResult,
+  type SubagentBackend,
+  type SubagentSession,
+} from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
-import { researchAvailability, type CodexMethod, type CodexParams, type CodexResult } from "./codex-protocol.ts";
+import {
+  researchAvailability,
+  type CodexMethod,
+  type CodexParams,
+  type CodexResult,
+} from "./codex-protocol.ts";
 
 /**
  * Opt-in backend running children on `codex app-server`.
@@ -33,7 +43,12 @@ export class CodexBackend implements SubagentBackend {
   readonly name: BackendName = "codex";
   // A settled thread is continued with `thread/resume`, which is what a
   // follow-up turn needs. Live steering mid-turn is not wired up.
-  readonly capabilities = { steering: false, modelSelection: true, reasoningEffort: true, resumable: true };
+  readonly capabilities = {
+    steering: false,
+    modelSelection: true,
+    reasoningEffort: true,
+    resumable: true,
+  };
   private readonly options: CodexBackendOptions;
 
   constructor(options: CodexBackendOptions = {}) {
@@ -47,13 +62,18 @@ export class CodexBackend implements SubagentBackend {
       probe.once("error", (error: NodeJS.ErrnoException) => {
         resolve({
           ok: false,
-          reason: error.code === "ENOENT"
-            ? `The \`${binary}\` binary is not on PATH; install the Codex CLI to enable this backend.`
-            : `Could not run \`${binary}\`: ${error.message}`,
+          reason:
+            error.code === "ENOENT"
+              ? `The \`${binary}\` binary is not on PATH; install the Codex CLI to enable this backend.`
+              : `Could not run \`${binary}\`: ${error.message}`,
         });
       });
       probe.once("close", (code) => {
-        resolve(code === 0 ? { ok: true } : { ok: false, reason: `\`${binary} --version\` exited with status ${code}.` });
+        resolve(
+          code === 0
+            ? { ok: true }
+            : { ok: false, reason: `\`${binary} --version\` exited with status ${code}.` },
+        );
       });
     });
   }
@@ -87,12 +107,18 @@ class CodexSubagentSession implements SubagentSession {
   private nextId = 1;
   private threadId?: string;
   /** The thread id, which is how a settled subagent is continued. */
-  get resumeToken(): string | undefined { return this.threadId; }
+  get resumeToken(): string | undefined {
+    return this.threadId;
+  }
   private turnId?: string;
   private lastAssistantText = "";
   private disposed = false;
 
-  constructor(child: ChildProcessWithoutNullStreams, task: SpawnTask, options: CodexBackendOptions) {
+  constructor(
+    child: ChildProcessWithoutNullStreams,
+    task: SpawnTask,
+    options: CodexBackendOptions,
+  ) {
     this.child = child;
     this.task = task;
     this.options = options;
@@ -130,18 +156,18 @@ class CodexSubagentSession implements SubagentSession {
       const thread = this.task.resumeToken
         ? await this.request("thread/resume", { threadId: this.task.resumeToken })
         : await this.request("thread/start", {
-        cwd: this.task.cwd,
-        developerInstructions: this.task.systemPrompt,
-        // Nobody is present to answer an approval prompt, so they are off; the
-        // child works in its own directory like on any other harness.
-        approvalPolicy: this.options.approvalPolicy ?? "never",
-        sandbox: this.options.sandbox ?? "workspace-write",
-        // Research is truthful only when app-server itself is put in live mode.
-        ...(this.task.capability === "researcher" ? { config: { web_search: "live" } } : {}),
-        ...(this.task.model ?? this.options.defaultModel
-          ? { model: this.task.model ?? this.options.defaultModel }
-          : {}),
-      });
+            cwd: this.task.cwd,
+            developerInstructions: this.task.systemPrompt,
+            // Nobody is present to answer an approval prompt, so they are off; the
+            // child works in its own directory like on any other harness.
+            approvalPolicy: this.options.approvalPolicy ?? "never",
+            sandbox: this.options.sandbox ?? "workspace-write",
+            // Research is truthful only when app-server itself is put in live mode.
+            ...(this.task.capability === "researcher" ? { config: { web_search: "live" } } : {}),
+            ...((this.task.model ?? this.options.defaultModel)
+              ? { model: this.task.model ?? this.options.defaultModel }
+              : {}),
+          });
       this.threadId = threadIdOf(thread) ?? this.task.resumeToken;
       if (!this.threadId) throw new Error("codex thread/start returned no thread id.");
       this.channel.push({ type: "run_started" });
@@ -152,7 +178,7 @@ class CodexSubagentSession implements SubagentSession {
         threadId: this.threadId,
         input: [{ type: "text", text: this.task.prompt }],
         ...(this.task.effort ? { effort: this.task.effort } : {}),
-        ...(this.task.model ?? this.options.defaultModel
+        ...((this.task.model ?? this.options.defaultModel)
           ? { model: this.task.model ?? this.options.defaultModel }
           : {}),
       });
@@ -204,7 +230,8 @@ class CodexSubagentSession implements SubagentSession {
         return;
       }
       case "item/agentMessage/delta": {
-        if (typeof params.delta === "string") this.channel.push({ type: "assistant_delta", text: params.delta });
+        if (typeof params.delta === "string")
+          this.channel.push({ type: "assistant_delta", text: params.delta });
         return;
       }
       case "item/started":
@@ -222,12 +249,23 @@ class CodexSubagentSession implements SubagentSession {
         if (item.type === "webSearch") {
           const toolId = typeof item.id === "string" ? item.id : "webSearch";
           const query = typeof item.query === "string" ? item.query : undefined;
-          this.channel.push(method === "item/started"
-            ? { type: "tool_start", toolId, name: "web_search", ...(query ? { preview: query } : {}) }
-            : { type: "tool_end", toolId, ok: true, ...(query ? { preview: query } : {}) });
+          this.channel.push(
+            method === "item/started"
+              ? {
+                  type: "tool_start",
+                  toolId,
+                  name: "web_search",
+                  ...(query ? { preview: query } : {}),
+                }
+              : { type: "tool_end", toolId, ok: true, ...(query ? { preview: query } : {}) },
+          );
           return;
         }
-        if (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "fileChange") {
+        if (
+          item.type === "commandExecution" ||
+          item.type === "mcpToolCall" ||
+          item.type === "fileChange"
+        ) {
           const toolId = typeof item.id === "string" ? item.id : String(item.type);
           if (method === "item/started") {
             this.channel.push({
@@ -250,7 +288,9 @@ class CodexSubagentSession implements SubagentSession {
           type: "usage",
           inputTokens: numeric(total.inputTokens) + numeric(total.cachedInputTokens),
           outputTokens: numeric(total.outputTokens),
-          ...(numeric(usage?.modelContextWindow) ? { contextWindow: numeric(usage?.modelContextWindow) } : {}),
+          ...(numeric(usage?.modelContextWindow)
+            ? { contextWindow: numeric(usage?.modelContextWindow) }
+            : {}),
         });
         return;
       }
@@ -263,7 +303,11 @@ class CodexSubagentSession implements SubagentSession {
             ? { type: "run_settled", outcome: "completed", text: this.lastAssistantText }
             : status === "interrupted"
               ? { type: "run_settled", outcome: "interrupted" }
-              : { type: "run_settled", outcome: "failed", error: error?.message ?? "codex turn failed." },
+              : {
+                  type: "run_settled",
+                  outcome: "failed",
+                  error: error?.message ?? "codex turn failed.",
+                },
         );
         this.cleanup();
         return;
@@ -272,7 +316,11 @@ class CodexSubagentSession implements SubagentSession {
         const error = params.error as { message?: string } | undefined;
         // `willRetry` errors are transient; codex recovers on its own.
         if (params.willRetry === true) return;
-        this.channel.push({ type: "run_settled", outcome: "failed", error: error?.message ?? "codex reported an error." });
+        this.channel.push({
+          type: "run_settled",
+          outcome: "failed",
+          error: error?.message ?? "codex reported an error.",
+        });
         this.cleanup();
         return;
       }
@@ -311,7 +359,8 @@ class CodexSubagentSession implements SubagentSession {
     this.disposed = true;
     this.lines.close();
     this.child.kill("SIGTERM");
-    for (const waiter of this.pending.values()) waiter.reject(new Error("codex session was disposed."));
+    for (const waiter of this.pending.values())
+      waiter.reject(new Error("codex session was disposed."));
     this.pending.clear();
     this.channel.close();
   }
@@ -330,7 +379,10 @@ class CodexSubagentSession implements SubagentSession {
     this.channel.push({ type: "backend_error", message });
   }
 
-  private request<M extends CodexMethod>(method: M, params: CodexParams<M>): Promise<CodexResult<M>> {
+  private request<M extends CodexMethod>(
+    method: M,
+    params: CodexParams<M>,
+  ): Promise<CodexResult<M>> {
     const id = this.nextId++;
     const timeoutMs = this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
@@ -339,8 +391,14 @@ class CodexSubagentSession implements SubagentSession {
         reject(new Error(`codex ${method} timed out after ${timeoutMs}ms.`));
       }, timeoutMs);
       this.pending.set(id, {
-        resolve: (value) => { clearTimeout(timer); resolve(value as CodexResult<M>); },
-        reject: (error) => { clearTimeout(timer); reject(error); },
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value as CodexResult<M>);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       });
       this.write({ id, method, params });
     });

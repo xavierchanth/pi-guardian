@@ -35,20 +35,26 @@ test("returns immutable defaults when files are absent", () => {
 
 test("unprivileged trusted project values override valid global values", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
-    sessionTitle: { provider: "global-provider", model: "global-model", maxWords: 8 },
-    ansiTheme: { darkTheme: "global-dark" },
-    notifications: { reviewFailure: false },
-    cmux: { enabled: false },
-    compaction: { thresholdPercent: 85 },
-  }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    sessionTitle: { model: "project-model" },
-    ansiTheme: { lightTheme: "project-light" },
-    notifications: { agentCompletion: false },
-    cmux: { enabled: true },
-    compaction: { enabled: false, thresholdPercent: 92.5 },
-  }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { provider: "global-provider", model: "global-model", maxWords: 8 },
+      ansiTheme: { darkTheme: "global-dark" },
+      notifications: { reviewFailure: false },
+      cmux: { enabled: false },
+      compaction: { thresholdPercent: 85 },
+    }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { model: "project-model" },
+      ansiTheme: { lightTheme: "project-light" },
+      notifications: { agentCompletion: false },
+      cmux: { enabled: true },
+      compaction: { enabled: false, thresholdPercent: 92.5 },
+    }),
+  );
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
   assert.deepEqual(loaded.config.sessionPolicy.sessionTitle, {
@@ -69,33 +75,53 @@ test("unprivileged trusted project values override valid global values", () => {
     enabled: false,
     thresholdPercent: 92.5,
   });
-  assert.ok(loaded.warnings.some((warning) => warning.includes("sessionPolicy.sessionTitle.model")));
+  assert.ok(
+    loaded.warnings.some((warning) => warning.includes("sessionPolicy.sessionTitle.model")),
+  );
 });
 
 test("trusted projects cannot replace privileged model profiles", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
-    modelProfiles: [
-      { name: "global-low", provider: "openai-codex", model: "global", effort: "low" },
-    ],
-  }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    modelProfiles: [
-      { name: "project-high", provider: "openai-codex", model: "project", effort: "high" },
-      { name: "project-low", provider: "openai-codex", model: "project", effort: "low" },
-    ],
-  }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({
+      modelProfiles: [
+        { name: "global-low", provider: "openai-codex", model: "global", effort: "low" },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      modelProfiles: [
+        { name: "project-high", provider: "openai-codex", model: "project", effort: "high" },
+        { name: "project-low", provider: "openai-codex", model: "project", effort: "low" },
+      ],
+    }),
+  );
   const trusted = loadPiTaiConfig({ ...paths, projectTrusted: true });
-  assert.deepEqual(trusted.config.sessionPolicy.modelProfiles.map((profile) => profile.name), ["global-low"]);
+  assert.deepEqual(
+    trusted.config.sessionPolicy.modelProfiles.map((profile) => profile.name),
+    ["global-low"],
+  );
   assert.ok(trusted.warnings.some((warning) => warning.includes("sessionPolicy.modelProfiles")));
   const untrusted = loadPiTaiConfig({ ...paths, projectTrusted: false });
-  assert.deepEqual(untrusted.config.sessionPolicy.modelProfiles.map((profile) => profile.name), ["global-low"]);
+  assert.deepEqual(
+    untrusted.config.sessionPolicy.modelProfiles.map((profile) => profile.name),
+    ["global-low"],
+  );
 });
 
 test("untrusted project configuration is ignored", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({ sessionTitle: { model: "global" } }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({ sessionTitle: { model: "project" } }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({ sessionTitle: { model: "global" } }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({ sessionTitle: { model: "project" } }),
+  );
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: false });
   assert.equal(loaded.config.sessionPolicy.sessionTitle.model, "global");
@@ -103,16 +129,22 @@ test("untrusted project configuration is ignored", () => {
 
 test("invalid overrides are ignored without erasing valid global values", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
-    sessionTitle: { provider: "global", maxWords: 7 },
-  }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    sessionTitle: { provider: "", maxWords: 99, surprise: true },
-    notifications: { reviewFailure: "yes", surprise: true },
-    cmux: { enabled: "yes", surprise: true },
-    compaction: { enabled: "yes", thresholdPercent: 101, surprise: true },
-    unknown: true,
-  }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { provider: "global", maxWords: 7 },
+    }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { provider: "", maxWords: 99, surprise: true },
+      notifications: { reviewFailure: "yes", surprise: true },
+      cmux: { enabled: "yes", surprise: true },
+      compaction: { enabled: "yes", thresholdPercent: 101, surprise: true },
+      unknown: true,
+    }),
+  );
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
   assert.equal(loaded.config.sessionPolicy.sessionTitle.provider, "global");
@@ -137,21 +169,26 @@ test("invalid JSON produces a warning and safe defaults", () => {
   assert.equal(loaded.warnings.length, 1);
 });
 
-
 test("trusted projects cannot override privileged model selection", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
-    sessionTitle: { model: "global-model" },
-    modelProfiles: [
-      { name: "global", provider: "openai-codex", model: "global-model", effort: "low" },
-    ],
-  }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    sessionTitle: { model: "project-model" },
-    modelProfiles: [
-      { name: "project", provider: "other", model: "project-model", effort: "high" },
-    ],
-  }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { model: "global-model" },
+      modelProfiles: [
+        { name: "global", provider: "openai-codex", model: "global-model", effort: "low" },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { model: "project-model" },
+      modelProfiles: [
+        { name: "project", provider: "other", model: "project-model", effort: "high" },
+      ],
+    }),
+  );
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
   assert.equal(loaded.config.sessionPolicy.sessionTitle.model, "global-model");
@@ -176,12 +213,18 @@ test("provenance is complete and defaults every absent field", () => {
 
 test("provenance identifies winning user and project layers", () => {
   const paths = fixture();
-  writeFileSync(join(paths.agentDir, "pi-tai.json"), JSON.stringify({
-    compaction: { enabled: false },
-  }));
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    compaction: { thresholdPercent: 75 },
-  }));
+  writeFileSync(
+    join(paths.agentDir, "pi-tai.json"),
+    JSON.stringify({
+      compaction: { enabled: false },
+    }),
+  );
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      compaction: { thresholdPercent: 75 },
+    }),
+  );
 
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
   assert.deepEqual(loaded.provenance["sessionPolicy.compaction.enabled"], {
@@ -194,8 +237,14 @@ test("provenance identifies winning user and project layers", () => {
     path: loaded.projectPath,
     digest: loaded.provenance["sessionPolicy.compaction.thresholdPercent"]?.digest,
   });
-  assert.match(loaded.provenance["sessionPolicy.compaction.enabled"]?.digest ?? "", /^[a-f0-9]{64}$/);
-  assert.match(loaded.provenance["sessionPolicy.compaction.thresholdPercent"]?.digest ?? "", /^[a-f0-9]{64}$/);
+  assert.match(
+    loaded.provenance["sessionPolicy.compaction.enabled"]?.digest ?? "",
+    /^[a-f0-9]{64}$/,
+  );
+  assert.match(
+    loaded.provenance["sessionPolicy.compaction.thresholdPercent"]?.digest ?? "",
+    /^[a-f0-9]{64}$/,
+  );
 });
 
 test("layer digests are stable until raw file content changes", () => {
@@ -214,9 +263,12 @@ test("layer digests are stable until raw file content changes", () => {
 
 test("invalid privileged project values warn only about privilege", () => {
   const paths = fixture();
-  writeFileSync(join(paths.cwd, ".pi", "pi-tai.json"), JSON.stringify({
-    sessionTitle: { model: "" },
-  }));
+  writeFileSync(
+    join(paths.cwd, ".pi", "pi-tai.json"),
+    JSON.stringify({
+      sessionTitle: { model: "" },
+    }),
+  );
   const loaded = loadPiTaiConfig({ ...paths, projectTrusted: true });
   assert.equal(loaded.warnings.length, 1);
   assert.match(loaded.warnings[0] ?? "", /Ignored privileged sessionPolicy\.sessionTitle\.model/);

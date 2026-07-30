@@ -18,10 +18,7 @@ import {
   type ProposedAction,
   type ReviewDecision,
 } from "./policy.ts";
-import {
-  createGuardianReviewRecorder,
-  type GuardianReviewRecorder,
-} from "./records.ts";
+import { createGuardianReviewRecorder, type GuardianReviewRecorder } from "./records.ts";
 
 export type ActionReviewer = (request: ReviewRequest) => Promise<ReviewResult>;
 
@@ -40,10 +37,7 @@ export interface GuardianOptions {
   onHumanExecutionRequired?: (notice: HumanExecutionRequiredNotice) => void | Promise<void>;
 }
 
-export function registerApprovalGuardian(
-  pi: ExtensionAPI,
-  options: GuardianOptions = {},
-): void {
+export function registerApprovalGuardian(pi: ExtensionAPI, options: GuardianOptions = {}): void {
   const reviewer = options.reviewer ?? reviewAction;
   const recorder = options.recorder ?? createGuardianReviewRecorder();
 
@@ -176,10 +170,15 @@ async function notifyHumanExecutionRequired(
   }
 }
 
-function humanExecutionReason(action: ProposedAction, reason: string, reviewUnavailable: boolean): string {
-  const exactAction = action.toolName === "bash" && typeof action.arguments.command === "string"
-    ? `Command for the human to review and run directly if they choose:\n${action.arguments.command}`
-    : `Tool action for the human to review and perform directly if they choose:\n${JSON.stringify({ tool: action.toolName, arguments: action.arguments })}`;
+function humanExecutionReason(
+  action: ProposedAction,
+  reason: string,
+  reviewUnavailable: boolean,
+): string {
+  const exactAction =
+    action.toolName === "bash" && typeof action.arguments.command === "string"
+      ? `Command for the human to review and run directly if they choose:\n${action.arguments.command}`
+      : `Tool action for the human to review and perform directly if they choose:\n${JSON.stringify({ tool: action.toolName, arguments: action.arguments })}`;
   const basis = reviewUnavailable
     ? `Guardian could not complete review of a potentially destructive action: ${reason}`
     : `Guardian classified this as high-risk and will not execute it: ${reason}`;

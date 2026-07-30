@@ -2,10 +2,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  CustomEditor,
-  type KeybindingsManager,
-} from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { buildEditorArguments, parseEditorCommand } from "./command.ts";
 import { extractResponse, formatResponseDocument } from "./document.ts";

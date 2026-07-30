@@ -57,8 +57,9 @@ function runGit(cwd: string, args: readonly string[]) {
 }
 
 function isNotRepository(error: unknown): boolean {
-  return isExitCode(error, 128)
-    && errorMessage(error).toLowerCase().includes("not a git repository");
+  return (
+    isExitCode(error, 128) && errorMessage(error).toLowerCase().includes("not a git repository")
+  );
 }
 
 function isExitCode(error: unknown, code: number): boolean {

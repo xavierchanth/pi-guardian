@@ -35,8 +35,15 @@ import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
 import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
-import { HostRepositoryEnrollmentStore, RepositoryEnrollmentService } from "../../../packages/pi-tai/src/jj/repository-enrollment.ts";
-import { HostRepositoryMutationCoordinator, HostSessionWorkspaceStore, SessionWorkspaceService } from "../../../packages/pi-tai/src/jj/session-workspace.ts";
+import {
+  HostRepositoryEnrollmentStore,
+  RepositoryEnrollmentService,
+} from "../../../packages/pi-tai/src/jj/repository-enrollment.ts";
+import {
+  HostRepositoryMutationCoordinator,
+  HostSessionWorkspaceStore,
+  SessionWorkspaceService,
+} from "../../../packages/pi-tai/src/jj/session-workspace.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
 import type { HostServicePort } from "./host-services.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";
@@ -66,9 +73,13 @@ export class PiSdkRuntimePort implements RuntimePort {
     this.diagnostics = diagnostics;
   }
 
-  bindHostServices(services: HostServicePort): void { this.hostServices = services; }
+  bindHostServices(services: HostServicePort): void {
+    this.hostServices = services;
+  }
 
-  sessionPolicy(): SessionPolicy | undefined { return this.pinnedPolicy?.policy; }
+  sessionPolicy(): SessionPolicy | undefined {
+    return this.pinnedPolicy?.policy;
+  }
 
   async capabilities(): Promise<RuntimeCapabilities> {
     if (!this.runtime) {
@@ -83,15 +94,22 @@ export class PiSdkRuntimePort implements RuntimePort {
     const extensionRuntime = this.runtime.services.resourceLoader.getExtensions().runtime;
     return {
       methods: [],
-      tools: this.runtime.session.getAllTools().map((tool) => tool.name).sort(),
-      commands: extensionRuntime.getCommands().map((command) => command.name).sort(),
-      sessionCapabilities: this.capabilityController?.snapshot().capabilities.map((capability) => ({
-        id: capability.id,
-        available: capability.available,
-        serviceEnabled: capability.serviceEnabled,
-        toolsExposed: capability.toolsExposed,
-        ...(capability.reason ? { reason: capability.reason } : {}),
-      })) ?? [],
+      tools: this.runtime.session
+        .getAllTools()
+        .map((tool) => tool.name)
+        .sort(),
+      commands: extensionRuntime
+        .getCommands()
+        .map((command) => command.name)
+        .sort(),
+      sessionCapabilities:
+        this.capabilityController?.snapshot().capabilities.map((capability) => ({
+          id: capability.id,
+          available: capability.available,
+          serviceEnabled: capability.serviceEnabled,
+          toolsExposed: capability.toolsExposed,
+          ...(capability.reason ? { reason: capability.reason } : {}),
+        })) ?? [],
       extensionErrors: [...this.extensionErrors],
     };
   }
@@ -126,7 +144,11 @@ export class PiSdkRuntimePort implements RuntimePort {
     };
     await this.ensureModelRuntime(params.agentDir, params.faux ?? false);
     const sessionManager = SessionManager.open(params.sessionFile, params.sessionDir);
-    this.runtime = await this.createRuntime(sessionManager.getCwd(), params.agentDir, sessionManager);
+    this.runtime = await this.createRuntime(
+      sessionManager.getCwd(),
+      params.agentDir,
+      sessionManager,
+    );
     await this.bindSession(this.runtime.session);
     const info = sessionInfo(this.runtime.session, this.runtime.cwd);
     emit({
@@ -147,17 +169,24 @@ export class PiSdkRuntimePort implements RuntimePort {
     this.configureFauxResponses(params.text);
     this.active = { commandId, turnId: params.turnId, emit };
     let resolvePreflight!: (accepted: boolean) => void;
-    const preflight = new Promise<boolean>((resolve) => { resolvePreflight = resolve; });
-    const completion = session.prompt(params.text, {
-      source: "rpc",
-      preflightResult: resolvePreflight,
-    }).finally(() => {
-      if (this.active?.turnId === params.turnId) this.active = undefined;
+    const preflight = new Promise<boolean>((resolve) => {
+      resolvePreflight = resolve;
     });
+    const completion = session
+      .prompt(params.text, {
+        source: "rpc",
+        preflightResult: resolvePreflight,
+      })
+      .finally(() => {
+        if (this.active?.turnId === params.turnId) this.active = undefined;
+      });
     completion.catch(() => undefined);
     const accepted = await Promise.race([
       preflight,
-      completion.then(() => false, () => false),
+      completion.then(
+        () => false,
+        () => false,
+      ),
     ]);
     return { accepted, completion };
   }
@@ -195,14 +224,13 @@ export class PiSdkRuntimePort implements RuntimePort {
     params: SessionSetCapabilityParams,
     emit: RuntimeEventSink,
   ): Promise<RuntimeCapabilities> {
-    const known = this.capabilityController?.snapshot().capabilities.some(
-      (capability) => capability.id === params.capabilityId,
-    );
+    const known = this.capabilityController
+      ?.snapshot()
+      .capabilities.some((capability) => capability.id === params.capabilityId);
     if (!known) throw new Error(`Unknown capability: ${params.capabilityId}`);
-    await this.requireSession().prompt(
-      `/${params.capabilityId} ${params.enabled ? "on" : "off"}`,
-      { source: "rpc" },
-    );
+    await this.requireSession().prompt(`/${params.capabilityId} ${params.enabled ? "on" : "off"}`, {
+      source: "rpc",
+    });
     const capabilities = await this.capabilities();
     emit({
       event: "session.capabilities_changed",
@@ -237,15 +265,25 @@ export class PiSdkRuntimePort implements RuntimePort {
   private async managedSessionCwd(params: SessionCreateParams): Promise<string> {
     const rootSessionId = params.rootSessionId ?? undefined;
     if (!this.hostServices || !rootSessionId) return params.cwd;
-    const enrollments = new RepositoryEnrollmentService({ store: new HostRepositoryEnrollmentStore(this.hostServices) });
+    const enrollments = new RepositoryEnrollmentService({
+      store: new HostRepositoryEnrollmentStore(this.hostServices),
+    });
     let enrollment;
-    try { enrollment = await enrollments.verify(params.cwd); }
-    catch { return params.cwd; }
+    try {
+      enrollment = await enrollments.verify(params.cwd);
+    } catch {
+      return params.cwd;
+    }
     const service = new SessionWorkspaceService({
       store: new HostSessionWorkspaceStore(this.hostServices, rootSessionId),
       coordinator: new HostRepositoryMutationCoordinator(this.hostServices),
     });
-    const identity = await service.allocate({ enrollment, invokingCwd: params.cwd, rootSessionId, runtimeGeneration: params.runtimeGeneration ?? 1 });
+    const identity = await service.allocate({
+      enrollment,
+      invokingCwd: params.cwd,
+      rootSessionId,
+      runtimeGeneration: params.runtimeGeneration ?? 1,
+    });
     return identity.path;
   }
 
@@ -311,7 +349,9 @@ export class PiSdkRuntimePort implements RuntimePort {
         ),
         workContext: createPiSessionWorkContextStore(),
         titleGenerator: async () => "Hosted session",
-        queryTerminalBackground: async () => { throw new Error("TTY access is disabled in hosted mode."); },
+        queryTerminalBackground: async () => {
+          throw new Error("TTY access is disabled in hosted mode.");
+        },
         notificationSender: () => {},
         capabilities,
         agentDir,
@@ -407,10 +447,13 @@ export class PiSdkRuntimePort implements RuntimePort {
     if (!this.faux) throw new Error("Faux provider is unavailable.");
     if (prompt.includes("use update_plan")) {
       this.faux.setResponses([
-        fauxAssistantMessage(fauxToolCall("update_plan", {
-          goal: "Prove hosted runtime",
-          plan: [{ content: "Run faux prompt", status: "in_progress" }],
-        }), { stopReason: "toolUse" }),
+        fauxAssistantMessage(
+          fauxToolCall("update_plan", {
+            goal: "Prove hosted runtime",
+            plan: [{ content: "Run faux prompt", status: "in_progress" }],
+          }),
+          { stopReason: "toolUse" },
+        ),
         fauxAssistantMessage("Plan recorded by the hosted runtime."),
       ]);
       return;
@@ -418,9 +461,10 @@ export class PiSdkRuntimePort implements RuntimePort {
     this.faux.setResponses([
       (context) => {
         const history = JSON.stringify(context.messages);
-        const prefix = prompt.includes("verify history") && history.includes("first persisted turn")
-          ? "history-present"
-          : "faux";
+        const prefix =
+          prompt.includes("verify history") && history.includes("first persisted turn")
+            ? "history-present"
+            : "faux";
         const text = prompt.includes("slow")
           ? `${prefix} ${"streaming ".repeat(80)}`
           : `${prefix} response`;

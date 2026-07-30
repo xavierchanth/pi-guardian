@@ -3,8 +3,7 @@ export interface EditorInvocation {
   args: string[];
 }
 
-export const NEOVIM_RESPONSE_POSITION_COMMAND =
-  "+call cursor(search('^<response>$', 'nw') + 1, 1)";
+export const NEOVIM_RESPONSE_POSITION_COMMAND = "+call cursor(search('^<response>$', 'nw') + 1, 1)";
 
 export function parseEditorCommand(command: string): EditorInvocation | undefined {
   const tokens: string[] = [];

@@ -33,7 +33,8 @@ export async function registerCmux(
   const environment = dependencies.environment ?? process.env;
   if (!environment.CMUX_WORKSPACE_ID?.trim()) return false;
 
-  const injected = dependencies.initI18n && dependencies.registerNotify && dependencies.registerSidebar;
+  const injected =
+    dependencies.initI18n && dependencies.registerNotify && dependencies.registerSidebar;
   if (!injected && !hasCmuxExecutable(environment)) return false;
   const defaults = injected ? undefined : await loadCmuxModules();
   const initializeI18n = dependencies.initI18n ?? defaults!.initI18n;
@@ -52,7 +53,10 @@ function hasCmuxExecutable(environment: NodeJS.ProcessEnv): boolean {
   for (const directory of environment.PATH?.split(delimiter) ?? []) {
     if (!directory) continue;
     try {
-      accessSync(join(directory, process.platform === "win32" ? "cmux.exe" : "cmux"), constants.X_OK);
+      accessSync(
+        join(directory, process.platform === "win32" ? "cmux.exe" : "cmux"),
+        constants.X_OK,
+      );
       return true;
     } catch {
       // Keep searching the configured executable path.
@@ -86,7 +90,7 @@ function gateEventHandlers(pi: ExtensionAPI, enabled: () => boolean): ExtensionA
     get(target, property) {
       if (property === "on") {
         return (name: string, handler: Handler) => {
-          register(name, (event, context) => enabled() ? handler(event, context) : undefined);
+          register(name, (event, context) => (enabled() ? handler(event, context) : undefined));
         };
       }
       const value = Reflect.get(target, property, target) as unknown;

@@ -107,8 +107,13 @@ describe("codex protocol capability mapping", () => {
   const supported = { webSearch: true, imageGeneration: false, namespaceTools: false };
 
   it("distinguishes unsupported provider support from policy restrictions", () => {
-    const unsupported = researchAvailability({ ...supported, webSearch: false }, { requirements: null });
-    const policy = researchAvailability(supported, { requirements: { allowedWebSearchModes: ["cached"] } });
+    const unsupported = researchAvailability(
+      { ...supported, webSearch: false },
+      { requirements: null },
+    );
+    const policy = researchAvailability(supported, {
+      requirements: { allowedWebSearchModes: ["cached"] },
+    });
     assert.equal(unsupported.ok, false);
     assert.equal(!unsupported.ok && unsupported.kind, "unsupported");
     assert.equal(policy.ok, false);
@@ -117,7 +122,10 @@ describe("codex protocol capability mapping", () => {
 
   it("permits live search when requirements are absent or explicitly allow it", () => {
     assert.deepEqual(researchAvailability(supported, { requirements: null }), { ok: true });
-    assert.deepEqual(researchAvailability(supported, { requirements: { allowedWebSearchModes: ["live"] } }), { ok: true });
+    assert.deepEqual(
+      researchAvailability(supported, { requirements: { allowedWebSearchModes: ["live"] } }),
+      { ok: true },
+    );
   });
 });
 
@@ -154,12 +162,25 @@ describe("codex backend", () => {
     const session = await backend.spawn(task());
     const events = await collect(session.events);
 
-    assert.deepEqual(events.map((event) => event.type), [
-      "run_started", "tool_start", "tool_end", "assistant_delta", "assistant_delta",
-      "usage", "assistant_message", "run_settled",
-    ]);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      [
+        "run_started",
+        "tool_start",
+        "tool_end",
+        "assistant_delta",
+        "assistant_delta",
+        "usage",
+        "assistant_message",
+        "run_settled",
+      ],
+    );
     const usage = events.find((event) => event.type === "usage");
-    assert.equal(usage?.type === "usage" && usage.inputTokens, 1000, "cached input counts toward input tokens");
+    assert.equal(
+      usage?.type === "usage" && usage.inputTokens,
+      1000,
+      "cached input counts toward input tokens",
+    );
     assert.equal(usage?.type === "usage" && usage.contextWindow, 200_000);
     const settled = events.at(-1);
     assert.equal(settled?.type === "run_settled" && settled.outcome, "completed");
@@ -188,7 +209,14 @@ describe("codex backend", () => {
 
     assert.match(await stderr, /web_search=live/);
     const web = events.filter((event) => event.type === "tool_start" || event.type === "tool_end");
-    assert.ok(web.some((event) => event.type === "tool_start" && event.name === "web_search" && event.preview === "current facts"));
+    assert.ok(
+      web.some(
+        (event) =>
+          event.type === "tool_start" &&
+          event.name === "web_search" &&
+          event.preview === "current facts",
+      ),
+    );
   });
 
   it("fails a researcher before starting a thread when native search is unsupported", async () => {
@@ -277,10 +305,17 @@ describe("codex backend", () => {
 function captureStderr(session: unknown): Promise<string> {
   const child = (session as { child: { stderr: NodeJS.ReadableStream } }).child;
   let text = "";
-  child.stderr.on("data", (chunk: Buffer) => { text += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk: Buffer) => {
+    text += chunk.toString("utf8");
+  });
   return new Promise((resolve) => setTimeout(() => resolve(text), 250));
 }
 
 function waitFor(check: () => boolean): Promise<void> {
-  return new Promise((resolve) => setTimeout(() => { check(); resolve(); }, 150));
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      check();
+      resolve();
+    }, 150),
+  );
 }
