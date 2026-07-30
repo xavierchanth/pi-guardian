@@ -25,6 +25,7 @@ import {
 import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
+import { registerBtw } from "./src/sidebar/register.ts";
 import { registerAgents } from "./src/agents/register.ts";
 import type { BackendName } from "./src/agents/domain.ts";
 
@@ -67,6 +68,7 @@ export interface PiTaiRegistrars {
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
+  sidebar: PiTaiRegistrar;
   cmux: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
   guardian: PiTaiRegistrar;
@@ -99,6 +101,7 @@ const productionRegistrars: PiTaiRegistrars = {
   sessionTitle: (pi, runtime) => {
     registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
   },
+  sidebar: (pi) => registerBtw(pi),
   cmux: async (pi, runtime) => {
     await registerCmux(pi, runtime.config);
   },
@@ -145,6 +148,7 @@ export function createPiTaiExtension(
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);
+    await registrars.sidebar(pi, runtime);
     await registrars.cmux(pi, runtime);
     await registrars.notifications(pi, runtime);
     await registrars.guardian(pi, runtime);

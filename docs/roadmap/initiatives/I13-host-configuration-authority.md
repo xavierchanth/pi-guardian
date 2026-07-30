@@ -1,7 +1,11 @@
 # I13 — Host configuration authority
 
-**Status:** In progress  
-**Depends on:** I02, I03
+**Status:** Retired (delivered checkpoints 1–7 retained as architecture)  
+**Depends on:** —
+
+I13 is no longer active and is not a dependency gate. The user retired the initiative after accepting
+checkpoints 1–7. Checkpoints 8, 12, and 13 are explicitly dropped; this document preserves delivered
+architecture and historical decisions only. In particular, Guardian behavior is unchanged.
 
 ## Outcome
 
@@ -10,22 +14,16 @@ an event, and never re-read from the filesystem by a running worker. Every resol
 provenance; privileged fields cannot be set by a project. Guardian's reviewer model and timeout
 become explicit machine configuration; high/critical outcomes remain fixed safety invariants.
 
-## Current gap
+## Delivered boundary
 
 Checkpoints 6 and 7 ended the Host/runtime configuration split. A Host-managed session now resolves
 policy before worker startup, emits one durable `session.policy_resolved` event, reconstructs policy
 from replay, and rejects a worker session that lacks pinned policy and provenance. Editing a
 configuration file cannot alter an existing session; it affects only sessions created afterward.
 
-I13 remains incomplete in four areas:
-
-1. session policy is pinned but cannot yet be changed through a revision-guarded command and event;
-2. project trust is a temporary client assertion rather than a Host-owned, digest-bound decision;
-3. project agent definitions can still widen a packaged or user definition;
-4. Guardian's reviewer model and timeout remain hardcoded rather than explicit privileged Host
-   machine configuration.
-
-Configuration remains the forcing function for I01. While the direct Pi extension is both client
+The formerly planned policy mutation, Host-owned project trust/agent narrowing, and Guardian
+configuration work is not implied future scope here; checkpoints 8, 12, and 13 were dropped when the
+initiative was retired. Configuration is therefore no longer a forcing function for I01. While the direct Pi extension is both client
 and harness, `packages/pi-tai/src` can remain both core and adapter. Configuration exposes where
 Pi's ownership is load-bearing rather than incidental: `getAgentDir()`, project trust,
 `session_start`, credentials, model catalogs, and keybindings.
@@ -215,9 +213,9 @@ pinned configuration that fails loudly.
 | 5 | **[Complete]** Implement the pure Rust resolver and generated TypeScript bindings | Medium | 4 | Fixture/differential tests agree with preserved loader behavior; invalid values warn rather than abort |
 | 6 | **[Complete]** Host resolves policy and the runtime protocol carries it | Medium | 5, I03 protocol foundation | Host calls the resolver and sends resolved policy plus provenance |
 | 7 | **[Complete]** Cut configuration authority over to the Host | High | 6 | Worker opens no config files; `session.policy_resolved`, replay, and mid-session-edit tests prove one authority |
-| 8 | Add revision-guarded `session.set_policy`; make profile and effort changes commands | Medium | 7 | Commands/events replay deterministically and reject stale revisions |
-| 12 | Make Guardian reviewer configuration explicit (D10) in a separate change | Security-sensitive | 7; separate from 7 | Reviewer model is pinned, timeout is configured, and high/critical outcomes remain non-configurable |
-| 13 | Replace asserted project trust with Host-owned trust and agent narrowing (D8) | Security-sensitive | 7 | Trust is digest-bound; project agents cannot widen tools or become root; clients cannot assert trust |
+| 8 | **[Dropped]** Revision-guarded `session.set_policy` and profile/effort commands | — | — | Explicitly not delivered by I13 |
+| 12 | **[Dropped]** Explicit Guardian reviewer configuration (D10) | — | — | Guardian remains unchanged |
+| 13 | **[Dropped]** Host-owned trust and agent narrowing (D8) | — | — | Explicitly not delivered by I13 |
 
 Checkpoints 9–11 (ACP modes/models/commands/permissions, the Pi interactive-session backend seam,
 and `pi-tai-client` productization) belong to I04 and I10 and are tracked there.
