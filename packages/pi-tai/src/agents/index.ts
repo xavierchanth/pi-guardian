@@ -32,4 +32,8 @@ export {
   type SubagentManagerOptions,
 } from "./manager.ts";
 export { DeferredResultDelivery, type DeferredResult } from "./result-delivery.ts";
-export { IsolatedSubagents, type IsolatedSpawnRequest, type IsolatedSubagentsOptions } from "./isolated.ts";
+export {
+  IsolatedSubagents,
+  type IsolatedSpawnRequest,
+  type IsolatedSubagentsOptions,
+} from "./isolated.ts";

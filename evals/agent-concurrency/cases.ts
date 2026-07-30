@@ -23,7 +23,9 @@ export async function loadConcurrencyCases(directory: string): Promise<Concurren
     try {
       raw = parse(await readFile(source, "utf8"));
     } catch (error) {
-      throw new Error(`${source}: YAML parse failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `${source}: YAML parse failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
     cases.push(validateConcurrencyCase(raw, source));
   }
@@ -32,14 +34,30 @@ export async function loadConcurrencyCases(directory: string): Promise<Concurren
     if (ids.has(item.id)) throw new Error(`${directory}: duplicate case ID: ${item.id}`);
     ids.add(item.id);
   }
-  if (!cases.some((item) => item.mode === "policy")) throw new Error(`${directory}: at least one policy case is required.`);
-  if (!cases.some((item) => item.mode === "real-jj")) throw new Error(`${directory}: at least one Real-JJ case is required.`);
+  if (!cases.some((item) => item.mode === "policy"))
+    throw new Error(`${directory}: at least one policy case is required.`);
+  if (!cases.some((item) => item.mode === "real-jj"))
+    throw new Error(`${directory}: at least one Real-JJ case is required.`);
   return cases;
 }
 
 export function validateConcurrencyCase(raw: unknown, source = "<input>"): ConcurrencyEvalCase {
   const value = record(raw, source, "$");
-  exact(value, ["version", "suite", "id", "title", "mode", "prompt", "expectedTools", "forbiddenTools", "expectedReportFields"], source);
+  exact(
+    value,
+    [
+      "version",
+      "suite",
+      "id",
+      "title",
+      "mode",
+      "prompt",
+      "expectedTools",
+      "forbiddenTools",
+      "expectedReportFields",
+    ],
+    source,
+  );
   if (value.version !== 1) fail(source, "version", "expected 1");
   if (value.suite !== "agent-concurrency") fail(source, "suite", "expected agent-concurrency");
   const id = text(value.id, source, "id");
@@ -63,7 +81,8 @@ export function validateConcurrencyCase(raw: unknown, source = "<input>"): Concu
 }
 
 function record(value: unknown, source: string, path: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) fail(source, path, "expected mapping");
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(source, path, "expected mapping");
   return value as Record<string, unknown>;
 }
 function exact(value: Record<string, unknown>, keys: readonly string[], source: string): void {
@@ -77,8 +96,16 @@ function textList(value: unknown, source: string, path: string): string[] {
   if (!Array.isArray(value)) fail(source, path, "expected list");
   return value.map((item, index) => text(item, source, `${path}[${index}]`));
 }
-function oneOf<T extends string>(value: unknown, choices: readonly T[], source: string, path: string): T {
-  if (typeof value !== "string" || !choices.includes(value as T)) fail(source, path, `expected one of: ${choices.join(", ")}`);
+function oneOf<T extends string>(
+  value: unknown,
+  choices: readonly T[],
+  source: string,
+  path: string,
+): T {
+  if (typeof value !== "string" || !choices.includes(value as T))
+    fail(source, path, `expected one of: ${choices.join(", ")}`);
   return value as T;
 }
-function fail(source: string, path: string, reason: string): never { throw new Error(`${source}:${path}: ${reason}`); }
+function fail(source: string, path: string, reason: string): never {
+  throw new Error(`${source}:${path}: ${reason}`);
+}

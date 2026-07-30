@@ -16,9 +16,7 @@ export function registerFooter(
       invalidate() {},
       render(width: number): string[] {
         return renderFooterRows(createSnapshot(pi, ctx, workContext, capabilities), width).map(
-          (row) =>
-            theme.fg(row.leftColor, row.left) +
-            theme.fg("text", row.padding + row.right),
+          (row) => theme.fg(row.leftColor, row.left) + theme.fg("text", row.padding + row.right),
         );
       },
     }));
@@ -64,8 +62,10 @@ function createSnapshot(
     .sort((left, right) => {
       const leftIndex = capabilityOrder.indexOf(left.id);
       const rightIndex = capabilityOrder.indexOf(right.id);
-      return (leftIndex < 0 ? capabilityOrder.length : leftIndex)
-        - (rightIndex < 0 ? capabilityOrder.length : rightIndex);
+      return (
+        (leftIndex < 0 ? capabilityOrder.length : leftIndex) -
+        (rightIndex < 0 ? capabilityOrder.length : rightIndex)
+      );
     })
     .map((capability) => capability.label);
   return {
@@ -88,7 +88,9 @@ function createSnapshot(
 function billedUsage(entry: SessionEntry): Usage | undefined {
   if (entry.type === "message") {
     const message = entry.message as typeof entry.message & { usage?: Usage };
-    return message.role === "assistant" || message.role === "toolResult" ? message.usage : undefined;
+    return message.role === "assistant" || message.role === "toolResult"
+      ? message.usage
+      : undefined;
   }
   if (entry.type === "compaction" || entry.type === "branch_summary") {
     return (entry as typeof entry & { usage?: Usage }).usage;

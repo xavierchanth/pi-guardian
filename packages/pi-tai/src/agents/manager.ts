@@ -105,7 +105,9 @@ export class SubagentManager {
 
   async spawn(request: SpawnRequest): Promise<SubagentSnapshot> {
     if (this.reserved >= this.maxRunning) {
-      throw new Error(`At most ${this.maxRunning} subagents may run at once; wait for one to finish.`);
+      throw new Error(
+        `At most ${this.maxRunning} subagents may run at once; wait for one to finish.`,
+      );
     }
     this.reserved += 1;
     const id = `sa-${++this.sequence}`;
@@ -113,7 +115,9 @@ export class SubagentManager {
       const backend = await this.registry.require(request.backend);
       const abort = new AbortController();
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
-      const settled = new Promise<SubagentSnapshot>((resolve) => { resolveSettled = resolve; });
+      const settled = new Promise<SubagentSnapshot>((resolve) => {
+        resolveSettled = resolve;
+      });
       const entry: Entry = {
         snapshot: emptySnapshot({
           id,
@@ -165,7 +169,11 @@ export class SubagentManager {
    * requested terminal snapshots visible then. Foreground input can release
    * the wait without cancelling children, while tool cancellation still rejects.
    */
-  async wait(ids: readonly string[], signal?: AbortSignal, interruption?: AbortSignal): Promise<WaitResult> {
+  async wait(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    interruption?: AbortSignal,
+  ): Promise<WaitResult> {
     const unique = [...new Set(ids)];
     const missing = unique.filter((id) => !this.entries.has(id));
     if (missing.length) throw new Error(`Unknown subagent(s): ${missing.join(", ")}.`);
@@ -181,20 +189,27 @@ export class SubagentManager {
       return { settled, pending, reason };
     };
     if (interruption?.aborted) return collect("user-interrupted");
-    if (unique.some((id) => this.entries.get(id)!.snapshot.status !== "running")) return collect("settled");
+    if (unique.some((id) => this.entries.get(id)!.snapshot.status !== "running"))
+      return collect("settled");
 
     let onCancel: (() => void) | undefined;
     let onInterrupt: (() => void) | undefined;
-    const cancelled = signal && new Promise<never>((_, reject) => {
-      onCancel = () => reject(new Error("Wait was cancelled."));
-      signal.addEventListener("abort", onCancel, { once: true });
-    });
-    const interrupted = interruption && new Promise<"user-interrupted">((resolve) => {
-      onInterrupt = () => resolve("user-interrupted");
-      interruption.addEventListener("abort", onInterrupt, { once: true });
-    });
+    const cancelled =
+      signal &&
+      new Promise<never>((_, reject) => {
+        onCancel = () => reject(new Error("Wait was cancelled."));
+        signal.addEventListener("abort", onCancel, { once: true });
+      });
+    const interrupted =
+      interruption &&
+      new Promise<"user-interrupted">((resolve) => {
+        onInterrupt = () => resolve("user-interrupted");
+        interruption.addEventListener("abort", onInterrupt, { once: true });
+      });
     try {
-      const firstSettlement = Promise.race(unique.map((id) => this.entries.get(id)!.settled)).then(() => "settled" as const);
+      const firstSettlement = Promise.race(unique.map((id) => this.entries.get(id)!.settled)).then(
+        () => "settled" as const,
+      );
       const outcome = await Promise.race([
         firstSettlement,
         ...(cancelled ? [cancelled] : []),
@@ -234,7 +249,9 @@ export class SubagentManager {
   /** Starts a follow-up run in place, reusing the entry so the id stays stable. */
   private async resume(entry: Entry, text: string, resumeToken: string): Promise<void> {
     if (this.reserved >= this.maxRunning) {
-      throw new Error(`At most ${this.maxRunning} subagents may run at once; wait for one to finish.`);
+      throw new Error(
+        `At most ${this.maxRunning} subagents may run at once; wait for one to finish.`,
+      );
     }
     this.reserved += 1;
     const task: SpawnTask = { ...entry.task, prompt: text, resumeToken };
@@ -250,7 +267,9 @@ export class SubagentManager {
     entry.session = session;
     // Reopen the entry so `wait` and result delivery work exactly as on a first run.
     let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
-    const settled = new Promise<SubagentSnapshot>((resolve) => { resolveSettled = resolve; });
+    const settled = new Promise<SubagentSnapshot>((resolve) => {
+      resolveSettled = resolve;
+    });
     Object.assign(entry, { settled, resolveSettled });
     this.update(entry, { ...entry.snapshot, status: "running", latestText: "", liveTools: [] });
     this.delivery.consume(entry.snapshot.id);
@@ -280,7 +299,9 @@ export class SubagentManager {
 
   /** Cancels everything and releases backend resources. */
   async shutdown(): Promise<void> {
-    const running = this.list().filter((snapshot) => snapshot.status === "running").map((snapshot) => snapshot.id);
+    const running = this.list()
+      .filter((snapshot) => snapshot.status === "running")
+      .map((snapshot) => snapshot.id);
     if (running.length) await this.cancel(running);
     for (const entry of this.entries.values()) entry.session?.dispose();
     this.entries.clear();
@@ -300,7 +321,10 @@ export class SubagentManager {
       // The stream ended without a terminal event; treat that as a backend fault
       // rather than leaving the entry running forever.
       if (entry.snapshot.status === "running") {
-        this.finish(entry, { type: "backend_error", message: "Backend closed the event stream without settling." });
+        this.finish(entry, {
+          type: "backend_error",
+          message: "Backend closed the event stream without settling.",
+        });
       }
     } catch (error) {
       this.finish(entry, { type: "backend_error", message: describe(error) });

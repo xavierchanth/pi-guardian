@@ -28,7 +28,9 @@ export interface BackendCapabilities {
   readonly resumable?: boolean;
 }
 
-export type AvailabilityResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+export type AvailabilityResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
 
 export interface SubagentSession {
   /** Normalised event stream; completes after the terminal `run_settled`. */
@@ -72,7 +74,8 @@ export class BackendRegistry {
       );
     }
     const availability = await backend.available();
-    if (!availability.ok) throw new Error(`Backend "${name}" is unavailable: ${availability.reason}`);
+    if (!availability.ok)
+      throw new Error(`Backend "${name}" is unavailable: ${availability.reason}`);
     return backend;
   }
 }

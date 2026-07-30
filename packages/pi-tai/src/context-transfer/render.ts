@@ -25,8 +25,10 @@ function summaryFrom(message: {
   }
   if (typeof message.content === "string") return message.content;
   return message.content
-    .filter((block): block is { type: "text"; text: string } =>
-      block.type === "text" && typeof block.text === "string")
+    .filter(
+      (block): block is { type: "text"; text: string } =>
+        block.type === "text" && typeof block.text === "string",
+    )
     .map((block) => block.text)
     .join("\n");
 }

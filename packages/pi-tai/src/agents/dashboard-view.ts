@@ -9,7 +9,13 @@
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type TUI } from "@earendil-works/pi-tui";
-import { clampSelection, renderDashboard, renderSubagentDetail, scrollDetail, type DashboardTone } from "./dashboard.ts";
+import {
+  clampSelection,
+  renderDashboard,
+  renderSubagentDetail,
+  scrollDetail,
+  type DashboardTone,
+} from "./dashboard.ts";
 import type { SubagentSnapshot } from "./domain.ts";
 
 /**
@@ -55,17 +61,18 @@ class SubagentDashboard {
     this.theme = options.theme;
     this.close = options.close;
     this.snapshots = this.agents?.list() ?? [];
-    this.unsubscribe = this.agents?.subscribe(() => {
-      this.snapshots = this.agents?.list() ?? [];
-      this.selected = clampSelection(this.snapshots.length, this.selected);
-      if (this.detailId && !this.snapshots.some((snapshot) => snapshot.id === this.detailId)) {
-        const id = this.detailId;
-        this.detailId = undefined;
-        this.detailScroll = 0;
-        this.notice = `${id} is no longer available.`;
-      }
-      this.tui.requestRender();
-    }) ?? (() => {});
+    this.unsubscribe =
+      this.agents?.subscribe(() => {
+        this.snapshots = this.agents?.list() ?? [];
+        this.selected = clampSelection(this.snapshots.length, this.selected);
+        if (this.detailId && !this.snapshots.some((snapshot) => snapshot.id === this.detailId)) {
+          const id = this.detailId;
+          this.detailId = undefined;
+          this.detailScroll = 0;
+          this.notice = `${id} is no longer available.`;
+        }
+        this.tui.requestRender();
+      }) ?? (() => {});
   }
 
   handleInput(data: string): void {
@@ -77,8 +84,14 @@ class SubagentDashboard {
       } else this.close();
       return;
     }
-    if (matchesKey(data, "q") || matchesKey(data, "ctrl+c")) { this.close(); return; }
-    if (matchesKey(data, "x")) { this.abort(); return; }
+    if (matchesKey(data, "q") || matchesKey(data, "ctrl+c")) {
+      this.close();
+      return;
+    }
+    if (matchesKey(data, "x")) {
+      this.abort();
+      return;
+    }
     if (this.detailId) {
       if (matchesKey(data, "j") || matchesKey(data, "down")) this.scroll("down");
       else if (matchesKey(data, "k") || matchesKey(data, "up")) this.scroll("up");
@@ -90,7 +103,12 @@ class SubagentDashboard {
     }
     if (matchesKey(data, "enter")) {
       const target = this.snapshots[this.selected];
-      if (target) { this.detailId = target.id; this.detailScroll = 0; this.notice = undefined; this.tui.requestRender(); }
+      if (target) {
+        this.detailId = target.id;
+        this.detailScroll = 0;
+        this.notice = undefined;
+        this.tui.requestRender();
+      }
       return;
     }
     if (matchesKey(data, "j") || matchesKey(data, "down")) this.move(1);
@@ -98,16 +116,32 @@ class SubagentDashboard {
   }
 
   render(width: number): string[] {
-    const detail = this.detailId ? this.snapshots.find((snapshot) => snapshot.id === this.detailId) : undefined;
-    const rows = detail ? renderSubagentDetail({
-      snapshot: detail, width, now: Date.now(), scroll: this.detailScroll,
-      ...(this.notice ? { notice: this.notice } : {}),
-    }) : undefined;
-    if (rows) { this.detailScroll = rows.scroll; this.detailMaxScroll = rows.maxScroll; }
-    return (rows?.rows ?? renderDashboard({
-      snapshots: this.snapshots, selected: this.selected, width, now: Date.now(),
-      ...(this.notice ? { notice: this.notice } : {}),
-    })).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+    const detail = this.detailId
+      ? this.snapshots.find((snapshot) => snapshot.id === this.detailId)
+      : undefined;
+    const rows = detail
+      ? renderSubagentDetail({
+          snapshot: detail,
+          width,
+          now: Date.now(),
+          scroll: this.detailScroll,
+          ...(this.notice ? { notice: this.notice } : {}),
+        })
+      : undefined;
+    if (rows) {
+      this.detailScroll = rows.scroll;
+      this.detailMaxScroll = rows.maxScroll;
+    }
+    return (
+      rows?.rows ??
+      renderDashboard({
+        snapshots: this.snapshots,
+        selected: this.selected,
+        width,
+        now: Date.now(),
+        ...(this.notice ? { notice: this.notice } : {}),
+      })
+    ).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
   }
 
   invalidate(): void {}

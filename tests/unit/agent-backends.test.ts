@@ -15,7 +15,10 @@ function task(overrides: Partial<SpawnTask> = {}): SpawnTask {
 }
 
 /** An SDK double that replays a scripted message stream. */
-function fakeSdk(messages: unknown[], onOptions?: (options: Record<string, unknown>) => void): ClaudeSdk {
+function fakeSdk(
+  messages: unknown[],
+  onOptions?: (options: Record<string, unknown>) => void,
+): ClaudeSdk {
   return {
     query({ options }) {
       onOptions?.(options ?? {});
@@ -36,7 +39,11 @@ async function collect(events: AsyncIterable<SubagentEvent>): Promise<SubagentEv
 
 describe("claude backend", () => {
   it("reports itself unavailable rather than throwing when the SDK is absent", async () => {
-    const backend = new ClaudeBackend({ load: async () => { throw new Error("Cannot find module"); } });
+    const backend = new ClaudeBackend({
+      load: async () => {
+        throw new Error("Cannot find module");
+      },
+    });
 
     const availability = await backend.available();
 
@@ -46,7 +53,12 @@ describe("claude backend", () => {
 
   it("passes the workspace as cwd and the role prompt as the system prompt", async () => {
     let captured: Record<string, unknown> = {};
-    const backend = new ClaudeBackend({ load: async () => fakeSdk([], (options) => { captured = options; }) });
+    const backend = new ClaudeBackend({
+      load: async () =>
+        fakeSdk([], (options) => {
+          captured = options;
+        }),
+    });
 
     const session = await backend.spawn(task({ cwd: "/tmp/managed-ws", model: "claude-opus-5" }));
     await collect(session.events);
@@ -59,31 +71,48 @@ describe("claude backend", () => {
 
   it("translates an SDK run into assistant, tool and settle events", async () => {
     const backend = new ClaudeBackend({
-      load: async () => fakeSdk([
-        { type: "system", subtype: "init", model: "claude-opus-5" },
-        {
-          type: "assistant",
-          message: {
-            content: [
-              { type: "text", text: "reading the file" },
-              { type: "tool_use", id: "t1", name: "Read", input: {} },
-            ],
-            usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5 },
+      load: async () =>
+        fakeSdk([
+          { type: "system", subtype: "init", model: "claude-opus-5" },
+          {
+            type: "assistant",
+            message: {
+              content: [
+                { type: "text", text: "reading the file" },
+                { type: "tool_use", id: "t1", name: "Read", input: {} },
+              ],
+              usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 5 },
+            },
           },
-        },
-        { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
-        { type: "result", subtype: "success", result: "done: added the feature" },
-      ]),
+          {
+            type: "user",
+            message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+          },
+          { type: "result", subtype: "success", result: "done: added the feature" },
+        ]),
     });
 
     const session = await backend.spawn(task());
     const events = await collect(session.events);
 
-    assert.deepEqual(events.map((event) => event.type), [
-      "run_started", "meta", "assistant_message", "tool_start", "usage", "tool_end", "run_settled",
-    ]);
+    assert.deepEqual(
+      events.map((event) => event.type),
+      [
+        "run_started",
+        "meta",
+        "assistant_message",
+        "tool_start",
+        "usage",
+        "tool_end",
+        "run_settled",
+      ],
+    );
     const usage = events.find((event) => event.type === "usage");
-    assert.equal(usage?.type === "usage" && usage.inputTokens, 105, "cache reads count toward input");
+    assert.equal(
+      usage?.type === "usage" && usage.inputTokens,
+      105,
+      "cache reads count toward input",
+    );
     const settled = events.at(-1);
     assert.equal(settled?.type === "run_settled" && settled.outcome, "completed");
     assert.equal(settled?.type === "run_settled" && settled.text, "done: added the feature");
@@ -91,7 +120,15 @@ describe("claude backend", () => {
 
   it("settles as failed when the SDK reports an error result", async () => {
     const backend = new ClaudeBackend({
-      load: async () => fakeSdk([{ type: "result", subtype: "error_during_execution", is_error: true, result: "tool crashed" }]),
+      load: async () =>
+        fakeSdk([
+          {
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            result: "tool crashed",
+          },
+        ]),
     });
 
     const session = await backend.spawn(task());
@@ -126,10 +163,11 @@ describe("claude backend", () => {
 
   it("captures the session id so a settled run can be continued", async () => {
     const backend = new ClaudeBackend({
-      load: async () => fakeSdk([
-        { type: "system", subtype: "init", session_id: "sess-abc", model: "claude-fable-5" },
-        { type: "result", subtype: "success", result: "here is the design" },
-      ]),
+      load: async () =>
+        fakeSdk([
+          { type: "system", subtype: "init", session_id: "sess-abc", model: "claude-fable-5" },
+          { type: "result", subtype: "success", result: "here is the design" },
+        ]),
     });
 
     const session = await backend.spawn(task());
@@ -141,9 +179,16 @@ describe("claude backend", () => {
 
   it("passes the resume token back to the SDK on a follow-up turn", async () => {
     let captured: Record<string, unknown> = {};
-    const backend = new ClaudeBackend({ load: async () => fakeSdk([], (options) => { captured = options; }) });
+    const backend = new ClaudeBackend({
+      load: async () =>
+        fakeSdk([], (options) => {
+          captured = options;
+        }),
+    });
 
-    const session = await backend.spawn(task({ prompt: "what about auth?", resumeToken: "sess-abc" }));
+    const session = await backend.spawn(
+      task({ prompt: "what about auth?", resumeToken: "sess-abc" }),
+    );
     await collect(session.events);
 
     assert.equal(captured.resume, "sess-abc");
@@ -151,7 +196,8 @@ describe("claude backend", () => {
 
   it("accepts a string content payload as assistant text", async () => {
     const backend = new ClaudeBackend({
-      load: async () => fakeSdk([{ type: "assistant", message: { content: "plain string reply" } }]),
+      load: async () =>
+        fakeSdk([{ type: "assistant", message: { content: "plain string reply" } }]),
     });
 
     const session = await backend.spawn(task());

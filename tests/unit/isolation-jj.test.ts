@@ -10,7 +10,9 @@ function recording(stdout = ""): { cli: JjCli; requests: JjExecutionRequest[] } 
       requests.push(request);
       return { kind: "success" as const, stdout, stderr: "", exitCode: 0 as const, durationMs: 0 };
     },
-    async probe() { return { kind: "available" as const, binary: "jj", version: "0.43.0" as const }; },
+    async probe() {
+      return { kind: "available" as const, binary: "jj", version: "0.43.0" as const };
+    },
   } satisfies JjExecutor;
   return { cli: new JjCli(executor), requests };
 }
@@ -20,9 +22,14 @@ describe("isolation jj cosmetic topology commands", () => {
     const { cli, requests } = recording("x");
     assert.equal(await cli.hasRedundantParents("/repo", "kkkk"), true);
     assert.deepEqual(requests[0]?.args, [
-      "log", "--revision",
+      "log",
+      "--revision",
       "parents(exactly(change_id(kkkk), 1)) & ancestors(parents(exactly(change_id(kkkk), 1))-)",
-      "--limit", "1", "--no-graph", "--template", "\"x\"",
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      '"x"',
     ]);
     assert.equal(requests[0]?.access, "read");
   });
@@ -30,7 +37,11 @@ describe("isolation jj cosmetic topology commands", () => {
   it("bounds simplify-parents to the exact target revision", async () => {
     const { cli, requests } = recording();
     await cli.simplifyParents("/repo", "kkkk");
-    assert.deepEqual(requests[0]?.args, ["simplify-parents", "--revision", "exactly(change_id(kkkk), 1)"]);
+    assert.deepEqual(requests[0]?.args, [
+      "simplify-parents",
+      "--revision",
+      "exactly(change_id(kkkk), 1)",
+    ]);
     assert.equal(requests[0]?.access, "write");
   });
 
@@ -38,7 +49,13 @@ describe("isolation jj cosmetic topology commands", () => {
     const { cli, requests } = recording();
     await cli.hasDescendants("/repo", "kkkk");
     await cli.areAncestorsOf("/repo", ["llll", "mmmm"], "kkkk");
-    assert.equal(requests[0]?.args[2], "(exactly(change_id(kkkk), 1)):: ~ exactly(change_id(kkkk), 1)");
-    assert.equal(requests[1]?.args[2], "(exactly(change_id(llll), 1) | exactly(change_id(mmmm), 1)) ~ ancestors(exactly(change_id(kkkk), 1))");
+    assert.equal(
+      requests[0]?.args[2],
+      "(exactly(change_id(kkkk), 1)):: ~ exactly(change_id(kkkk), 1)",
+    );
+    assert.equal(
+      requests[1]?.args[2],
+      "(exactly(change_id(llll), 1) | exactly(change_id(mmmm), 1)) ~ ancestors(exactly(change_id(kkkk), 1))",
+    );
   });
 });

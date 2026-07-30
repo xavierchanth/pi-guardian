@@ -5,7 +5,12 @@ import {
   type PrivateChildSessionHandle,
 } from "../../concurrency/child-session.ts";
 import type { SessionPolicyReader } from "../../config/register.ts";
-import { EventChannel, type AvailabilityResult, type SubagentBackend, type SubagentSession } from "../backend.ts";
+import {
+  EventChannel,
+  type AvailabilityResult,
+  type SubagentBackend,
+  type SubagentSession,
+} from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
 
 /**
@@ -66,7 +71,10 @@ export class PiBackend implements SubagentBackend {
       } as never,
       modelRegistry: this.options.modelRegistry,
       systemPrompt: task.systemPrompt,
-      extensions: [...(this.options.extensions ?? []), ...(this.options.extensionsFor?.(task) ?? [])],
+      extensions: [
+        ...(this.options.extensions ?? []),
+        ...(this.options.extensionsFor?.(task) ?? []),
+      ],
       ...(task.signal ? { signal: task.signal } : {}),
     });
     return new PiSubagentSession(handle, task);
@@ -144,7 +152,8 @@ class PiSubagentSession implements SubagentSession {
         if (usage) {
           this.channel.push({
             type: "usage",
-            inputTokens: numeric(usage.input) + numeric(usage.cacheRead) + numeric(usage.cacheWrite),
+            inputTokens:
+              numeric(usage.input) + numeric(usage.cacheRead) + numeric(usage.cacheWrite),
             outputTokens: numeric(usage.output),
             ...(usage.contextWindow ? { contextWindow: usage.contextWindow } : {}),
           });
@@ -194,11 +203,14 @@ function assistantText(frame: unknown): string | undefined {
     message?: unknown;
     assistantMessageEvent?: { type?: unknown; content?: unknown; partial?: unknown };
   };
-  return messageText(candidate.message)
-    ?? (candidate.assistantMessageEvent?.type === "text_end" && typeof candidate.assistantMessageEvent.content === "string"
+  return (
+    messageText(candidate.message) ??
+    (candidate.assistantMessageEvent?.type === "text_end" &&
+    typeof candidate.assistantMessageEvent.content === "string"
       ? candidate.assistantMessageEvent.content
-      : undefined)
-    ?? messageText(candidate.assistantMessageEvent?.partial);
+      : undefined) ??
+    messageText(candidate.assistantMessageEvent?.partial)
+  );
 }
 
 function messageText(message: unknown): string | undefined {
@@ -207,9 +219,13 @@ function messageText(message: unknown): string | undefined {
   if (typeof content === "string") return content || undefined;
   if (!Array.isArray(content)) return undefined;
   const text = content
-    .filter((block): block is { type: string; text: string } =>
-      typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text"
-      && typeof (block as { text?: unknown }).text === "string")
+    .filter(
+      (block): block is { type: string; text: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
     .map((block) => block.text)
     .join("");
   return text || undefined;

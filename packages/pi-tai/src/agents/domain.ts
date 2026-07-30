@@ -49,11 +49,31 @@ export type SubagentEvent =
   | { readonly type: "run_started" }
   | { readonly type: "assistant_delta"; readonly text: string }
   | { readonly type: "assistant_message"; readonly text: string }
-  | { readonly type: "tool_start"; readonly toolId: string; readonly name: string; readonly preview?: string }
-  | { readonly type: "tool_end"; readonly toolId: string; readonly ok: boolean; readonly preview?: string }
-  | { readonly type: "usage"; readonly inputTokens: number; readonly outputTokens: number; readonly contextWindow?: number }
+  | {
+      readonly type: "tool_start";
+      readonly toolId: string;
+      readonly name: string;
+      readonly preview?: string;
+    }
+  | {
+      readonly type: "tool_end";
+      readonly toolId: string;
+      readonly ok: boolean;
+      readonly preview?: string;
+    }
+  | {
+      readonly type: "usage";
+      readonly inputTokens: number;
+      readonly outputTokens: number;
+      readonly contextWindow?: number;
+    }
   | { readonly type: "meta"; readonly model?: string; readonly contextWindow?: number }
-  | { readonly type: "run_settled"; readonly outcome: RunOutcome; readonly text?: string; readonly error?: string }
+  | {
+      readonly type: "run_settled";
+      readonly outcome: RunOutcome;
+      readonly text?: string;
+      readonly error?: string;
+    }
   | { readonly type: "backend_error"; readonly message: string };
 
 export interface LiveTool {
@@ -81,7 +101,11 @@ export interface SubagentSnapshot {
   readonly finalText: string;
   /** Final text, or the in-flight streaming buffer when still running. */
   readonly latestText: string;
-  readonly usage: { readonly inputTokens: number; readonly outputTokens: number; readonly contextWindow?: number };
+  readonly usage: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly contextWindow?: number;
+  };
   readonly liveTools: readonly LiveTool[];
 }
 
@@ -118,30 +142,51 @@ export function emptySnapshot(input: {
  * Folds one event into a snapshot. Pure, so the manager's state transitions are
  * testable without spawning anything.
  */
-export function applyEvent(snapshot: SubagentSnapshot, event: SubagentEvent, at: string): SubagentSnapshot {
+export function applyEvent(
+  snapshot: SubagentSnapshot,
+  event: SubagentEvent,
+  at: string,
+): SubagentSnapshot {
   switch (event.type) {
     case "run_started":
       return { ...snapshot, status: "running" };
     case "assistant_delta":
-      return { ...snapshot, latestText: `${snapshot.status === "running" ? snapshot.latestText : ""}${event.text}` };
+      return {
+        ...snapshot,
+        latestText: `${snapshot.status === "running" ? snapshot.latestText : ""}${event.text}`,
+      };
     case "assistant_message":
-      return { ...snapshot, turns: snapshot.turns + 1, finalText: event.text, latestText: event.text };
+      return {
+        ...snapshot,
+        turns: snapshot.turns + 1,
+        finalText: event.text,
+        latestText: event.text,
+      };
     case "tool_start":
       return {
         ...snapshot,
-        liveTools: ([
-          ...snapshot.liveTools.filter((tool) => tool.name !== event.name || tool.state !== "running"),
-          { name: event.name, state: "running", ...(event.preview ? { preview: event.preview } : {}) },
-        ] satisfies LiveTool[]).slice(-8),
+        liveTools: (
+          [
+            ...snapshot.liveTools.filter(
+              (tool) => tool.name !== event.name || tool.state !== "running",
+            ),
+            {
+              name: event.name,
+              state: "running",
+              ...(event.preview ? { preview: event.preview } : {}),
+            },
+          ] satisfies LiveTool[]
+        ).slice(-8),
       };
     case "tool_end": {
       const state: LiveTool["state"] = event.ok ? "done" : "error";
       return {
         ...snapshot,
-        liveTools: snapshot.liveTools.map((tool, index, all): LiveTool =>
-          index === all.length - 1 && tool.state === "running"
-            ? { ...tool, state, ...(event.preview ? { preview: event.preview } : {}) }
-            : tool,
+        liveTools: snapshot.liveTools.map(
+          (tool, index, all): LiveTool =>
+            index === all.length - 1 && tool.state === "running"
+              ? { ...tool, state, ...(event.preview ? { preview: event.preview } : {}) }
+              : tool,
         ),
       };
     }
@@ -151,7 +196,7 @@ export function applyEvent(snapshot: SubagentSnapshot, event: SubagentEvent, at:
         usage: {
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
-          ...(event.contextWindow ?? snapshot.usage.contextWindow
+          ...((event.contextWindow ?? snapshot.usage.contextWindow)
             ? { contextWindow: event.contextWindow ?? snapshot.usage.contextWindow }
             : {}),
         },
@@ -160,7 +205,9 @@ export function applyEvent(snapshot: SubagentSnapshot, event: SubagentEvent, at:
       return {
         ...snapshot,
         ...(event.model ? { model: event.model } : {}),
-        ...(event.contextWindow ? { usage: { ...snapshot.usage, contextWindow: event.contextWindow } } : {}),
+        ...(event.contextWindow
+          ? { usage: { ...snapshot.usage, contextWindow: event.contextWindow } }
+          : {}),
       };
     case "run_settled": {
       const failed = event.outcome !== "completed";
@@ -170,20 +217,34 @@ export function applyEvent(snapshot: SubagentSnapshot, event: SubagentEvent, at:
         settledAt: at,
         ...(event.text ? { finalText: event.text, latestText: event.text } : {}),
         ...(failed
-          ? { errorText: bound(event.error ?? (event.outcome === "interrupted" ? "Run was aborted." : "Run failed.")) }
+          ? {
+              errorText: bound(
+                event.error ??
+                  (event.outcome === "interrupted" ? "Run was aborted." : "Run failed."),
+              ),
+            }
           : {}),
         liveTools: [],
       };
     }
     case "backend_error":
-      return { ...snapshot, status: "error", settledAt: at, errorText: bound(event.message), liveTools: [] };
+      return {
+        ...snapshot,
+        status: "error",
+        settledAt: at,
+        errorText: bound(event.message),
+        liveTools: [],
+      };
   }
 }
 
 export function contextUtilisation(snapshot: SubagentSnapshot): number | undefined {
   const window = snapshot.usage.contextWindow;
   if (!window) return undefined;
-  return Math.min(100, Math.round(((snapshot.usage.inputTokens + snapshot.usage.outputTokens) / window) * 100));
+  return Math.min(
+    100,
+    Math.round(((snapshot.usage.inputTokens + snapshot.usage.outputTokens) / window) * 100),
+  );
 }
 
 function bound(value: string): string {

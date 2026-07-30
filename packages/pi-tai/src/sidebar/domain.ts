@@ -1,7 +1,8 @@
 export const BTW_ENTRY_TYPE = "pi-tai:btw";
 export const BTW_TIMEOUT_MS = 45_000;
 export const BTW_MAX_IN_FLIGHT = 2;
-export const BTW_OMISSION_MARKER = "[Earlier or incomplete session context omitted to fit the model window.]";
+export const BTW_OMISSION_MARKER =
+  "[Earlier or incomplete session context omitted to fit the model window.]";
 
 export type BtwEntry = {
   state: "success" | "error";
@@ -22,8 +23,13 @@ export function estimatedTokens(value: unknown): number {
 function toolCallIds(message: Message): string[] {
   if (message.role !== "assistant" || !Array.isArray(message.content)) return [];
   return message.content
-    .filter((part): part is { type: string; id: string } =>
-      typeof part === "object" && part !== null && (part as any).type === "toolCall" && typeof (part as any).id === "string")
+    .filter(
+      (part): part is { type: string; id: string } =>
+        typeof part === "object" &&
+        part !== null &&
+        (part as any).type === "toolCall" &&
+        typeof (part as any).id === "string",
+    )
     .map((part) => part.id);
 }
 
@@ -31,7 +37,7 @@ function toolCallIds(message: Message): string[] {
 function coherentGroups(messages: readonly Message[]): { groups: Message[][]; sanitized: boolean } {
   const groups: Message[][] = [];
   let sanitized = false;
-  for (let index = 0; index < messages.length;) {
+  for (let index = 0; index < messages.length; ) {
     const message = messages[index]!;
     if (message.role === "toolResult") {
       sanitized = true;
@@ -50,8 +56,14 @@ function coherentGroups(messages: readonly Message[]): { groups: Message[][]; sa
       results.push(messages[cursor]!);
       cursor++;
     }
-    const resultIds = results.map((result) => result.toolCallId).filter((id): id is string => typeof id === "string");
-    if (results.length === ids.length && ids.every((id) => resultIds.includes(id)) && resultIds.every((id) => ids.includes(id))) {
+    const resultIds = results
+      .map((result) => result.toolCallId)
+      .filter((id): id is string => typeof id === "string");
+    if (
+      results.length === ids.length &&
+      ids.every((id) => resultIds.includes(id)) &&
+      resultIds.every((id) => ids.includes(id))
+    ) {
       groups.push([message, ...results]);
     } else {
       sanitized = true;
@@ -62,7 +74,10 @@ function coherentGroups(messages: readonly Message[]): { groups: Message[][]; sa
 }
 
 /** Keep newest complete groups within the hard estimated-token budget. */
-export function boundContext(messages: readonly Message[], tokenBudget: number): {
+export function boundContext(
+  messages: readonly Message[],
+  tokenBudget: number,
+): {
   messages: Message[];
   truncated: boolean;
 } {
@@ -97,11 +112,17 @@ export function boundContext(messages: readonly Message[], tokenBudget: number):
   return { messages: bounded, truncated };
 }
 
-export function answerText(content: readonly { type: string; text?: string }[], maxChars: number): {
+export function answerText(
+  content: readonly { type: string; text?: string }[],
+  maxChars: number,
+): {
   text: string;
   truncated: boolean;
 } {
-  const text = content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+  const text = content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("");
   if (!text.trim()) throw new Error("Model returned an empty answer.");
   if (text.length <= maxChars) return { text, truncated: false };
   return { text: `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`, truncated: true };

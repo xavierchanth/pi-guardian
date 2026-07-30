@@ -1,7 +1,4 @@
-import {
-  SettingsManager,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import { SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { findLastAssistantText } from "./document.ts";
 import { ResponseEditor } from "./editor.ts";
 

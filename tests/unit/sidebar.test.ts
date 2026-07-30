@@ -4,7 +4,10 @@ import { boundContext, answerText } from "../../packages/pi-tai/src/sidebar/doma
 
 test("sidebar context trimming keeps an assistant tool call with its result", () => {
   const old = { role: "user", content: "x".repeat(500) };
-  const assistant = { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: {} }] };
+  const assistant = {
+    role: "assistant",
+    content: [{ type: "toolCall", id: "1", name: "read", arguments: {} }],
+  };
   const result = { role: "toolResult", toolCallId: "1", content: [{ type: "text", text: "ok" }] };
   const bounded = boundContext([old, assistant, result], 100);
   assert.equal(bounded.truncated, true);
@@ -14,10 +17,16 @@ test("sidebar context trimming keeps an assistant tool call with its result", ()
 test("sidebar context drops orphan results and active incomplete tool calls", () => {
   const orphan = { role: "toolResult", toolCallId: "old", content: "orphan" };
   const user = { role: "user", content: "keep" };
-  const active = { role: "assistant", content: [{ type: "toolCall", id: "active", name: "bash", arguments: {} }] };
+  const active = {
+    role: "assistant",
+    content: [{ type: "toolCall", id: "active", name: "bash", arguments: {} }],
+  };
   const bounded = boundContext([orphan, user, active], 100);
   assert.equal(bounded.truncated, true);
-  assert.equal(bounded.messages.some((message) => message === orphan || message === active), false);
+  assert.equal(
+    bounded.messages.some((message) => message === orphan || message === active),
+    false,
+  );
   assert.equal(bounded.messages.at(-1), user);
 });
 
@@ -37,6 +46,9 @@ test("sidebar context remains a contiguous newest suffix", () => {
 });
 
 test("sidebar output bounds are explicit and empty output is rejected", () => {
-  assert.deepEqual(answerText([{ type: "text", text: "abcdef" }], 5), { text: "abcd…", truncated: true });
+  assert.deepEqual(answerText([{ type: "text", text: "abcdef" }], 5), {
+    text: "abcd…",
+    truncated: true,
+  });
   assert.throws(() => answerText([{ type: "text", text: "  " }], 5), /empty answer/);
 });

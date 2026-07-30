@@ -2,12 +2,21 @@
   "$schema": "https://biomejs.dev/schemas/2.2.7/schema.json",
   "files": {
     "includes": [
-      "packages/pi-tai/src/concurrency/**/*.ts",
-      "packages/pi-tai/src/jj/**/*.ts",
+      "packages/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "services/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "bins/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "apps/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "tests/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "evals/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "fixtures/**/*.{ts,tsx,js,jsx,mjs,cjs}",
       "!**/node_modules",
       "!**/dist",
+      "!**/build",
+      "!**/coverage",
       "!**/target",
-      "!apps/*/src-tauri/gen"
+      "!apps/*/src-tauri/gen",
+      "!packages/runtime-protocol/src/generated.ts"
     ]
   },
   "formatter": {
@@ -29,11 +38,16 @@
     "rules": {
       "recommended": true,
       "complexity": { "noCommaOperator": "off" },
+      "correctness": { "useExhaustiveDependencies": "off" },
       "style": {
         "noNonNullAssertion": "off",
         "useImportType": "off"
       },
-      "suspicious": { "noExplicitAny": "off" }
+      "suspicious": {
+        "noControlCharactersInRegex": "off",
+        "noExplicitAny": "off",
+        "noImplicitAnyLet": "off"
+      }
     }
   }
 }

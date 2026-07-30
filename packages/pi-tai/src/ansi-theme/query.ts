@@ -25,7 +25,9 @@ export const queryTerminalBackground: QueryTerminalBackground = async (tui, sign
     if (!color || signal?.aborted) return undefined;
 
     const hex = (value: number) =>
-      Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+      Math.max(0, Math.min(255, Math.round(value)))
+        .toString(16)
+        .padStart(2, "0");
     return `#${hex(color.r)}${hex(color.g)}${hex(color.b)}`;
   } finally {
     if (abort) signal?.removeEventListener("abort", abort);

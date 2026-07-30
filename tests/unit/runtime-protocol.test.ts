@@ -14,7 +14,8 @@ import {
 } from "../../packages/runtime-protocol/src/index.ts";
 
 const fixtureRoot = resolve(import.meta.dirname, "../../fixtures/runtime-protocol");
-const fixture = (name: string): unknown => JSON.parse(readFileSync(join(fixtureRoot, name), "utf8"));
+const fixture = (name: string): unknown =>
+  JSON.parse(readFileSync(join(fixtureRoot, name), "utf8"));
 
 test("Zod consumes shared runtime fixtures and method-specific parameters", () => {
   const command = decodeRuntimeCommand(fixture("initialize-command.json"));
@@ -25,15 +26,24 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
     runtimeGeneration: 7,
   });
   assert.equal(RuntimeResponseSchema.parse(fixture("initialize-response.json")).ok, true);
-  assert.equal(RuntimeEventSchema.parse(fixture("text-delta-event.json")).event, "assistant.text_delta");
-  assert.deepEqual(decodeMethodParams("session.set_capability", {
-    capabilityId: "jj-workspaces",
-    enabled: true,
-  }), { capabilityId: "jj-workspaces", enabled: true });
-  assert.deepEqual(decodeMethodParams("session.relocate_workspace", {
-    backend: "git",
-    name: "focused-task",
-  }), { backend: "git", name: "focused-task" });
+  assert.equal(
+    RuntimeEventSchema.parse(fixture("text-delta-event.json")).event,
+    "assistant.text_delta",
+  );
+  assert.deepEqual(
+    decodeMethodParams("session.set_capability", {
+      capabilityId: "jj-workspaces",
+      enabled: true,
+    }),
+    { capabilityId: "jj-workspaces", enabled: true },
+  );
+  assert.deepEqual(
+    decodeMethodParams("session.relocate_workspace", {
+      backend: "git",
+      name: "focused-task",
+    }),
+    { backend: "git", name: "focused-task" },
+  );
 });
 
 test("session create policy round trips through strict method schemas", () => {
@@ -47,29 +57,33 @@ test("session create policy round trips through strict method schemas", () => {
   const provenance = {
     "sessionPolicy.compaction.enabled": { layer: "default" },
   };
-  assert.deepEqual(decodeMethodParams("session.create", {
-    cwd: "/tmp/project",
-    agentDir: "/tmp/agent",
-    sessionDir: "/tmp/sessions",
-    sessionPolicy: policy,
-    policyProvenance: provenance,
-  }), {
-    cwd: "/tmp/project",
-    rootSessionId: null,
-    runtimeGeneration: null,
-    agentDir: "/tmp/agent",
-    sessionDir: "/tmp/sessions",
-    sessionPolicy: policy,
-    policyProvenance: provenance,
-  });
-  assert.throws(
-    () => decodeMethodParams("session.create", {
+  assert.deepEqual(
+    decodeMethodParams("session.create", {
       cwd: "/tmp/project",
       agentDir: "/tmp/agent",
       sessionDir: "/tmp/sessions",
-      sessionPolicy: { ...policy, compaction: { enabled: true, thresholdPercent: 500 } },
+      sessionPolicy: policy,
       policyProvenance: provenance,
     }),
+    {
+      cwd: "/tmp/project",
+      rootSessionId: null,
+      runtimeGeneration: null,
+      agentDir: "/tmp/agent",
+      sessionDir: "/tmp/sessions",
+      sessionPolicy: policy,
+      policyProvenance: provenance,
+    },
+  );
+  assert.throws(
+    () =>
+      decodeMethodParams("session.create", {
+        cwd: "/tmp/project",
+        agentDir: "/tmp/agent",
+        sessionDir: "/tmp/sessions",
+        sessionPolicy: { ...policy, compaction: { enabled: true, thresholdPercent: 500 } },
+        policyProvenance: provenance,
+      }),
     RuntimeDecodeError,
   );
 });
@@ -92,14 +106,23 @@ test("generic envelopes preserve unsupported methods while known params validate
 });
 
 test("runtime schemas reject unknown fields, unsafe counters, and invalid response combinations", () => {
-  assert.throws(() => decodeRuntimeCommand(fixture("invalid-extra-field.json")), RuntimeDecodeError);
-  assert.equal(RuntimeEventSchema.safeParse(fixture("invalid-unsafe-sequence.json")).success, false);
-  assert.equal(RuntimeResponseSchema.safeParse({
-    protocolVersion: 2,
-    kind: "response",
-    id: "bad",
-    ok: false,
-  }).success, false);
+  assert.throws(
+    () => decodeRuntimeCommand(fixture("invalid-extra-field.json")),
+    RuntimeDecodeError,
+  );
+  assert.equal(
+    RuntimeEventSchema.safeParse(fixture("invalid-unsafe-sequence.json")).success,
+    false,
+  );
+  assert.equal(
+    RuntimeResponseSchema.safeParse({
+      protocolVersion: 2,
+      kind: "response",
+      id: "bad",
+      ok: false,
+    }).success,
+    false,
+  );
 });
 
 test("response constructors validate outbound frames", () => {
@@ -110,19 +133,22 @@ test("response constructors validate outbound frames", () => {
     ok: true,
     result: {},
   });
-  assert.deepEqual(errorResponse("bad-1", {
-    code: "unsupported_command",
-    message: "Unsupported command.",
-    retryable: false,
-  }), {
-    protocolVersion: 2,
-    kind: "response",
-    id: "bad-1",
-    ok: false,
-    error: {
+  assert.deepEqual(
+    errorResponse("bad-1", {
       code: "unsupported_command",
       message: "Unsupported command.",
       retryable: false,
+    }),
+    {
+      protocolVersion: 2,
+      kind: "response",
+      id: "bad-1",
+      ok: false,
+      error: {
+        code: "unsupported_command",
+        message: "Unsupported command.",
+        retryable: false,
+      },
     },
-  });
+  );
 });

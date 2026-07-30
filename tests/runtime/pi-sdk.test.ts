@@ -33,7 +33,10 @@ async function fixture() {
 test("hosted extension UI rejects interaction and redacts notifications", async () => {
   const records: Array<{ event: string; data?: Record<string, unknown> }> = [];
   const ui = createHeadlessUiContext((record) => records.push(record));
-  await assert.rejects(ui.select("choose", ["secret option"]), /unavailable in hosted mode: select/);
+  await assert.rejects(
+    ui.select("choose", ["secret option"]),
+    /unavailable in hosted mode: select/,
+  );
   ui.notify("private notification", "warning");
   assert.equal(records[0]?.event, "extension_notification");
   assert.deepEqual(records[0]?.data, { characters: 20 });
@@ -53,24 +56,30 @@ test("Pi SDK create and open prefer pinned policy without reading configuration 
     Object.keys(FIELD_DESCRIPTORS).map((path) => [path, { layer: "default" as const }]),
   );
   const first = new PiSdkRuntimePort();
-  const session = await first.createSession({
-    ...paths,
-    faux: true,
-    sessionPolicy: policy,
-    policyProvenance: provenance,
-  }, () => {});
+  const session = await first.createSession(
+    {
+      ...paths,
+      faux: true,
+      sessionPolicy: policy,
+      policyProvenance: provenance,
+    },
+    () => {},
+  );
   assert.deepEqual(first.sessionPolicy(), policy);
   await first.disposeSession();
 
   const second = new PiSdkRuntimePort();
-  await second.openSession({
-    sessionFile: session.sessionFile,
-    agentDir: paths.agentDir,
-    sessionDir: paths.sessionDir,
-    faux: true,
-    sessionPolicy: policy,
-    policyProvenance: provenance,
-  }, () => {});
+  await second.openSession(
+    {
+      sessionFile: session.sessionFile,
+      agentDir: paths.agentDir,
+      sessionDir: paths.sessionDir,
+      faux: true,
+      sessionPolicy: policy,
+      policyProvenance: provenance,
+    },
+    () => {},
+  );
   assert.deepEqual(second.sessionPolicy(), policy);
   await second.shutdown();
 });
@@ -79,7 +88,9 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
   const paths = await fixture();
   const events: RuntimeEventInput[] = [];
   const first = new PiSdkRuntimePort();
-  const session = await first.createSession({ ...paths, faux: true }, (event) => events.push(event));
+  const session = await first.createSession({ ...paths, faux: true }, (event) =>
+    events.push(event),
+  );
   const capabilities = await first.capabilities();
   assert.equal(capabilities.tools.includes("update_plan"), false);
   assert.ok(capabilities.commands.includes("continue"));
@@ -100,13 +111,16 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
 
   const secondEvents: RuntimeEventInput[] = [];
   const second = new PiSdkRuntimePort();
-  await second.openSession({
-    sessionFile: session.sessionFile,
-    agentDir: paths.agentDir,
-    sessionDir: paths.sessionDir,
-    ...pinnedPolicy(),
-    faux: true,
-  }, (event) => secondEvents.push(event));
+  await second.openSession(
+    {
+      sessionFile: session.sessionFile,
+      agentDir: paths.agentDir,
+      sessionDir: paths.sessionDir,
+      ...pinnedPolicy(),
+      faux: true,
+    },
+    (event) => secondEvents.push(event),
+  );
   const turnB = await second.startPrompt(
     { turnId: "turn-b", text: "verify history" },
     "prompt-b",
@@ -127,9 +141,12 @@ test("Pi SDK runtime does not expose workspace backends as capabilities", async 
   const port = new PiSdkRuntimePort();
   await port.createSession({ ...paths, faux: true }, () => {});
   const capabilities = await port.capabilities();
-  assert.equal(capabilities.sessionCapabilities.some(
-    (capability) => capability.id === "jj-workspaces" || capability.id === "git-worktrees",
-  ), false);
+  assert.equal(
+    capabilities.sessionCapabilities.some(
+      (capability) => capability.id === "jj-workspaces" || capability.id === "git-worktrees",
+    ),
+    false,
+  );
   await assert.rejects(
     port.setCapability({ capabilityId: "git-worktrees", enabled: true }, () => {}),
     /Unknown capability/,
@@ -157,13 +174,16 @@ test("Pi SDK session replacement rebinds events to only the new session", async 
   const port = new PiSdkRuntimePort();
   await port.createSession({ ...firstPaths, faux: true }, () => {});
   const replacementEvents: RuntimeEventInput[] = [];
-  const replaced = await port.openSession({
-    sessionFile: secondSession.sessionFile,
-    agentDir: firstPaths.agentDir,
-    sessionDir: firstPaths.sessionDir,
-    ...pinnedPolicy(),
-    faux: true,
-  }, (event) => replacementEvents.push(event));
+  const replaced = await port.openSession(
+    {
+      sessionFile: secondSession.sessionFile,
+      agentDir: firstPaths.agentDir,
+      sessionDir: firstPaths.sessionDir,
+      ...pinnedPolicy(),
+      faux: true,
+    },
+    (event) => replacementEvents.push(event),
+  );
   const prompt = await port.startPrompt(
     { turnId: "replacement-turn", text: "replacement session" },
     "replacement-prompt",
@@ -172,7 +192,11 @@ test("Pi SDK session replacement rebinds events to only the new session", async 
   await prompt.completion;
   assert.equal(replaced.sessionId, secondSession.sessionId);
   assert.ok(replacementEvents.length > 1);
-  assert.ok(replacementEvents.every((event) => !event.sessionId || event.sessionId === secondSession.sessionId));
+  assert.ok(
+    replacementEvents.every(
+      (event) => !event.sessionId || event.sessionId === secondSession.sessionId,
+    ),
+  );
   await port.shutdown();
 });
 

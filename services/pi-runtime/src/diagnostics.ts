@@ -8,7 +8,9 @@ export interface DiagnosticRecord {
 export type DiagnosticSink = (record: DiagnosticRecord) => void;
 
 export function createDiagnosticSink(
-  write: (chunk: string) => void = (chunk) => { process.stderr.write(chunk); },
+  write: (chunk: string) => void = (chunk) => {
+    process.stderr.write(chunk);
+  },
 ): DiagnosticSink {
   return (record) => {
     write(`${JSON.stringify(record)}\n`);

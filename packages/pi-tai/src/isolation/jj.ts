@@ -13,8 +13,7 @@ import type { ChangeEntry } from "./domain.ts";
 
 const UNIT = "";
 const RECORD = "";
-const ENTRY_TEMPLATE =
-  `change_id ++ "${UNIT}" ++ if(empty, "1", "0") ++ "${UNIT}" ++ if(conflict, "1", "0") ++ "${UNIT}" ++ description.first_line() ++ "${RECORD}"`;
+const ENTRY_TEMPLATE = `change_id ++ "${UNIT}" ++ if(empty, "1", "0") ++ "${UNIT}" ++ if(conflict, "1", "0") ++ "${UNIT}" ++ description.first_line() ++ "${RECORD}"`;
 
 /** Mirrors `exactChange` in ../jj/repository.ts without the branded-id plumbing. */
 export function exact(changeId: string): string {
@@ -53,9 +52,17 @@ export class JjCli {
 
   /** Exactly one change id for a revision that must resolve to exactly one commit. */
   async changeIdAt(cwd: string, revision: string): Promise<string> {
-    const out = await this.read(cwd, ["log", "--revision", revision, "--no-graph", "--template", 'change_id ++ "\\n"']);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      revision,
+      "--no-graph",
+      "--template",
+      'change_id ++ "\\n"',
+    ]);
     const ids = splitLines(out);
-    if (ids.length !== 1) throw new Error(`Expected exactly one change for ${revision}, got ${ids.length}.`);
+    if (ids.length !== 1)
+      throw new Error(`Expected exactly one change for ${revision}, got ${ids.length}.`);
     return ids[0]!;
   }
 
@@ -64,9 +71,17 @@ export class JjCli {
    * Returns more than one entry when the user's working copy is itself a merge.
    */
   async parentsOfWorkingCopy(cwd: string): Promise<string[]> {
-    const out = await this.read(cwd, ["log", "--revision", "parents(@)", "--no-graph", "--template", 'change_id ++ "\\n"']);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      "parents(@)",
+      "--no-graph",
+      "--template",
+      'change_id ++ "\\n"',
+    ]);
     const parents = splitLines(out);
-    if (!parents.length) throw new Error("Source working copy has no parents; the repository is empty.");
+    if (!parents.length)
+      throw new Error("Source working copy has no parents; the repository is empty.");
     return parents;
   }
 
@@ -80,7 +95,12 @@ export class JjCli {
   }
 
   /** Creates a workspace whose working copy sits on top of every id in `parentChangeIds`. */
-  async workspaceAdd(cwd: string, path: string, name: string, parentChangeIds: readonly string[]): Promise<void> {
+  async workspaceAdd(
+    cwd: string,
+    path: string,
+    name: string,
+    parentChangeIds: readonly string[],
+  ): Promise<void> {
     const revisions = parentChangeIds.flatMap((id) => ["--revision", exact(id)]);
     await this.run(cwd, ["workspace", "add", path, "--name", name, ...revisions]);
   }
@@ -101,9 +121,21 @@ export class JjCli {
    * workspace that has had other work merged *into* it holds commits that are
    * not descendants of its own root, and a `root::head` range would miss them.
    */
-  async range(cwd: string, baseChangeIds: readonly string[], headChangeId: string): Promise<ChangeEntry[]> {
+  async range(
+    cwd: string,
+    baseChangeIds: readonly string[],
+    headChangeId: string,
+  ): Promise<ChangeEntry[]> {
     const revset = `(${exactAny(baseChangeIds)})..${exact(headChangeId)}`;
-    const out = await this.read(cwd, ["log", "--revision", revset, "--no-graph", "--reversed", "--template", ENTRY_TEMPLATE]);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      revset,
+      "--no-graph",
+      "--reversed",
+      "--template",
+      ENTRY_TEMPLATE,
+    ]);
     return out
       .split(RECORD)
       .map((record) => record.trim())
@@ -128,7 +160,12 @@ export class JjCli {
    */
   async headsOf(cwd: string, changeIds: readonly string[]): Promise<string[]> {
     const out = await this.read(cwd, [
-      "log", "--revision", `heads(${exactAny(changeIds)})`, "--no-graph", "--template", 'change_id ++ "\\n"',
+      "log",
+      "--revision",
+      `heads(${exactAny(changeIds)})`,
+      "--no-graph",
+      "--template",
+      'change_id ++ "\\n"',
     ]);
     return splitLines(out);
   }
@@ -142,22 +179,44 @@ export class JjCli {
     });
     // `jj resolve --list` exits non-zero precisely when there is nothing to resolve.
     if (result.kind !== "success") return [];
-    return splitLines(result.stdout).map((line) => line.split(/\s+/)[0]!).filter(Boolean);
+    return splitLines(result.stdout)
+      .map((line) => line.split(/\s+/)[0]!)
+      .filter(Boolean);
   }
 
   async hasConflicts(cwd: string, revset: string): Promise<boolean> {
-    const out = await this.read(cwd, ["log", "--revision", revset, "--no-graph", "--template", 'if(conflict, "x", "")']);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      revset,
+      "--no-graph",
+      "--template",
+      'if(conflict, "x", "")',
+    ]);
     return out.includes("x");
   }
 
   /** True when the change at `revision` carries no diff against its parents. */
   async isEmpty(cwd: string, revision: string): Promise<boolean> {
-    const out = await this.read(cwd, ["log", "--revision", revision, "--no-graph", "--template", 'if(empty, "1", "0")']);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      revision,
+      "--no-graph",
+      "--template",
+      'if(empty, "1", "0")',
+    ]);
     return out.trim().startsWith("1");
   }
 
   async describe(cwd: string, changeId: string, message: string): Promise<void> {
-    await this.run(cwd, ["--ignore-working-copy", "describe", "--message", message, exact(changeId)]);
+    await this.run(cwd, [
+      "--ignore-working-copy",
+      "describe",
+      "--message",
+      message,
+      exact(changeId),
+    ]);
   }
 
   async abandon(cwd: string, changeId: string): Promise<void> {
@@ -174,8 +233,14 @@ export class JjCli {
   async hasRedundantParents(cwd: string, changeId: string): Promise<boolean> {
     const revision = exact(changeId);
     const out = await this.read(cwd, [
-      "log", "--revision", `parents(${revision}) & ancestors(parents(${revision})-)`,
-      "--limit", "1", "--no-graph", "--template", '"x"',
+      "log",
+      "--revision",
+      `parents(${revision}) & ancestors(parents(${revision})-)`,
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      '"x"',
     ]);
     return out.includes("x");
   }
@@ -184,7 +249,14 @@ export class JjCli {
   async hasDescendants(cwd: string, changeId: string): Promise<boolean> {
     const revision = exact(changeId);
     const out = await this.read(cwd, [
-      "log", "--revision", `(${revision}):: ~ ${revision}`, "--limit", "1", "--no-graph", "--template", '"x"',
+      "log",
+      "--revision",
+      `(${revision}):: ~ ${revision}`,
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      '"x"',
     ]);
     return out.includes("x");
   }
@@ -195,10 +267,20 @@ export class JjCli {
   }
 
   /** Every supplied head must be reachable from this exact commit. */
-  async areAncestorsOf(cwd: string, headIds: readonly string[], changeId: string): Promise<boolean> {
+  async areAncestorsOf(
+    cwd: string,
+    headIds: readonly string[],
+    changeId: string,
+  ): Promise<boolean> {
     const out = await this.read(cwd, [
-      "log", "--revision", `(${exactAny(headIds)}) ~ ancestors(${exact(changeId)})`,
-      "--limit", "1", "--no-graph", "--template", '"x"',
+      "log",
+      "--revision",
+      `(${exactAny(headIds)}) ~ ancestors(${exact(changeId)})`,
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      '"x"',
     ]);
     return !out.includes("x");
   }
@@ -215,7 +297,14 @@ export class JjCli {
   /** The id of the newest operation, used to bound an undo. */
   async currentOperationId(cwd: string): Promise<string> {
     const out = await this.read(cwd, [
-      "--ignore-working-copy", "operation", "log", "--limit", "1", "--no-graph", "--template", 'id ++ "\\n"',
+      "--ignore-working-copy",
+      "operation",
+      "log",
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      'id ++ "\\n"',
     ]);
     return splitLines(out)[0] ?? "";
   }
@@ -241,5 +330,8 @@ export class JjCli {
 }
 
 function splitLines(value: string): string[] {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }

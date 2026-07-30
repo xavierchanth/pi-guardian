@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext, type InlineExtension } from "@earendil-works/pi-coding-agent";
+import {
+  getAgentDir,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type InlineExtension,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { SessionPolicyReader } from "../config/register.ts";
 import {
@@ -13,7 +18,12 @@ import { JjProcessExecutor } from "../jj/executor.ts";
 import { composePiTaiInstructions } from "../subagents/domain.ts";
 import { loadPackagedInstructions, type InstructionLoader } from "../subagents/instructions.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
-import { CAPABILITIES, CAPABILITY_NAMES, capabilityInstructions, type CapabilityName } from "./capabilities.ts";
+import {
+  CAPABILITIES,
+  CAPABILITY_NAMES,
+  capabilityInstructions,
+  type CapabilityName,
+} from "./capabilities.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
 import { CodexBackend } from "./backends/codex.ts";
 import { PiBackend } from "./backends/pi.ts";
@@ -75,7 +85,10 @@ const MAX_RESULT_BYTES = 16 * 1024;
 
 export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencies): void {
   const agentDir = dependencies.agentDir ?? getAgentDir();
-  const enabled: BackendName[] = ["pi", ...(dependencies.backends ?? ["claude", "codex"]).filter((name) => name !== "pi")];
+  const enabled: BackendName[] = [
+    "pi",
+    ...(dependencies.backends ?? ["claude", "codex"]).filter((name) => name !== "pi"),
+  ];
   const loadInstructions = dependencies.loadInstructions ?? loadPackagedInstructions;
   let runtime: Promise<Runtime> | undefined;
   /** Settled runtime, for callers such as the dashboard that cannot await one. */
@@ -105,12 +118,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 
   async function build(ctx: ExtensionContext): Promise<Runtime> {
     const stateRoot = join(agentDir, "pi-tai", "agents");
-    const workspaces = dependencies.workspaces ?? new WorkspaceManager({
-      jj: new JjCli(new JjProcessExecutor()),
-      registry: new FileWorkspaceRegistry(stateRoot),
-      sourcePath: ctx.cwd,
-      workspaceRoot: join(stateRoot, "workspaces"),
-    });
+    const workspaces =
+      dependencies.workspaces ??
+      new WorkspaceManager({
+        jj: new JjCli(new JjProcessExecutor()),
+        registry: new FileWorkspaceRegistry(stateRoot),
+        sourcePath: ctx.cwd,
+        workspaceRoot: join(stateRoot, "workspaces"),
+      });
     const backends: SubagentBackend[] = [
       new PiBackend({
         config: dependencies.config,
@@ -146,63 +161,102 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     promptSnippet: "Start an autonomous background subagent on a self-contained task",
     promptGuidelines: [...DELEGATION_GUIDELINES],
     parameters: Type.Object({
-      objective: Type.String({ description: "What the subagent must accomplish, stated so it stands alone" }),
-      isolation: Type.Union([Type.Literal("workspace"), Type.Literal("shared")], {
-        description: "workspace: a private checkout the subagent may change. shared: your working copy, read-only.",
+      objective: Type.String({
+        description: "What the subagent must accomplish, stated so it stands alone",
       }),
-      capability: Type.Optional(Type.Union(CAPABILITY_NAMES.map((name) => Type.Literal(name)), {
-        description: "Specialized environment and instructions for research tasks.",
-      })),
-      background: Type.Optional(Type.String({ description: "Context the subagent needs but cannot discover on its own" })),
-      acceptanceCriteria: Type.Optional(Type.Array(Type.String(), {
-        description: "Conditions that must hold for the task to be complete",
-        minItems: 1,
-        maxItems: 32,
-      })),
+      isolation: Type.Union([Type.Literal("workspace"), Type.Literal("shared")], {
+        description:
+          "workspace: a private checkout the subagent may change. shared: your working copy, read-only.",
+      }),
+      capability: Type.Optional(
+        Type.Union(
+          CAPABILITY_NAMES.map((name) => Type.Literal(name)),
+          {
+            description: "Specialized environment and instructions for research tasks.",
+          },
+        ),
+      ),
+      background: Type.Optional(
+        Type.String({ description: "Context the subagent needs but cannot discover on its own" }),
+      ),
+      acceptanceCriteria: Type.Optional(
+        Type.Array(Type.String(), {
+          description: "Conditions that must hold for the task to be complete",
+          minItems: 1,
+          maxItems: 32,
+        }),
+      ),
       constraints: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
-      backend: Type.Optional(Type.Union(enabled.map((name) => Type.Literal(name)), {
-        description: "Harness to run on. Defaults to pi; choose another only when the task genuinely suits it.",
-      })),
-      model: Type.Optional(Type.String({
-        description: `Model alias (${MODEL_ALIAS_NAMES.join(", ")}) or an explicit provider/model id. An alias selects its harness; incompatible model/backend pairs are rejected.`,
-      })),
-      effort: Type.Optional(Type.Union(
-        ["low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)),
-        {
-          description: "Reasoning effort. Omit this: each model has a default chosen for its purpose. "
-            + "Set it only when the user asks for a different reasoning level.",
-        },
-      )),
+      backend: Type.Optional(
+        Type.Union(
+          enabled.map((name) => Type.Literal(name)),
+          {
+            description:
+              "Harness to run on. Defaults to pi; choose another only when the task genuinely suits it.",
+          },
+        ),
+      ),
+      model: Type.Optional(
+        Type.String({
+          description: `Model alias (${MODEL_ALIAS_NAMES.join(", ")}) or an explicit provider/model id. An alias selects its harness; incompatible model/backend pairs are rejected.`,
+        }),
+      ),
+      effort: Type.Optional(
+        Type.Union(
+          ["low", "medium", "high", "xhigh", "max"].map((level) => Type.Literal(level)),
+          {
+            description:
+              "Reasoning effort. Omit this: each model has a default chosen for its purpose. " +
+              "Set it only when the user asks for a different reasoning level.",
+          },
+        ),
+      ),
       title: Type.Optional(Type.String({ description: "Short label for progress display" })),
-      continue: Type.Optional(Type.String({
-        description: "Id of a finished subagent whose workspace this one should pick up instead of starting a fresh checkout. Use this for coupled or sequential work in one workspace, and to hand stuck work to another model.",
-      })),
+      continue: Type.Optional(
+        Type.String({
+          description:
+            "Id of a finished subagent whose workspace this one should pick up instead of starting a fresh checkout. Use this for coupled or sequential work in one workspace, and to hand stuck work to another model.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { isolated, agents } = await requireRuntime(ctx);
       const previous = params.continue ? agents.get(params.continue) : undefined;
       if (previous && params.capability && previous.capability !== params.capability) {
-        return failure(`Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability}.`);
+        return failure(
+          `Continuation must retain capability ${previous.capability ?? "(none)"}; requested ${params.capability}.`,
+        );
       }
-      const capabilityName = (params.capability ?? previous?.capability) as CapabilityName | undefined;
+      const capabilityName = (params.capability ?? previous?.capability) as
+        | CapabilityName
+        | undefined;
       const capability = capabilityName ? CAPABILITIES[capabilityName] : undefined;
 
       // Known aliases select their catalog backend. Explicit provider/model IDs
       // retain the configured backend unless the caller overrides it.
       const explicitAlias = params.model ? MODEL_ALIASES[params.model.toLowerCase()] : undefined;
-      const selectedBackend = params.backend
-        ?? (params.model
-          ? (explicitAlias ? undefined : dependencies.defaultBackend)
-          : capability?.backend ?? dependencies.defaultBackend);
+      const selectedBackend =
+        params.backend ??
+        (params.model
+          ? explicitAlias
+            ? undefined
+            : dependencies.defaultBackend
+          : (capability?.backend ?? dependencies.defaultBackend));
       const resolved = resolveModel({
         ...(params.model ? { model: params.model } : capability ? { model: capability.model } : {}),
         ...(selectedBackend ? { backend: selectedBackend } : {}),
-        ...(params.effort ? { effort: params.effort } : capability ? { effort: capability.effort } : {}),
+        ...(params.effort
+          ? { effort: params.effort }
+          : capability
+            ? { effort: capability.effort }
+            : {}),
       });
       if (!resolved.ok) return failure(resolved.reason);
       const { backend, provider, model, effort } = resolved.choice;
       if (capability && !capability.allowedBackends.includes(backend)) {
-        return failure(`Capability "${capability.name}" cannot run on the ${backend} backend; use ${capability.allowedBackends.join(" or ")}.`);
+        return failure(
+          `Capability "${capability.name}" cannot run on the ${backend} backend; use ${capability.allowedBackends.join(" or ")}.`,
+        );
       }
       if (!enabled.includes(backend)) {
         return failure(`Backend "${backend}" is not enabled here. Enabled: ${enabled.join(", ")}.`);
@@ -212,36 +266,46 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       let snapshot;
       try {
         snapshot = await isolated.spawn({
-        backend,
-        ...(capability ? { capability: capability.name } : {}),
-        isolation: params.isolation,
-        title,
-        tools: [...CHILD_TOOLS],
-        provider,
-        model,
-        effort,
-        prompt: composeChildPrompt({
-          objective: params.objective,
-          ...(params.background ? { background: params.background } : {}),
-          ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
-        }),
-        ...(params.continue ? { continueFrom: params.continue } : {}),
-        systemPrompt: (cwd) => [composeChildCharter({
-          resuming: Boolean(params.continue),
-          objective: params.objective,
-          cwd,
-          isolated: isolatedRun,
-          ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
-          ...(params.constraints ? { constraints: params.constraints } : {}),
-        }), ...(capability ? [`<capability_instructions name="${capability.name}">\n${capabilityInstructions(capability)}\n</capability_instructions>`] : [])].join("\n\n"),
+          backend,
+          ...(capability ? { capability: capability.name } : {}),
+          isolation: params.isolation,
+          title,
+          tools: [...CHILD_TOOLS],
+          provider,
+          model,
+          effort,
+          prompt: composeChildPrompt({
+            objective: params.objective,
+            ...(params.background ? { background: params.background } : {}),
+            ...(params.acceptanceCriteria ? { acceptanceCriteria: params.acceptanceCriteria } : {}),
+          }),
+          ...(params.continue ? { continueFrom: params.continue } : {}),
+          systemPrompt: (cwd) =>
+            [
+              composeChildCharter({
+                resuming: Boolean(params.continue),
+                objective: params.objective,
+                cwd,
+                isolated: isolatedRun,
+                ...(params.acceptanceCriteria
+                  ? { acceptanceCriteria: params.acceptanceCriteria }
+                  : {}),
+                ...(params.constraints ? { constraints: params.constraints } : {}),
+              }),
+              ...(capability
+                ? [
+                    `<capability_instructions name="${capability.name}">\n${capabilityInstructions(capability)}\n</capability_instructions>`,
+                  ]
+                : []),
+            ].join("\n\n"),
         });
       } catch (error) {
         return failure(error instanceof Error ? error.message : String(error));
       }
       return success(
-        `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})`
-        + `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.`
-        + " Its result will arrive automatically.",
+        `Started ${snapshot.id} (${snapshot.backend}, ${provider}/${model}, effort ${effort})` +
+          `${isolatedRun ? " in its own workspace" : " in the shared working copy"}.` +
+          " Its result will arrive automatically.",
         {
           id: snapshot.id,
           backend: snapshot.backend,
@@ -262,7 +326,11 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     description: WAIT_DESCRIPTION,
     promptSnippet: "Block until any named subagent finishes; foreground input releases the wait",
     parameters: Type.Object({
-      ids: Type.Array(Type.String(), { description: "Subagent ids to wait for", minItems: 1, maxItems: 16 }),
+      ids: Type.Array(Type.String(), {
+        description: "Subagent ids to wait for",
+        minItems: 1,
+        maxItems: 16,
+      }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const interruption = new AbortController();
@@ -272,9 +340,12 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         const result = await agents.wait(params.ids, signal, interruption.signal);
         const rendered = result.settled.map(renderResult).join("\n\n---\n\n");
         const pending = result.pending.map((snapshot) => snapshot.id);
-        const suffix = result.reason === "user-interrupted"
-          ? `Wait interrupted by foreground user input; ${pending.length} subagent(s) remain running and can be collected later${pending.length ? `: ${pending.join(", ")}` : ""}.`
-          : pending.length ? `Still running: ${pending.join(", ")}.` : "";
+        const suffix =
+          result.reason === "user-interrupted"
+            ? `Wait interrupted by foreground user input; ${pending.length} subagent(s) remain running and can be collected later${pending.length ? `: ${pending.join(", ")}` : ""}.`
+            : pending.length
+              ? `Still running: ${pending.join(", ")}.`
+              : "";
         const message = [rendered, suffix].filter(Boolean).join("\n\n");
         return success(message, {
           ids: params.ids,
@@ -318,7 +389,8 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const { agents } = await requireRuntime(ctx);
       const all = agents.list();
-      if (!all.length) return success("No subagents have been started in this session.", { count: 0 });
+      if (!all.length)
+        return success("No subagents have been started in this session.", { count: 0 });
       return success(all.map(renderLine).join("\n"), {
         count: all.length,
         subagents: all.map((snapshot) => ({
@@ -384,10 +456,11 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     promptGuidelines: [...WORKSPACE_GUIDELINES],
     parameters: Type.Object({
       id: Type.String({ description: "Subagent id whose workspace should be merged" }),
-      strategy: Type.Optional(Type.Union(
-        [Type.Literal("auto"), Type.Literal("linear"), Type.Literal("merge-under")],
-        { description: "Defaults to auto, which is almost always right." },
-      )),
+      strategy: Type.Optional(
+        Type.Union([Type.Literal("auto"), Type.Literal("linear"), Type.Literal("merge-under")], {
+          description: "Defaults to auto, which is almost always right.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { isolated } = await requireRuntime(ctx);
@@ -399,7 +472,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       }
       if (result.kind === "blocked") return failure(result.reason);
       if (result.kind === "no_changes") {
-        return success(`${params.id} produced no changes; its workspace has been removed.`, { merged: false });
+        return success(`${params.id} produced no changes; its workspace has been removed.`, {
+          merged: false,
+        });
       }
       const { summary } = result;
       const conflicts = summary.conflictPaths.length
@@ -424,7 +499,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     label: "Discard Subagent Work",
     description: DISCARD_DESCRIPTION,
     promptSnippet: "Permanently throw away a subagent's workspace",
-    parameters: Type.Object({ id: Type.String({ description: "Subagent id whose workspace should be discarded" }) }),
+    parameters: Type.Object({
+      id: Type.String({ description: "Subagent id whose workspace should be discarded" }),
+    }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { isolated } = await requireRuntime(ctx);
       try {
@@ -449,10 +526,12 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       const { workspaces } = await requireRuntime(ctx);
       const records = await workspaces.list();
       if (!records.length) return success("No managed workspaces.", { count: 0 });
-      const lines = await Promise.all(records.map(async (record) => {
-        const pending = await workspaces.pendingChanges(record.id).catch(() => undefined);
-        return renderWorkspace(record, pending?.length);
-      }));
+      const lines = await Promise.all(
+        records.map(async (record) => {
+          const pending = await workspaces.pendingChanges(record.id).catch(() => undefined);
+          return renderWorkspace(record, pending?.length);
+        }),
+      );
       return success(lines.join("\n"), { count: records.length });
     },
   });
@@ -478,14 +557,18 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     const swept = await workspaces.sweep(isolated.activeOwners()).catch(() => []);
     const attention = swept.filter((entry) => entry.disposition === "needs_attention");
     if (attention.length && typeof pi.sendMessage === "function") {
-      pi.sendMessage({
-        customType: "pi-tai-workspace-sweep",
-        content: `${attention.length} managed workspace(s) from an earlier session still hold unmerged work: `
-          + `${attention.map((entry) => `${entry.name} (${entry.reason})`).join("; ")}. `
-          + "Use workspace_status to inspect them.",
-        display: true,
-        details: { swept },
-      }, { deliverAs: "nextTurn", triggerTurn: false });
+      pi.sendMessage(
+        {
+          customType: "pi-tai-workspace-sweep",
+          content:
+            `${attention.length} managed workspace(s) from an earlier session still hold unmerged work: ` +
+            `${attention.map((entry) => `${entry.name} (${entry.reason})`).join("; ")}. ` +
+            "Use workspace_status to inspect them.",
+          display: true,
+          details: { swept },
+        },
+        { deliverAs: "nextTurn", triggerTurn: false },
+      );
     }
   });
 
@@ -503,12 +586,17 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     if (typeof pi.sendMessage !== "function") return;
     for (const result of results) {
       const snapshot = agents.get(result.id);
-      pi.sendMessage({
-        customType: "pi-tai-subagent-result",
-        content: snapshot ? renderResult(snapshot) : `Subagent ${result.id} finished:\n${result.text}`,
-        display: true,
-        details: { id: result.id },
-      }, { deliverAs: "followUp", triggerTurn: true });
+      pi.sendMessage(
+        {
+          customType: "pi-tai-subagent-result",
+          content: snapshot
+            ? renderResult(snapshot)
+            : `Subagent ${result.id} finished:\n${result.text}`,
+          display: true,
+          details: { id: result.id },
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
     }
 
     const running = agents.list().filter((snapshot) => snapshot.status === "running");
@@ -519,12 +607,15 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     if (reassessmentSent) return;
     reassessmentSent = true;
     const ids = running.map((snapshot) => snapshot.id);
-    pi.sendMessage({
-      customType: "pi-tai-subagent-wait-reassessment",
-      content: `Subagents still running: ${ids.join(", ")}. Reassess whether to wait.`,
-      display: false,
-      details: { ids },
-    }, { deliverAs: "followUp", triggerTurn: true });
+    pi.sendMessage(
+      {
+        customType: "pi-tai-subagent-wait-reassessment",
+        content: `Subagents still running: ${ids.join(", ")}. Reassess whether to wait.`,
+        display: false,
+        details: { ids },
+      },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
   });
 
   pi.on("session_shutdown", async () => {
@@ -536,19 +627,23 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 
 function renderLine(snapshot: SubagentSnapshot): string {
   const context = contextUtilisation(snapshot);
-  return `${snapshot.id}  ${snapshot.status.padEnd(7)} ${snapshot.backend.padEnd(6)} `
-    + `${snapshot.capability ? `[${snapshot.capability}] ` : ""}`
-    + `${context === undefined ? "" : `ctx ${context}%  `}${snapshot.title}`;
+  return (
+    `${snapshot.id}  ${snapshot.status.padEnd(7)} ${snapshot.backend.padEnd(6)} ` +
+    `${snapshot.capability ? `[${snapshot.capability}] ` : ""}` +
+    `${context === undefined ? "" : `ctx ${context}%  `}${snapshot.title}`
+  );
 }
 
 function renderWorkspace(record: WorkspaceRecord, pending: number | undefined): string {
-  const holding = pending === undefined ? "unreadable" : pending === 0 ? "empty" : `${pending} change(s)`;
+  const holding =
+    pending === undefined ? "unreadable" : pending === 0 ? "empty" : `${pending} change(s)`;
   return `${record.name}  ${record.phase}  ${holding}${record.owner ? `  owner ${record.owner}` : ""}`;
 }
 
 function renderResult(snapshot: SubagentSnapshot): string {
   const header = `Subagent ${snapshot.id} (${snapshot.title}) ${snapshot.status === "done" ? "finished" : "failed"}.`;
-  const body = snapshot.status === "done" ? snapshot.finalText : snapshot.errorText ?? "No output.";
+  const body =
+    snapshot.status === "done" ? snapshot.finalText : (snapshot.errorText ?? "No output.");
   return `${header}\n\n${truncate(body, MAX_RESULT_BYTES)}`;
 }
 

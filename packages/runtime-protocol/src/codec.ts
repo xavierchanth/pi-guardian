@@ -1,6 +1,16 @@
 import { z } from "zod";
-import type { RuntimeCommand, RuntimeEvent, RuntimeProtocolError, RuntimeResponse } from "./generated.ts";
-import { isRuntimeMethod, runtimeMethodRegistry, type RuntimeMethod, type RuntimeMethodParams } from "./registry.ts";
+import type {
+  RuntimeCommand,
+  RuntimeEvent,
+  RuntimeProtocolError,
+  RuntimeResponse,
+} from "./generated.ts";
+import {
+  isRuntimeMethod,
+  runtimeMethodRegistry,
+  type RuntimeMethod,
+  type RuntimeMethodParams,
+} from "./registry.ts";
 import {
   CURRENT_RUNTIME_PROTOCOL_VERSION,
   RuntimeCommandSchema,
@@ -39,7 +49,11 @@ export class RuntimeDecodeError extends Error {
 export function decodeRuntimeCommand(value: unknown): RuntimeCommand {
   const parsed = RuntimeCommandSchema.safeParse(value);
   if (!parsed.success) {
-    throw new RuntimeDecodeError("invalid_envelope", "Runtime command envelope is invalid.", parsed.error.issues);
+    throw new RuntimeDecodeError(
+      "invalid_envelope",
+      "Runtime command envelope is invalid.",
+      parsed.error.issues,
+    );
   }
   return parsed.data;
 }
@@ -53,18 +67,23 @@ export function decodeMethodParams(method: string, value: unknown): unknown {
   if (!isRuntimeMethod(method)) return value;
   const parsed = runtimeMethodRegistry[method].params.safeParse(value);
   if (!parsed.success) {
-    throw new RuntimeDecodeError("invalid_params", `Parameters for ${method} are invalid.`, parsed.error.issues);
+    throw new RuntimeDecodeError(
+      "invalid_params",
+      `Parameters for ${method} are invalid.`,
+      parsed.error.issues,
+    );
   }
   return parsed.data;
 }
 
-export function validateMethodResult<M extends RuntimeMethod>(
-  method: M,
-  value: unknown,
-): unknown {
+export function validateMethodResult<M extends RuntimeMethod>(method: M, value: unknown): unknown {
   const parsed = runtimeMethodRegistry[method].result.safeParse(value);
   if (!parsed.success) {
-    throw new RuntimeDecodeError("invalid_envelope", `Result for ${method} is invalid.`, parsed.error.issues);
+    throw new RuntimeDecodeError(
+      "invalid_envelope",
+      `Result for ${method} is invalid.`,
+      parsed.error.issues,
+    );
   }
   return parsed.data;
 }
@@ -72,7 +91,11 @@ export function validateMethodResult<M extends RuntimeMethod>(
 export function validateRuntimeResponse(value: unknown): RuntimeResponse {
   const parsed = RuntimeResponseSchema.safeParse(value);
   if (!parsed.success) {
-    throw new RuntimeDecodeError("invalid_envelope", "Runtime response envelope is invalid.", parsed.error.issues);
+    throw new RuntimeDecodeError(
+      "invalid_envelope",
+      "Runtime response envelope is invalid.",
+      parsed.error.issues,
+    );
   }
   return parsed.data;
 }
@@ -80,7 +103,11 @@ export function validateRuntimeResponse(value: unknown): RuntimeResponse {
 export function validateRuntimeEvent(value: unknown): RuntimeEvent {
   const parsed = RuntimeEventSchema.safeParse(value);
   if (!parsed.success) {
-    throw new RuntimeDecodeError("invalid_envelope", "Runtime event envelope is invalid.", parsed.error.issues);
+    throw new RuntimeDecodeError(
+      "invalid_envelope",
+      "Runtime event envelope is invalid.",
+      parsed.error.issues,
+    );
   }
   return parsed.data;
 }

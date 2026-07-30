@@ -18,12 +18,13 @@ export function createHeadlessUiContext(diagnostics: DiagnosticSink): ExtensionU
     input: () => unsupported("input"),
     custom: () => unsupported("custom"),
     editor: () => unsupported("editor"),
-    notify: (message: string, type: "info" | "warning" | "error" = "info") => diagnostics({
-      timestamp: new Date().toISOString(),
-      level: type === "warning" ? "warn" : type,
-      event: "extension_notification",
-      data: { characters: message.length },
-    }),
+    notify: (message: string, type: "info" | "warning" | "error" = "info") =>
+      diagnostics({
+        timestamp: new Date().toISOString(),
+        level: type === "warning" ? "warn" : type,
+        event: "extension_notification",
+        data: { characters: message.length },
+      }),
     onTerminalInput: () => () => {},
     getEditorText: () => "",
     getEditorComponent: () => undefined,

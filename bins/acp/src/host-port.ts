@@ -7,11 +7,7 @@ import {
   type HostCommand,
   type HostEvent,
 } from "@pi-tai/host-protocol";
-import type {
-  BrokerPort,
-  BrokerSessionEvent,
-  BrokerSessionSummary,
-} from "./broker-port.ts";
+import type { BrokerPort, BrokerSessionEvent, BrokerSessionSummary } from "./broker-port.ts";
 
 const foregroundSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("idle"), last_stop_reason: z.string().nullable() }),
@@ -28,11 +24,13 @@ const sessionSchema = z.object({
   revision: z.number().int().nonnegative(),
   runtimeGeneration: z.number().int().nonnegative(),
   foreground: foregroundSchema,
-  piSession: z.object({
-    sessionId: z.string(),
-    sessionFile: z.string(),
-    cwd: z.string(),
-  }).nullable(),
+  piSession: z
+    .object({
+      sessionId: z.string(),
+      sessionFile: z.string(),
+      cwd: z.string(),
+    })
+    .nullable(),
 });
 
 type SessionSnapshot = z.infer<typeof sessionSchema>;
@@ -57,15 +55,19 @@ export class HostBrokerPort implements BrokerPort {
   }
 
   async create(input: { cwd: string }): Promise<BrokerSessionSummary> {
-    const result = sessionSchema.parse(await this.command("session.create", undefined, undefined, {
-      cwd: input.cwd,
-      clientAssertedProjectTrust: false,
-    }));
+    const result = sessionSchema.parse(
+      await this.command("session.create", undefined, undefined, {
+        cwd: input.cwd,
+        clientAssertedProjectTrust: false,
+      }),
+    );
     return summary(result);
   }
 
   async list(input: { cwd?: string }): Promise<{ sessions: BrokerSessionSummary[] }> {
-    const values = z.array(sessionSchema).parse(await this.command("session.list", undefined, undefined, {}));
+    const values = z
+      .array(sessionSchema)
+      .parse(await this.command("session.list", undefined, undefined, {}));
     return {
       sessions: values
         .map(summary)
@@ -106,12 +108,9 @@ export class HostBrokerPort implements BrokerPort {
     if (current.foreground.state === "idle") return;
     const pending = this.prompts.get(input.sessionId);
     if (pending) pending.cancelled = true;
-    await this.command(
-      "session.cancel",
-      input.sessionId,
-      current.revision,
-      { operationId: current.foreground.operation_id },
-    );
+    await this.command("session.cancel", input.sessionId, current.revision, {
+      operationId: current.foreground.operation_id,
+    });
   }
 
   async subscribe(
@@ -120,18 +119,19 @@ export class HostBrokerPort implements BrokerPort {
   ): Promise<() => void> {
     this.observers.get(input.sessionId)?.close();
     const connection = await this.connect();
-    const result = await connection.command(this.hostCommand(
-      "session.observe",
-      input.sessionId,
-      undefined,
-      { replayFromStart: input.replayFromStart },
-    ));
+    const result = await connection.command(
+      this.hostCommand("session.observe", input.sessionId, undefined, {
+        replayFromStart: input.replayFromStart,
+      }),
+    );
     if (input.replayFromStart) {
-      const replay = z.object({
-        snapshot: sessionSchema,
-        replay: z.array(z.unknown()),
-        highWaterSequence: z.number().int().nonnegative(),
-      }).parse(result);
+      const replay = z
+        .object({
+          snapshot: sessionSchema,
+          replay: z.array(z.unknown()),
+          highWaterSequence: z.number().int().nonnegative(),
+        })
+        .parse(result);
       for (const value of replay.replay) {
         for (const event of this.mapEvent(parseHostEvent(value))) await onEvent(event);
       }
@@ -212,29 +212,38 @@ export class HostBrokerPort implements BrokerPort {
     const pending = this.prompts.get(event.sessionId);
     switch (event.type) {
       case "user.message": {
-        const message = z.object({ messageId: z.string(), content: z.string() }).parse(event.payload);
+        const message = z
+          .object({ messageId: z.string(), content: z.string() })
+          .parse(event.payload);
         return [{ type: "user_message", ...message }];
       }
       case "foreground.running":
         return [{ type: "foreground_running" }];
       case "assistant.text_delta": {
-        const delta = z.object({
-          delta: z.string(),
-          operationId: z.string().optional(),
-        }).parse(event.payload);
-        return [{
-          type: "assistant_text_delta",
-          messageId: `assistant-${delta.operationId ?? pending?.operationId ?? event.runtimeGeneration}`,
-          delta: delta.delta,
-        }];
+        const delta = z
+          .object({
+            delta: z.string(),
+            operationId: z.string().optional(),
+          })
+          .parse(event.payload);
+        return [
+          {
+            type: "assistant_text_delta",
+            messageId: `assistant-${delta.operationId ?? pending?.operationId ?? event.runtimeGeneration}`,
+            delta: delta.delta,
+          },
+        ];
       }
       case "session.idle": {
         this.prompts.delete(event.sessionId);
         const idle = z.object({ stopReason: z.string().optional() }).parse(event.payload);
-        return [{
-          type: "foreground_idle",
-          stopReason: idle.stopReason === "cancelled" || pending?.cancelled ? "cancelled" : "end_turn",
-        }];
+        return [
+          {
+            type: "foreground_idle",
+            stopReason:
+              idle.stopReason === "cancelled" || pending?.cancelled ? "cancelled" : "end_turn",
+          },
+        ];
       }
       default:
         return [];

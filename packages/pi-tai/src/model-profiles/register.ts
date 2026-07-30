@@ -1,19 +1,9 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SessionPolicyReader } from "../config/register.ts";
 import { PROFILE_CYCLE_SHORTCUT } from "../keybindings/register.ts";
-import {
-  THINKING_EFFORTS,
-  type ModelProfile,
-  type ThinkingEffort,
-} from "./domain.ts";
+import { THINKING_EFFORTS, type ModelProfile, type ThinkingEffort } from "./domain.ts";
 
-export function registerModelProfiles(
-  pi: ExtensionAPI,
-  config: SessionPolicyReader,
-): void {
+export function registerModelProfiles(pi: ExtensionAPI, config: SessionPolicyReader): void {
   const profiles = () => config.sessionPolicy().modelProfiles;
 
   pi.registerCommand("profile", {
@@ -23,7 +13,10 @@ export function registerModelProfiles(
       if (requested) {
         const profile = profiles().find((entry) => entry.name === requested);
         if (!profile) {
-          ctx.ui.notify(`Unknown model profile "${requested}". Available: ${profileNames(profiles())}.`, "error");
+          ctx.ui.notify(
+            `Unknown model profile "${requested}". Available: ${profileNames(profiles())}.`,
+            "error",
+          );
           return;
         }
         await applyModelProfile(pi, profile, ctx);
@@ -49,10 +42,16 @@ export function registerModelProfiles(
       let effort = args.trim() as ThinkingEffort | "";
       if (!effort) {
         if (!ctx.hasUI) {
-          ctx.ui.notify(`Current effort: ${pi.getThinkingLevel()}. Available: ${THINKING_EFFORTS.join(", ")}.`, "info");
+          ctx.ui.notify(
+            `Current effort: ${pi.getThinkingLevel()}. Available: ${THINKING_EFFORTS.join(", ")}.`,
+            "info",
+          );
           return;
         }
-        effort = await ctx.ui.select("Select reasoning effort", [...THINKING_EFFORTS]) as ThinkingEffort | undefined ?? "";
+        effort =
+          ((await ctx.ui.select("Select reasoning effort", [...THINKING_EFFORTS])) as
+            | ThinkingEffort
+            | undefined) ?? "";
         if (!effort) return;
       }
       if (!THINKING_EFFORTS.includes(effort as ThinkingEffort)) {
@@ -71,7 +70,12 @@ export function registerModelProfiles(
         ctx.ui.notify("No model profiles are configured.", "warning");
         return;
       }
-      const current = matchingProfile(configured, ctx.model?.provider, ctx.model?.id, pi.getThinkingLevel());
+      const current = matchingProfile(
+        configured,
+        ctx.model?.provider,
+        ctx.model?.id,
+        pi.getThinkingLevel(),
+      );
       const index = current ? configured.findIndex((entry) => entry.name === current.name) : -1;
       const next = configured[(index + 1) % configured.length];
       await applyModelProfile(pi, next, ctx);
@@ -87,11 +91,17 @@ export async function applyModelProfile(
   const model = ctx.modelRegistry.find(profile.provider, profile.model);
   const target = `${profile.provider}/${profile.model}`;
   if (!model) {
-    ctx.ui.notify(`Model profile "${profile.name}" is unavailable: ${target} is not registered.`, "error");
+    ctx.ui.notify(
+      `Model profile "${profile.name}" is unavailable: ${target} is not registered.`,
+      "error",
+    );
     return false;
   }
-  if (!await pi.setModel(model)) {
-    ctx.ui.notify(`Model profile "${profile.name}" is unavailable: no credentials for ${target}.`, "error");
+  if (!(await pi.setModel(model))) {
+    ctx.ui.notify(
+      `Model profile "${profile.name}" is unavailable: no credentials for ${target}.`,
+      "error",
+    );
     return false;
   }
   pi.setThinkingLevel(profile.effort);
@@ -113,8 +123,9 @@ export function matchingProfile(
   model: string | undefined,
   effort: string,
 ): ModelProfile | undefined {
-  return profiles.find((profile) =>
-    profile.provider === provider && profile.model === model && profile.effort === effort,
+  return profiles.find(
+    (profile) =>
+      profile.provider === provider && profile.model === model && profile.effort === effort,
   );
 }
 

@@ -1,16 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DIVERGENT_ARGV, displacedChangeIds, updateStaleSafely } from "../../packages/pi-tai/src/jj/stale-update.ts";
+import {
+  DIVERGENT_ARGV,
+  displacedChangeIds,
+  updateStaleSafely,
+} from "../../packages/pi-tai/src/jj/stale-update.ts";
 
-function harness(divergentBefore: string[], divergentAfter: string[], output = "Working copy now at: abc\nAdded 0 files, modified 1 files, removed 1 files\n") {
+function harness(
+  divergentBefore: string[],
+  divergentAfter: string[],
+  output = "Working copy now at: abc\nAdded 0 files, modified 1 files, removed 1 files\n",
+) {
   const calls: string[][] = [];
   let updated = false;
   return {
     calls,
     context: "Test",
     location: "/tmp/workspace",
-    read: async (args: readonly string[]) => { calls.push([...args]); return (updated ? divergentAfter : divergentBefore).join("\n"); },
-    run: async (args: readonly string[]) => { calls.push([...args]); updated = true; return output; },
+    read: async (args: readonly string[]) => {
+      calls.push([...args]);
+      return (updated ? divergentAfter : divergentBefore).join("\n");
+    },
+    run: async (args: readonly string[]) => {
+      calls.push([...args]);
+      updated = true;
+      return output;
+    },
   };
 }
 
@@ -25,12 +40,15 @@ test("stale update passes through when nothing was displaced", async () => {
 
 test("stale update refuses to continue when uncommitted work was displaced", async () => {
   const io = harness([], ["kkkk", "zzzz"]);
-  await assert.rejects(() => updateStaleSafely(io), (error: Error) => {
-    assert.match(error.message, /displaced uncommitted work/);
-    assert.match(error.message, /kkkk, zzzz/);
-    assert.match(error.message, /\/tmp\/workspace/);
-    return true;
-  });
+  await assert.rejects(
+    () => updateStaleSafely(io),
+    (error: Error) => {
+      assert.match(error.message, /displaced uncommitted work/);
+      assert.match(error.message, /kkkk, zzzz/);
+      assert.match(error.message, /\/tmp\/workspace/);
+      return true;
+    },
+  );
 });
 
 test("stale update ignores divergent changes that already existed", async () => {

@@ -10,7 +10,11 @@ import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
 import { IsolatedSubagents } from "../../packages/pi-tai/src/agents/isolated.ts";
 import { SubagentManager } from "../../packages/pi-tai/src/agents/manager.ts";
 import type { SubagentSnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
-import { InMemoryWorkspaceRegistry, JjCli, WorkspaceManager } from "../../packages/pi-tai/src/isolation/index.ts";
+import {
+  InMemoryWorkspaceRegistry,
+  JjCli,
+  WorkspaceManager,
+} from "../../packages/pi-tai/src/isolation/index.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
 
 const run = promisify(execFile);
@@ -123,13 +127,18 @@ describe("isolated subagents", () => {
 
   it("does not leak a workspace when the spawn itself fails", async () => {
     const backend = new StubBackend();
-    backend.spawn = async () => { throw new Error("model provider is down"); };
+    backend.spawn = async () => {
+      throw new Error("model provider is down");
+    };
     const { isolated, workspaces, source } = await harness(backend);
 
     await assert.rejects(isolated.spawn(request()), /model provider is down/);
 
     assert.deepEqual(await workspaces.list(), [], "the workspace record is gone");
-    assert.ok(!(await jj(source, "workspace", "list")).includes("pitai-"), "the jj attachment is gone");
+    assert.ok(
+      !(await jj(source, "workspace", "list")).includes("pitai-"),
+      "the jj attachment is gone",
+    );
   });
 
   it("reclaims the workspace of a child that produced nothing", async () => {
@@ -144,29 +153,43 @@ describe("isolated subagents", () => {
   });
 
   it("keeps the workspace of a child that produced work", async () => {
-    const { isolated, agents, workspaces } = await harness(writingBackend("feature.txt", "agent output\n"));
+    const { isolated, agents, workspaces } = await harness(
+      writingBackend("feature.txt", "agent output\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);
     await settleQueue();
 
-    assert.equal((await workspaces.list()).length, 1, "real work is never discarded by the settle hook");
+    assert.equal(
+      (await workspaces.list()).length,
+      1,
+      "real work is never discarded by the settle hook",
+    );
     assert.ok(isolated.workspaceFor(snapshot.id));
   });
 
   it("keeps a failed child's work for inspection rather than discarding it", async () => {
-    const { isolated, agents, workspaces } = await harness(writingBackend("partial.txt", "half done\n"));
+    const { isolated, agents, workspaces } = await harness(
+      writingBackend("partial.txt", "half done\n"),
+    );
 
     const snapshot = await isolated.spawn(request({ prompt: "FAIL: ran out of budget" }));
     const [settled] = (await agents.wait([snapshot.id])).settled;
     await settleQueue();
 
     assert.equal(settled?.status, "error");
-    assert.equal((await workspaces.list()).length, 1, "a failed child's partial work survives for review");
+    assert.equal(
+      (await workspaces.list()).length,
+      1,
+      "a failed child's partial work survives for review",
+    );
   });
 
   it("merges a settled child's work into the source graph", async () => {
-    const { isolated, agents, source, workspaces } = await harness(writingBackend("feature.txt", "agent output\n"));
+    const { isolated, agents, source, workspaces } = await harness(
+      writingBackend("feature.txt", "agent output\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);
@@ -190,7 +213,9 @@ describe("isolated subagents", () => {
   });
 
   it("discards a child's work on request", async () => {
-    const { isolated, agents, source, workspaces } = await harness(writingBackend("scratch.txt", "throwaway\n"));
+    const { isolated, agents, source, workspaces } = await harness(
+      writingBackend("scratch.txt", "throwaway\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);

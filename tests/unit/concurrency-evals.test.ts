@@ -11,7 +11,9 @@ test("agent concurrency benchmark fixtures include policy and Real-JJ cases", as
   const root = dirname(fileURLToPath(import.meta.url));
   const cases = await loadConcurrencyCases(join(root, "../../evals/agent-concurrency/cases"));
   assert.deepEqual(cases.map((item) => item.mode).sort(), ["policy", "real-jj"]);
-  assert.ok(cases.every((item) => item.expectedTools.every((tool) => !item.forbiddenTools.includes(tool))));
+  assert.ok(
+    cases.every((item) => item.expectedTools.every((tool) => !item.forbiddenTools.includes(tool))),
+  );
 });
 
 test("agent concurrency benchmark schema rejects unknown and contradictory fields", () => {
@@ -28,5 +30,8 @@ test("agent concurrency benchmark schema rejects unknown and contradictory field
   };
   assert.equal(validateConcurrencyCase(base).id, "valid-case");
   assert.throws(() => validateConcurrencyCase({ ...base, surprise: true }), /unknown field/);
-  assert.throws(() => validateConcurrencyCase({ ...base, forbiddenTools: ["checkpoint_change"] }), /also forbidden/);
+  assert.throws(
+    () => validateConcurrencyCase({ ...base, forbiddenTools: ["checkpoint_change"] }),
+    /also forbidden/,
+  );
 });

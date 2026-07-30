@@ -10,7 +10,9 @@ test("capability leases separate service availability from model tool exposure",
   const controller = new SessionCapabilityController();
   controller.bindTools({
     getActiveTools: () => [...active],
-    setActiveTools: (next) => { active = [...next]; },
+    setActiveTools: (next) => {
+      active = [...next];
+    },
   });
   controller.bindPersistence((enabled) => persisted.push([...enabled]));
   controller.register({
@@ -44,7 +46,9 @@ test("capability reconstruction resets forks and preserves resumed user intent",
   const controller = new SessionCapabilityController();
   controller.bindTools({
     getActiveTools: () => [...active],
-    setActiveTools: (next) => { active = [...next]; },
+    setActiveTools: (next) => {
+      active = [...next];
+    },
   });
   controller.register({
     id: "git-worktrees",
@@ -52,14 +56,16 @@ test("capability reconstruction resets forks and preserves resumed user intent",
     description: "Create isolated Git worktrees",
     toolNames: ["create_git_worktree"],
   });
-  const entries = [{
-    type: "custom",
-    id: "entry",
-    parentId: null,
-    timestamp: new Date(0).toISOString(),
-    customType: CAPABILITY_STATE_ENTRY,
-    data: { enabled: ["git-worktrees"] },
-  }] as SessionEntry[];
+  const entries = [
+    {
+      type: "custom",
+      id: "entry",
+      parentId: null,
+      timestamp: new Date(0).toISOString(),
+      customType: CAPABILITY_STATE_ENTRY,
+      data: { enabled: ["git-worktrees"] },
+    },
+  ] as SessionEntry[];
 
   controller.reconstruct(entries, false);
   assert.deepEqual(active, ["read", "create_git_worktree"]);

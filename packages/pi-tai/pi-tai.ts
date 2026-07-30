@@ -52,10 +52,7 @@ export interface PiTaiRuntime {
   defaultBackend?: BackendName;
 }
 
-export type PiTaiRegistrar = (
-  pi: ExtensionAPI,
-  runtime: PiTaiRuntime,
-) => void | Promise<void>;
+export type PiTaiRegistrar = (pi: ExtensionAPI, runtime: PiTaiRuntime) => void | Promise<void>;
 
 export interface PiTaiRegistrars {
   keybindings: PiTaiRegistrar;
@@ -108,9 +105,10 @@ const productionRegistrars: PiTaiRegistrars = {
   notifications: (pi, runtime) => {
     registerNotifications(pi, runtime.config, runtime.notificationSender);
   },
-  guardian: (pi, runtime) => registerApprovalGuardian(pi, {
-    workContext: () => runtime.workContext.current(),
-  }),
+  guardian: (pi, runtime) =>
+    registerApprovalGuardian(pi, {
+      workContext: () => runtime.workContext.current(),
+    }),
   footer: (pi, runtime) => {
     registerFooter(pi, runtime.workContext, runtime.capabilities);
   },

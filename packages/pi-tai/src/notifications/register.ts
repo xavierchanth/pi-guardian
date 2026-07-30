@@ -2,14 +2,8 @@ import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isCmuxIntegrationActive } from "../cmux/register.ts";
 import type { ClientPreferencesReader } from "../config/register.ts";
-import {
-  GUARDIAN_REVIEW_FAILED_EVENT,
-  type GuardianReviewFailedEvent,
-} from "./events.ts";
-import {
-  sendNativeTerminalNotification,
-  type NotificationSender,
-} from "./native.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT, type GuardianReviewFailedEvent } from "./events.ts";
+import { sendNativeTerminalNotification, type NotificationSender } from "./native.ts";
 
 const MAX_IDENTITY_LENGTH = 80;
 const MAX_RESPONSE_LENGTH = 240;
@@ -31,17 +25,20 @@ export function registerNotifications(
 
   pi.events.on(GUARDIAN_REVIEW_FAILED_EVENT, (data) => {
     const event = data as GuardianReviewFailedEvent;
-    if (event.mode !== "tui" || !configService.clientPreferences().notifications.reviewFailure) return;
-    const fallback = event.kind === "timeout"
-      ? "Automatic action review timed out."
-      : "Automatic action review failed.";
+    if (event.mode !== "tui" || !configService.clientPreferences().notifications.reviewFailure)
+      return;
+    const fallback =
+      event.kind === "timeout"
+        ? "Automatic action review timed out."
+        : "Automatic action review failed.";
     const detail = event.reason?.trim() || fallback;
     const body = event.toolName?.trim() ? `${event.toolName.trim()} — ${detail}` : detail;
     notify(notificationTitle(pi, event.cwd), body);
   });
 
   pi.on("agent_settled", (_event, ctx) => {
-    if (ctx.mode !== "tui" || !configService.clientPreferences().notifications.agentCompletion) return;
+    if (ctx.mode !== "tui" || !configService.clientPreferences().notifications.agentCompletion)
+      return;
     if (cmuxActive(configService, environment)) return;
     notify(notificationTitle(pi, ctx.cwd), completionBody(ctx));
   });
@@ -75,11 +72,16 @@ function completionBody(ctx: ExtensionContext): string {
 }
 
 function assistantText(content: unknown): string | undefined {
-  const parts = typeof content === "string"
-    ? [content]
-    : Array.isArray(content)
-      ? content.flatMap((block) => isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : [])
-      : [];
+  const parts =
+    typeof content === "string"
+      ? [content]
+      : Array.isArray(content)
+        ? content.flatMap((block) =>
+            isRecord(block) && block.type === "text" && typeof block.text === "string"
+              ? [block.text]
+              : [],
+          )
+        : [];
   const normalized = parts.join(" ").replace(/\s+/g, " ").trim();
   return normalized || undefined;
 }

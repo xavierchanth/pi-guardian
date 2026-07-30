@@ -6,12 +6,14 @@ import { registerAutoCompaction } from "../../packages/pi-tai/src/compaction/reg
 
 type Handler = (event: unknown, ctx: any) => Promise<void> | void;
 
-function harness(options: {
-  enabled?: boolean;
-  thresholdPercent?: number;
-  percent?: number | null;
-  idle?: boolean;
-} = {}) {
+function harness(
+  options: {
+    enabled?: boolean;
+    thresholdPercent?: number;
+    percent?: number | null;
+    idle?: boolean;
+  } = {},
+) {
   const handlers = new Map<string, Handler>();
   const notifications: Array<{ message: string; level: string }> = [];
   const compactCalls: Array<Record<string, unknown>> = [];
@@ -56,7 +58,9 @@ test("compacts when settled context reaches the configured percentage", async ()
 
   assert.equal(state.compactCalls.length, 1);
   let resolved = false;
-  void Promise.resolve(completion).then(() => { resolved = true; });
+  void Promise.resolve(completion).then(() => {
+    resolved = true;
+  });
   await Promise.resolve();
   assert.equal(resolved, false);
 
@@ -95,10 +99,12 @@ test("reports failures and allows a later compaction attempt", async () => {
   (state.compactCalls[0]?.onError as ((error: Error) => void) | undefined)?.(new Error("quota"));
   await first;
 
-  assert.deepEqual(state.notifications, [{
-    message: "Automatic compaction failed: quota",
-    level: "warning",
-  }]);
+  assert.deepEqual(state.notifications, [
+    {
+      message: "Automatic compaction failed: quota",
+      level: "warning",
+    },
+  ]);
 
   const second = settled?.({}, state.ctx);
   assert.equal(state.compactCalls.length, 2);

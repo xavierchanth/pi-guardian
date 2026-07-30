@@ -45,27 +45,34 @@ test("managed subagent runtime cleanup bypasses review under a custom store root
   for (const path of paths) await writeFile(path, "runtime");
   await writeFile(join(storeRoot, "child_1.json"), JSON.stringify({ id: "child_1" }));
 
-  assert.deepEqual(await preflightManagedSubagentCleanup(
-    { command: `rm -f -- ${paths.map((path) => `'${path}'`).join(" ")}` },
-    root,
-    storeRoot,
-  ), { kind: "allow" });
-  assert.deepEqual(await preflightManagedSubagentCleanup(
-    { command: `unlink '${paths[0]}'` },
-    root,
-    storeRoot,
-  ), { kind: "allow" });
+  assert.deepEqual(
+    await preflightManagedSubagentCleanup(
+      { command: `rm -f -- ${paths.map((path) => `'${path}'`).join(" ")}` },
+      root,
+      storeRoot,
+    ),
+    { kind: "allow" },
+  );
+  assert.deepEqual(
+    await preflightManagedSubagentCleanup({ command: `unlink '${paths[0]}'` }, root, storeRoot),
+    { kind: "allow" },
+  );
 
   let reviews = 0;
   let handler: (event: unknown, ctx: unknown) => Promise<unknown> = async () => undefined;
   const pi = {
-    on(_name: string, received: typeof handler) { handler = received; },
+    on(_name: string, received: typeof handler) {
+      handler = received;
+    },
     events: { emit() {} },
     getAllTools: () => [],
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, {
     delegationStoreRoot: storeRoot,
-    reviewer: async () => { reviews++; return allow(); },
+    reviewer: async () => {
+      reviews++;
+      return allow();
+    },
   });
   assert.equal(await handler(bashEvent(`rm -f '${paths[0]}'`), fakeContext()), undefined);
   assert.equal(reviews, 0);
@@ -89,18 +96,26 @@ test("managed subagent state deletion outside exact artifacts requires model rev
     const decision = await preflightManagedSubagentCleanup({ command }, root, storeRoot);
     assert.equal(decision.kind, "deny", command);
   }
-  assert.equal((await preflightManagedSubagentCleanup({ command: "pwd" }, root, storeRoot)).kind, "review");
+  assert.equal(
+    (await preflightManagedSubagentCleanup({ command: "pwd" }, root, storeRoot)).kind,
+    "review",
+  );
 
   let reviewed = false;
   let handler: (event: unknown, ctx: unknown) => Promise<unknown> = async () => undefined;
   const pi = {
-    on(_name: string, received: typeof handler) { handler = received; },
+    on(_name: string, received: typeof handler) {
+      handler = received;
+    },
     events: { emit() {} },
     getAllTools: () => [],
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, {
     delegationStoreRoot: storeRoot,
-    reviewer: async () => { reviewed = true; return allow(); },
+    reviewer: async () => {
+      reviewed = true;
+      return allow();
+    },
   });
   assert.equal(await handler(bashEvent(`rm -rf '${stateRoot}'`), fakeContext()), undefined);
   assert.equal(reviewed, true);
@@ -148,10 +163,7 @@ test("ignored built-in file targets receive Guardian review with path evidence",
   );
   assert.equal(result, undefined);
   assert.equal(requests.length, 1);
-  assert.deepEqual(
-    (requests[0].reviewEvidence as { triggers: string[] }).triggers,
-    ["gitignored"],
-  );
+  assert.deepEqual((requests[0].reviewEvidence as { triggers: string[] }).triggers, ["gitignored"]);
 });
 
 test("outside, traversal, and symlink-escape file targets are denied", async () => {
@@ -230,14 +242,7 @@ test("Git-ignored and secret-like direct targets review while aggregate searches
   assert.equal(dotenvSymlink.evidence?.triggers[0], "sensitive-path");
 
   for (const toolName of ["grep", "find"]) {
-    const aggregate = await checkFileToolPath(
-      toolName,
-      { path: "." },
-      workspace,
-      [],
-      [],
-      agentDir,
-    );
+    const aggregate = await checkFileToolPath(toolName, { path: "." }, workspace, [], [], agentDir);
     assert.equal(aggregate.kind, "allow", toolName);
   }
 
@@ -262,7 +267,13 @@ test("Pi credentials and sessions review, safe state reads automatically, and wr
   await mkdir(outside);
   await mkdir(join(agentDir, "sessions"), { recursive: true });
   await mkdir(join(agentDir, "pi-tai", "context-exports"), { recursive: true });
-  for (const file of ["models.json", "settings.json", "trust.json", "models-store.json", "safe.json"]) {
+  for (const file of [
+    "models.json",
+    "settings.json",
+    "trust.json",
+    "models-store.json",
+    "safe.json",
+  ]) {
     await writeFile(join(agentDir, file), "{}\n");
   }
   await symlink("safe.json", join(agentDir, "auth.json"));
@@ -299,38 +310,40 @@ test("Pi credentials and sessions review, safe state reads automatically, and wr
     assert.equal(decision.kind, "allow", file);
   }
 
-  assert.equal((await checkFileToolPath(
-    "find",
-    { path: agentDir },
-    workspace,
-    [],
-    [],
-    agentDir,
-  )).kind, "review");
-  assert.equal((await checkFileToolPath(
-    "ls",
-    { path: agentDir },
-    workspace,
-    [],
-    [],
-    agentDir,
-  )).kind, "allow");
-  assert.equal((await checkFileToolPath(
-    "write",
-    { path: join(agentDir, "settings.json") },
-    workspace,
-    [],
-    [],
-    agentDir,
-  )).kind, "deny");
-  assert.equal((await checkFileToolPath(
-    "read",
-    { path: join(agentDir, "escape", "new.txt") },
-    workspace,
-    [],
-    [],
-    agentDir,
-  )).kind, "deny");
+  assert.equal(
+    (await checkFileToolPath("find", { path: agentDir }, workspace, [], [], agentDir)).kind,
+    "review",
+  );
+  assert.equal(
+    (await checkFileToolPath("ls", { path: agentDir }, workspace, [], [], agentDir)).kind,
+    "allow",
+  );
+  assert.equal(
+    (
+      await checkFileToolPath(
+        "write",
+        { path: join(agentDir, "settings.json") },
+        workspace,
+        [],
+        [],
+        agentDir,
+      )
+    ).kind,
+    "deny",
+  );
+  assert.equal(
+    (
+      await checkFileToolPath(
+        "read",
+        { path: join(agentDir, "escape", "new.txt") },
+        workspace,
+        [],
+        [],
+        agentDir,
+      )
+    ).kind,
+    "deny",
+  );
 });
 
 test("default read roots include safe Pi state but exclude credentials and sessions", () => {
@@ -339,8 +352,14 @@ test("default read roots include safe Pi state but exclude credentials and sessi
   assert.ok(candidates.some((path) => path.endsWith("/.pi/agent/extensions")));
   assert.ok(candidates.some((path) => path.endsWith("/.pi/agent/settings.json")));
   assert.ok(candidates.some((path) => path.endsWith("/@earendil-works/pi-coding-agent")));
-  assert.equal(candidates.some((path) => path.endsWith("/.pi/agent/auth.json")), false);
-  assert.equal(candidates.some((path) => path.endsWith("/.pi/agent/sessions")), false);
+  assert.equal(
+    candidates.some((path) => path.endsWith("/.pi/agent/auth.json")),
+    false,
+  );
+  assert.equal(
+    candidates.some((path) => path.endsWith("/.pi/agent/sessions")),
+    false,
+  );
 });
 
 test("read-only tools may inspect configured skill and Pi roots without allowing writes", async () => {
@@ -389,11 +408,16 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
     explanation: "Confirm the exact target",
     plan: [{ content: "Search source", status: "in_progress" }],
   };
-  const prompt = buildReviewPrompt([
-    { role: "user", content: "Inspect the implementation." },
-    { role: "assistant", content: "I will inspect it." },
-    { role: "toolResult", content: "previous failure" },
-  ], action, workContext, { triggers: ["gitignored"] });
+  const prompt = buildReviewPrompt(
+    [
+      { role: "user", content: "Inspect the implementation." },
+      { role: "assistant", content: "I will inspect it." },
+      { role: "toolResult", content: "previous failure" },
+    ],
+    action,
+    workContext,
+    { triggers: ["gitignored"] },
+  );
 
   assert.match(prompt, /role="user"/);
   assert.match(prompt, /Inspect the implementation/);
@@ -421,26 +445,38 @@ test("every bash review receives the latest structured work context explicitly",
     ],
   };
   let request: ReviewRequest | undefined;
-  const { handler } = registerWith(async (received) => {
-    request = received;
-    return allow();
-  }, () => snapshot);
+  const { handler } = registerWith(
+    async (received) => {
+      request = received;
+      return allow();
+    },
+    () => snapshot,
+  );
 
   await handler(bashEvent("npm test"), fakeContext());
   assert.deepEqual(request?.workContext, snapshot);
 });
 
 test("strict parser allows ordinary work and makes every related high-risk action human-only", () => {
-  assert.deepEqual(parseReviewDecision(JSON.stringify({
-    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: [], reason: "routine inspection",
-  })), {
-    riskLevel: "low",
-    taskRelationship: "supporting",
-    impactScope: "bounded",
-    harmKinds: [],
-    outcome: "allow",
-    reason: "routine inspection",
-  });
+  assert.deepEqual(
+    parseReviewDecision(
+      JSON.stringify({
+        risk_level: "low",
+        task_relationship: "supporting",
+        impact_scope: "bounded",
+        harm_kinds: [],
+        reason: "routine inspection",
+      }),
+    ),
+    {
+      riskLevel: "low",
+      taskRelationship: "supporting",
+      impactScope: "bounded",
+      harmKinds: [],
+      outcome: "allow",
+      reason: "routine inspection",
+    },
+  );
 
   for (const [risk_level, task_relationship, outcome] of [
     ["medium", "unrelated", "allow"],
@@ -452,53 +488,81 @@ test("strict parser allows ordinary work and makes every related high-risk actio
     ["critical", "explicit", "human_execution_required"],
     ["critical", "unrelated", "deny"],
   ] as const) {
-    assert.equal(parseReviewDecision(JSON.stringify({
-      risk_level, task_relationship, impact_scope: "bounded", harm_kinds: risk_level === "medium" ? [] : ["destructive"], reason: "matrix case",
-    })).outcome, outcome);
+    assert.equal(
+      parseReviewDecision(
+        JSON.stringify({
+          risk_level,
+          task_relationship,
+          impact_scope: "bounded",
+          harm_kinds: risk_level === "medium" ? [] : ["destructive"],
+          reason: "matrix case",
+        }),
+      ).outcome,
+      outcome,
+    );
   }
 
   assert.throws(() => parseReviewDecision("```json\n{}\n```"));
-  assert.throws(() => parseReviewDecision(JSON.stringify({
-    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: [], outcome: "deny", reason: "model chose outcome",
-  })));
-  assert.throws(() => parseReviewDecision(JSON.stringify({
-    risk_level: "low", task_relationship: "implicit", impact_scope: "bounded", harm_kinds: [], reason: "invalid relationship",
-  })));
-  assert.throws(() => parseReviewDecision(JSON.stringify({
-    risk_level: "low", task_relationship: "supporting", impact_scope: "bounded", harm_kinds: ["unknown"], reason: "invalid harm",
-  })));
+  assert.throws(() =>
+    parseReviewDecision(
+      JSON.stringify({
+        risk_level: "low",
+        task_relationship: "supporting",
+        impact_scope: "bounded",
+        harm_kinds: [],
+        outcome: "deny",
+        reason: "model chose outcome",
+      }),
+    ),
+  );
+  assert.throws(() =>
+    parseReviewDecision(
+      JSON.stringify({
+        risk_level: "low",
+        task_relationship: "implicit",
+        impact_scope: "bounded",
+        harm_kinds: [],
+        reason: "invalid relationship",
+      }),
+    ),
+  );
+  assert.throws(() =>
+    parseReviewDecision(
+      JSON.stringify({
+        risk_level: "low",
+        task_relationship: "supporting",
+        impact_scope: "bounded",
+        harm_kinds: ["unknown"],
+        reason: "invalid harm",
+      }),
+    ),
+  );
 });
 
 test("clear denial returns a failed tool result without interrupting the user", async () => {
-  const denied = async (): Promise<ReviewResult> => decision(
-    "high",
-    "unrelated",
-    "deny",
-    "unrelated command would destroy substantial data",
-  );
+  const denied = async (): Promise<ReviewResult> =>
+    decision("high", "unrelated", "deny", "unrelated command would destroy substantial data");
   const { handler } = registerWith(denied);
   const tui = fakeContext("tui", "Execute exact action once");
   const blocked = await handler(bashEvent("credential probe"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Guardian denied an unrelated or unclear high-risk action: unrelated command would destroy substantial data. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
+    reason:
+      "Guardian denied an unrelated or unclear high-risk action: unrelated command would destroy substantial data. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
   });
   assert.equal(tui.selections.length, 0);
 });
 
 test("non-allow reviews are blocked without confirmation and retained for evaluation", async () => {
-  const denied = async (): Promise<ReviewResult> => decision(
-    "high",
-    "unrelated",
-    "deny",
-    "highly destructive command is unrelated to the task",
-  );
+  const denied = async (): Promise<ReviewResult> =>
+    decision("high", "unrelated", "deny", "highly destructive command is unrelated to the task");
   const registered = registerWith(denied);
   const tui = fakeContext("tui", "Execute exact action once");
   const blocked = await registered.handler(bashEvent("deploy candidate"), tui);
   assert.deepEqual(blocked, {
     block: true,
-    reason: "Guardian denied an unrelated or unclear high-risk action: highly destructive command is unrelated to the task. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
+    reason:
+      "Guardian denied an unrelated or unclear high-risk action: highly destructive command is unrelated to the task. The action was not executed. Do not retry, delegate, or provide a runnable command; continue with safe task work.",
   });
   assert.equal(tui.selections.length, 0);
   assert.equal(registered.recorded.length, 1);
@@ -527,10 +591,16 @@ test("local Guardian evaluation records preserve the denied action and bounded r
 });
 
 test("related high-risk actions are blocked and surfaced for direct human execution", async () => {
-  const registered = registerWith(async () => decision(
-    "high", "supporting", "human_execution_required", "would delete production data", ["destructive", "production"],
-  ));
-  const blocked = await registered.handler(bashEvent("prodctl delete database"), fakeContext()) as { block: boolean; reason: string };
+  const registered = registerWith(async () =>
+    decision("high", "supporting", "human_execution_required", "would delete production data", [
+      "destructive",
+      "production",
+    ]),
+  );
+  const blocked = (await registered.handler(
+    bashEvent("prodctl delete database"),
+    fakeContext(),
+  )) as { block: boolean; reason: string };
   assert.equal(blocked.block, true);
   assert.match(blocked.reason, /will not execute/);
   assert.match(blocked.reason, /Do not retry it, delegate it/);
@@ -549,25 +619,36 @@ test("review failure, timeout, and cancellation allow ordinary actions but stop 
     assert.equal(await handler(bashEvent("true"), ctx), undefined);
     assert.equal(ctx.selections.length, 0);
     assert.equal(recorded.length, 1);
-    assert.deepEqual(emitted, [{
-      name: "pi-tai:guardian-review-failed",
-      data: {
-        kind: result.kind,
-        mode: "tui",
-        toolName: "bash",
-        reason: result.reason,
-        cwd: process.cwd(),
+    assert.deepEqual(emitted, [
+      {
+        name: "pi-tai:guardian-review-failed",
+        data: {
+          kind: result.kind,
+          mode: "tui",
+          toolName: "bash",
+          reason: result.reason,
+          cwd: process.cwd(),
+        },
       },
-    }]);
+    ]);
   }
 
-  const cancelledRegistration = registerWith(async () => ({ kind: "cancelled", reason: "cancelled" }));
+  const cancelledRegistration = registerWith(async () => ({
+    kind: "cancelled",
+    reason: "cancelled",
+  }));
   const ctx = fakeContext("tui", "Execute exact action once");
   assert.equal(await cancelledRegistration.handler(bashEvent("true"), ctx), undefined);
   assert.equal(ctx.selections.length, 0);
 
-  const unavailable = registerWith(async () => ({ kind: "failure", reason: "provider unavailable" }));
-  const blocked = await unavailable.handler(bashEvent("rm -rf -- /important"), fakeContext()) as { block: boolean; reason: string };
+  const unavailable = registerWith(async () => ({
+    kind: "failure",
+    reason: "provider unavailable",
+  }));
+  const blocked = (await unavailable.handler(bashEvent("rm -rf -- /important"), fakeContext())) as {
+    block: boolean;
+    reason: string;
+  };
   assert.equal(blocked.block, true);
   assert.match(blocked.reason, /could not complete review/);
   assert.equal(unavailable.notices[0].reviewUnavailable, true);
@@ -587,19 +668,19 @@ test("unknown tools and direct user shell remain outside extension scope", () =>
 test("custom tools that reuse file-tool names own their own policy", async () => {
   let handler: (event: unknown, ctx: unknown) => Promise<unknown> = async () => undefined;
   const pi = {
-    on(_name: string, received: typeof handler) { handler = received; },
-    getAllTools: () => [{
-      name: "read",
-      sourceInfo: { source: "custom-extension" },
-    }],
+    on(_name: string, received: typeof handler) {
+      handler = received;
+    },
+    getAllTools: () => [
+      {
+        name: "read",
+        sourceInfo: { source: "custom-extension" },
+      },
+    ],
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, { reviewer: async () => allow() });
-  assert.equal(
-    await handler(toolEvent("read", { path: "/outside" }), fakeContext()),
-    undefined,
-  );
+  assert.equal(await handler(toolEvent("read", { path: "/outside" }), fakeContext()), undefined);
 });
-
 
 test("reviewer resolves the internal identity from gpt-5.4 metadata", () => {
   const template = { provider: "openai-codex", id: "gpt-5.4-mini", name: "mini" };
@@ -640,9 +721,8 @@ test("reviewer session is isolated, tool-free, low-thinking, and strict", async 
 
   const result = await reviewer(reviewRequest());
   assert.deepEqual(result, allow());
-  for (const key of [
-    "noExtensions", "noSkills", "noPromptTemplates", "noThemes", "noContextFiles",
-  ]) assert.equal(resourceOptions?.[key], true, key);
+  for (const key of ["noExtensions", "noSkills", "noPromptTemplates", "noThemes", "noContextFiles"])
+    assert.equal(resourceOptions?.[key], true, key);
   assert.equal(sessionOptions?.noTools, "all");
   assert.deepEqual(sessionOptions?.tools, []);
   assert.deepEqual(sessionOptions?.customTools, []);
@@ -700,8 +780,16 @@ test("pi-tai's own resources are readable from an unrelated working directory", 
   const [piTaiRoot] = defaultReadCandidates();
   assert.ok(piTaiRoot.endsWith(join("packages", "pi-tai")), `unexpected root: ${piTaiRoot}`);
 
-  for (const relativePath of ["skills/dpic/SKILL.md", "prompts/dpic.md", "instructions/system.md"]) {
-    const decision = await checkFileToolPath("read", { path: join(piTaiRoot, relativePath) }, tmpdir());
+  for (const relativePath of [
+    "skills/dpic/SKILL.md",
+    "prompts/dpic.md",
+    "instructions/system.md",
+  ]) {
+    const decision = await checkFileToolPath(
+      "read",
+      { path: join(piTaiRoot, relativePath) },
+      tmpdir(),
+    );
     assert.equal(decision.kind, "allow", `${relativePath} should be readable from any cwd`);
   }
 });
@@ -712,7 +800,9 @@ test("reviewer reports malformed output, timeout, cancellation, and provider fai
 
   const failure = createModelReviewer({
     createResourceLoader: () => ({ reload: async () => undefined }) as never,
-    createSession: async () => { throw new Error("provider unavailable"); },
+    createSession: async () => {
+      throw new Error("provider unavailable");
+    },
   });
   const providerResult = await failure(reviewRequest());
   assert.equal(providerResult.kind, "failure");
@@ -728,13 +818,17 @@ test("reviewer reports malformed output, timeout, cancellation, and provider fai
 
   const controller = new AbortController();
   controller.abort();
-  const cancelled = createModelReviewer(fakeReviewerDependencies(JSON.stringify({
-    risk_level: "low",
-    task_relationship: "supporting",
-    impact_scope: "bounded",
-    harm_kinds: [],
-    reason: "ok",
-  })));
+  const cancelled = createModelReviewer(
+    fakeReviewerDependencies(
+      JSON.stringify({
+        risk_level: "low",
+        task_relationship: "supporting",
+        impact_scope: "bounded",
+        harm_kinds: [],
+        reason: "ok",
+      }),
+    ),
+  );
   assert.equal((await cancelled(reviewRequest({ signal: controller.signal }))).kind, "cancelled");
 });
 
@@ -766,18 +860,29 @@ function registerWith(
         emitted.push({ name, data });
       },
     },
-    getAllTools: () => [...["read", "write", "edit", "grep", "find", "ls"].map((name) => ({
-      name,
-      sourceInfo: { source: "builtin" },
-    }))],
+    getAllTools: () => [
+      ...["read", "write", "edit", "grep", "find", "ls"].map((name) => ({
+        name,
+        sourceInfo: { source: "builtin" },
+      })),
+    ],
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, {
     reviewer,
     workContext,
-    recorder: async (input) => { recorded.push(input); },
-    onHumanExecutionRequired: async (notice) => { notices.push(notice); },
+    recorder: async (input) => {
+      recorded.push(input);
+    },
+    onHumanExecutionRequired: async (notice) => {
+      notices.push(notice);
+    },
   });
-  return { handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>, emitted, recorded, notices };
+  return {
+    handler: handler as (event: unknown, ctx: unknown) => Promise<unknown>,
+    emitted,
+    recorded,
+    notices,
+  };
 }
 
 function fakeContext(mode: "tui" | "print" = "print", choice?: string) {
@@ -840,11 +945,13 @@ function fakeReviewerDependencies(output: string) {
 
 function fakeReviewerSession(output: string) {
   return {
-    messages: [{
-      role: "assistant",
-      stopReason: "stop",
-      content: [{ type: "text", text: output }],
-    }],
+    messages: [
+      {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: output }],
+      },
+    ],
     isStreaming: false,
     prompt: async () => undefined,
     abort: async () => undefined,
@@ -857,7 +964,9 @@ function decision(
   taskRelationship: "explicit" | "direct" | "supporting" | "unrelated" | "unclear",
   outcome: "allow" | "human_execution_required" | "deny",
   reason: string,
-  harmKinds: Array<"destructive" | "production" | "sensitive_egress" | "financial" | "privilege" | "privacy"> = [],
+  harmKinds: Array<
+    "destructive" | "production" | "sensitive_egress" | "financial" | "privilege" | "privacy"
+  > = [],
 ): ReviewResult {
   return {
     kind: "decision",

@@ -11,15 +11,18 @@ export type BashPreflightDecision =
 export async function preflightManagedSubagentCleanup(
   input: Record<string, unknown>,
   cwd: string,
-  storeRoot: string = process.env.PI_TAI_DELEGATION_STORE
-    || join(getAgentDir(), "pi-tai", "subagents", "delegations"),
+  storeRoot: string = process.env.PI_TAI_DELEGATION_STORE ||
+    join(getAgentDir(), "pi-tai", "subagents", "delegations"),
 ): Promise<BashPreflightDecision> {
   if (typeof input.command !== "string") return { kind: "review" };
   const stateRoot = dirname(resolve(storeRoot));
   const tokens = tokenizeSimpleCommand(input.command);
   if (!tokens) {
     return /^\s*(?:rm|unlink)\b/.test(input.command) && input.command.includes(stateRoot)
-      ? { kind: "deny", reason: "Deletion of managed subagent state requires one simple, exact cleanup command." }
+      ? {
+          kind: "deny",
+          reason: "Deletion of managed subagent state requires one simple, exact cleanup command.",
+        }
       : { kind: "review" };
   }
   if (!tokens.length || (tokens[0] !== "rm" && tokens[0] !== "unlink")) {
@@ -29,7 +32,10 @@ export async function preflightManagedSubagentCleanup(
   const parsed = deletionTargets(tokens);
   if (!parsed) {
     return tokens.some((token) => pathWithin(stateRoot, resolve(cwd, token)))
-      ? { kind: "deny", reason: "Deletion of managed subagent state is not an authorized runtime cleanup." }
+      ? {
+          kind: "deny",
+          reason: "Deletion of managed subagent state is not an authorized runtime cleanup.",
+        }
       : { kind: "review" };
   }
 
@@ -37,11 +43,18 @@ export async function preflightManagedSubagentCleanup(
     const lexicalTarget = resolve(cwd, target);
     if (!pathWithin(stateRoot, lexicalTarget)) return { kind: "review" };
     const delegationId = expectedRuntimeDelegationId(stateRoot, lexicalTarget);
-    if (!delegationId || !await hasDelegationRecord(storeRoot, delegationId)) {
-      return { kind: "deny", reason: "Only exact runtime artifacts belonging to a durable delegation record may be deleted automatically." };
+    if (!delegationId || !(await hasDelegationRecord(storeRoot, delegationId))) {
+      return {
+        kind: "deny",
+        reason:
+          "Only exact runtime artifacts belonging to a durable delegation record may be deleted automatically.",
+      };
     }
-    if (!await isCanonicalNonDirectoryTarget(stateRoot, lexicalTarget)) {
-      return { kind: "deny", reason: "Subagent runtime cleanup target is a directory, symlink, or path alias." };
+    if (!(await isCanonicalNonDirectoryTarget(stateRoot, lexicalTarget))) {
+      return {
+        kind: "deny",
+        reason: "Subagent runtime cleanup target is a directory, symlink, or path alias.",
+      };
     }
   }
   return { kind: "allow" };
@@ -54,7 +67,9 @@ function deletionTargets(tokens: readonly string[]): string[] | undefined {
     index++;
     if (tokens[index] === "--") index++;
     const targets = tokens.slice(index);
-    return targets.length && targets.every((target) => !target.startsWith("-")) ? targets : undefined;
+    return targets.length && targets.every((target) => !target.startsWith("-"))
+      ? targets
+      : undefined;
   }
   let index = 1;
   if (tokens[index] === "--") index++;
@@ -65,24 +80,40 @@ function deletionTargets(tokens: readonly string[]): string[] | undefined {
 function tokenizeSimpleCommand(command: string): string[] | undefined {
   const tokens: string[] = [];
   let token = "";
-  let quote: "'" | "\"" | undefined;
+  let quote: "'" | '"' | undefined;
   let active = false;
   for (let index = 0; index < command.length; index++) {
     const character = command[index];
     if (!quote && /[;&|<>\n\r`$*?{}[\]()]/.test(character)) return undefined;
-    if (character === "'" || character === "\"") {
-      if (!quote) { quote = character; active = true; continue; }
-      if (quote === character) { quote = undefined; continue; }
+    if (character === "'" || character === '"') {
+      if (!quote) {
+        quote = character;
+        active = true;
+        continue;
+      }
+      if (quote === character) {
+        quote = undefined;
+        continue;
+      }
     }
     if (character === "\\") {
       if (quote === "'") token += character;
-      else if (++index < command.length) { token += command[index]; active = true; }
-      else return undefined;
+      else if (++index < command.length) {
+        token += command[index];
+        active = true;
+      } else return undefined;
       continue;
     }
     if (!quote && /\s/.test(character)) {
-      if (active) { tokens.push(token); token = ""; active = false; }
-    } else { token += character; active = true; }
+      if (active) {
+        tokens.push(token);
+        token = "";
+        active = false;
+      }
+    } else {
+      token += character;
+      active = true;
+    }
   }
   if (quote) return undefined;
   if (active) tokens.push(token);
@@ -93,13 +124,16 @@ function expectedRuntimeDelegationId(stateRoot: string, target: string): string 
   const remainder = relative(stateRoot, target).split(sep);
   if (remainder.length !== 2) return undefined;
   const [directory, filename] = remainder;
-  const suffix = directory === "logs"
-    ? filename.endsWith(".stderr.log") ? ".stderr.log" : ".jsonl"
-    : directory === "control"
-      ? ".fifo"
-      : directory === "prompts"
-        ? ".md"
-        : undefined;
+  const suffix =
+    directory === "logs"
+      ? filename.endsWith(".stderr.log")
+        ? ".stderr.log"
+        : ".jsonl"
+      : directory === "control"
+        ? ".fifo"
+        : directory === "prompts"
+          ? ".md"
+          : undefined;
   if (!suffix || !filename.endsWith(suffix)) return undefined;
   const id = filename.slice(0, -suffix.length);
   return /^[a-zA-Z0-9_-]+$/.test(id) ? id : undefined;
@@ -111,8 +145,12 @@ async function hasDelegationRecord(storeRoot: string, id: string): Promise<boole
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) return false;
     const value: unknown = JSON.parse(await readFile(path, "utf8"));
-    return Boolean(value && typeof value === "object" && !Array.isArray(value)
-      && (value as { id?: unknown }).id === id);
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        (value as { id?: unknown }).id === id,
+    );
   } catch {
     return false;
   }
@@ -122,7 +160,8 @@ async function isCanonicalNonDirectoryTarget(stateRoot: string, target: string):
   try {
     const canonicalState = await realpath(stateRoot);
     const canonicalParent = await realpath(dirname(target));
-    if (canonicalParent !== join(canonicalState, relative(stateRoot, dirname(target)))) return false;
+    if (canonicalParent !== join(canonicalState, relative(stateRoot, dirname(target))))
+      return false;
     try {
       const stat = await lstat(target);
       return !stat.isDirectory() && !stat.isSymbolicLink();
@@ -136,7 +175,10 @@ async function isCanonicalNonDirectoryTarget(stateRoot: string, target: string):
 
 function pathWithin(root: string, target: string): boolean {
   const remainder = relative(root, target);
-  return remainder === "" || (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder));
+  return (
+    remainder === "" ||
+    (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
+  );
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
@@ -185,13 +227,26 @@ Return exactly one JSON object and no other text:
 export const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 
-export const TASK_RELATIONSHIPS = ["explicit", "direct", "supporting", "unrelated", "unclear"] as const;
+export const TASK_RELATIONSHIPS = [
+  "explicit",
+  "direct",
+  "supporting",
+  "unrelated",
+  "unclear",
+] as const;
 export type TaskRelationship = (typeof TASK_RELATIONSHIPS)[number];
 
 export const IMPACT_SCOPES = ["bounded", "broad"] as const;
 export type ImpactScope = (typeof IMPACT_SCOPES)[number];
 
-export const HARM_KINDS = ["destructive", "production", "sensitive_egress", "financial", "privilege", "privacy"] as const;
+export const HARM_KINDS = [
+  "destructive",
+  "production",
+  "sensitive_egress",
+  "financial",
+  "privilege",
+  "privacy",
+] as const;
 export type HarmKind = (typeof HARM_KINDS)[number];
 
 export type ReviewOutcome = "allow" | "human_execution_required" | "deny";
@@ -244,14 +299,15 @@ Review the proposed action according to the system policy.`;
 
 export function buildBoundedTranscript(messages: readonly unknown[]): string {
   const entries = messages.map(renderTranscriptEntry);
-  const userIndices = entries.flatMap((entry, index) =>
-    entry.role === "user" ? [index] : [],
-  );
+  const userIndices = entries.flatMap((entry, index) => (entry.role === "user" ? [index] : []));
   const selected = new Set<number>();
   let used = 0;
 
-  const prioritizedUsers = [userIndices[0], userIndices.at(-1), ...userIndices.slice(1, -1).reverse()]
-    .filter((index): index is number => index !== undefined);
+  const prioritizedUsers = [
+    userIndices[0],
+    userIndices.at(-1),
+    ...userIndices.slice(1, -1).reverse(),
+  ].filter((index): index is number => index !== undefined);
   for (const index of prioritizedUsers) {
     if (selected.has(index) || used + entries[index].text.length > TRANSCRIPT_CHARS) continue;
     selected.add(index);
@@ -264,8 +320,7 @@ export function buildBoundedTranscript(messages: readonly unknown[]): string {
     used += entries[index].text.length;
   }
 
-  const rendered = entries
-    .flatMap((entry, index) => (selected.has(index) ? [entry.text] : []));
+  const rendered = entries.flatMap((entry, index) => (selected.has(index) ? [entry.text] : []));
   if (selected.size < entries.length) rendered.push("<omitted />");
   return rendered.join("\n");
 }
@@ -287,7 +342,11 @@ export function parseReviewDecision(text: string): ReviewDecision {
   if (!isOneOf(parsed.impact_scope, IMPACT_SCOPES)) {
     throw new Error("review output has an invalid impact_scope");
   }
-  if (!Array.isArray(parsed.harm_kinds) || !parsed.harm_kinds.every((value) => isOneOf(value, HARM_KINDS)) || new Set(parsed.harm_kinds).size !== parsed.harm_kinds.length) {
+  if (
+    !Array.isArray(parsed.harm_kinds) ||
+    !parsed.harm_kinds.every((value) => isOneOf(value, HARM_KINDS)) ||
+    new Set(parsed.harm_kinds).size !== parsed.harm_kinds.length
+  ) {
     throw new Error("review output has invalid harm_kinds");
   }
   if (typeof parsed.reason !== "string" || !parsed.reason.trim()) {
@@ -305,9 +364,10 @@ export function parseReviewDecision(text: string): ReviewDecision {
 
 export function decideReview(assessment: ReviewAssessment): ReviewDecision {
   const humanOnly = assessment.riskLevel === "high" || assessment.riskLevel === "critical";
-  const related = assessment.taskRelationship === "explicit"
-    || assessment.taskRelationship === "direct"
-    || assessment.taskRelationship === "supporting";
+  const related =
+    assessment.taskRelationship === "explicit" ||
+    assessment.taskRelationship === "direct" ||
+    assessment.taskRelationship === "supporting";
   const outcome: ReviewOutcome = !humanOnly
     ? "allow"
     : related
@@ -334,9 +394,7 @@ export function isDestructiveCandidate(action: ProposedAction): boolean {
 }
 
 function renderTranscriptEntry(message: unknown): { role: string; text: string } {
-  const role = isRecord(message) && typeof message.role === "string"
-    ? message.role
-    : "unknown";
+  const role = isRecord(message) && typeof message.role === "string" ? message.role : "unknown";
   const serialized = truncate(escapeXml(JSON.stringify(message) ?? String(message)), ENTRY_CHARS);
   return { role, text: `<message role=${JSON.stringify(escapeXml(role))}>${serialized}</message>` };
 }
@@ -358,8 +416,5 @@ function isOneOf<T extends string>(value: unknown, values: readonly T[]): value 
 }
 
 function escapeXml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }

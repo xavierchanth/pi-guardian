@@ -45,7 +45,10 @@ test("renders the requested three-row work-focused footer", () => {
   assert.ok(lines[1]?.endsWith("67.6%/272k (auto)"));
   assert.ok(lines[2]?.startsWith("projects/pi-tai · subagents"));
   assert.ok(lines[2]?.endsWith("↑465k ↓35k R7.2M $6.991 (sub)"));
-  assert.deepEqual(rows.map((row) => row.leftColor), ["text", "text", "text"]);
+  assert.deepEqual(
+    rows.map((row) => row.leftColor),
+    ["text", "text", "text"],
+  );
   for (const line of lines) assert.equal(visibleWidth(line), 100);
 });
 
@@ -108,23 +111,27 @@ test("renders enabled capability labels beside the directory with base foregroun
     model: undefined,
     modelRegistry: { isUsingOAuth: () => false },
     sessionManager: {
-      getEntries: () => [{
-        type: "custom",
-        customType: "pi-tai-subagent-role",
-        data: { mode: "root", agentName: "subagents" },
-      }, {
-        type: "message",
-        message: {
-          role: "assistant",
-          usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cost: { total: 0.1 } },
+      getEntries: () => [
+        {
+          type: "custom",
+          customType: "pi-tai-subagent-role",
+          data: { mode: "root", agentName: "subagents" },
         },
-      }, {
-        type: "message",
-        message: {
-          role: "toolResult",
-          usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.2 } },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cost: { total: 0.1 } },
+          },
         },
-      }],
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.2 } },
+          },
+        },
+      ],
     },
     getContextUsage: () => undefined,
     ui: {
