@@ -38,15 +38,11 @@ Clients and models do not receive ambient machine handles.
 
 ### JJ and workspaces
 
-Strong semantic operations consume injected tracked handles and leases. Models supply intent and descriptions, not cwd, filesets, revsets, tracked IDs, or argv. See [JJ coordination](../concurrency/JJ.md).
+Strong semantic operations consume injected tracked handles and leases. Models supply intent and descriptions, not cwd, filesets, revsets, tracked IDs, or argv. See [Subagents and workspaces](../concurrency/README.md).
 
-### Web
+### External research
 
-- hosted search with bounded query context;
-- anonymous public fetch;
-- DNS/IP and redirect validation;
-- no private, metadata, credential-bearing, or non-routable targets;
-- bounded content conversion and continuation.
+External research is a role-scoped subagent capability, not ambient root authority. Parents delegate with `subagent_spawn` and `capability: "researcher"`; root sessions and Pi children receive no direct web tools. Research reports distinguish evidence from inference and include source URLs.
 
 ### Browser and computer use
 
@@ -62,7 +58,7 @@ Future stateful capabilities must define:
 - remote-client authorization;
 - recovery when adapter state disappears.
 
-They are not equivalent to `web_fetch`: they are interactive and often mutating.
+They are interactive, often mutating capabilities and are not aliases for the researcher role.
 
 ### Image generation
 

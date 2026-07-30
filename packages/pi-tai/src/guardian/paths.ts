@@ -108,6 +108,17 @@ export async function checkFileToolPath(
       return review(target, requestedPath, sensitive.trigger, sensitive.detail);
     }
 
+    // Read-only roots — packaged skills, prompts, themes, and Pi's own installed
+    // files — are reference material the agent is expected to read. Git ignore
+    // status says nothing useful about them: a package directory is ignored by
+    // construction and the agent directory is usually not a repository at all,
+    // so the check would send every such read to review for no security gain.
+    // This holds even when the root also sits inside the workspace, which is the
+    // usual case for a locally installed Pi package under node_modules.
+    if (withinReadBoundary) {
+      return { kind: "allow", canonicalPath: target.canonicalPath };
+    }
+
     const ignoreDecision = await classifyGitIgnore(target);
     if (ignoreDecision) {
       return review(target, requestedPath, ignoreDecision.trigger, ignoreDecision.detail);
@@ -128,6 +139,7 @@ export function defaultReadCandidates(): string[] {
   const piPackageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
   const runtimePackageRoot = findPiPackageRoot(process.argv[1]);
   return [
+    piTaiPackageRoot(),
     ...["skills", "extensions", "prompts", "themes", "npm", "git"]
       .map((directory) => join(agentDir, directory)),
     ...["AGENTS.md", "settings.json", "trust.json", "models-store.json"]
@@ -155,6 +167,7 @@ async function classifyPiAgentPath(
   const authPath = join(agentDirectory, "auth.json");
   const modelsPath = join(agentDirectory, "models.json");
   const sessionsPath = join(agentDirectory, "sessions");
+  const contextExportsPath = join(agentDirectory, "pi-tai", "context-exports");
   if (logicalPath === authPath || logicalPath === modelsPath) {
     return review(
       target,
@@ -171,8 +184,11 @@ async function classifyPiAgentPath(
       "The target is Pi session history and may contain unrelated private conversation or tool data.",
     );
   }
+  if (contains(contextExportsPath, logicalPath)) {
+    return review(target, requestedPath, "pi-session", "The target is a private context-transfer summary from another session.");
+  }
   if ((toolName === "grep" || toolName === "find")
-    && [authPath, modelsPath, sessionsPath].some((protectedPath) =>
+    && [authPath, modelsPath, sessionsPath, contextExportsPath].some((protectedPath) =>
       contains(logicalPath, protectedPath))) {
     return review(
       target,
@@ -186,10 +202,10 @@ async function classifyPiAgentPath(
   if (sensitive) {
     return review(target, requestedPath, sensitive.trigger, sensitive.detail);
   }
-  const ignoreDecision = await classifyGitIgnore(target);
-  if (ignoreDecision) {
-    return review(target, requestedPath, ignoreDecision.trigger, ignoreDecision.detail);
-  }
+  // Credentials, model state, and session history are handled above. What is
+  // left is the agent's own configuration and packaged resources, which are
+  // read freely; the agent directory is not a repository, so a git ignore check
+  // here only ever yields "unknown" and an unhelpful review.
   return { kind: "allow", canonicalPath: target.canonicalPath };
 }
 
@@ -281,6 +297,18 @@ function review(
 
 function deny(canonicalPath: string, reason: string): PathDecision {
   return { kind: "deny", canonicalPath, reason };
+}
+
+/**
+ * Root of this distribution, derived from this file's own location.
+ *
+ * Pi-Tai may be checked out in a workspace, installed under the agent
+ * directory, or pulled in as a dependency, so its path cannot be assumed. What
+ * does hold is the layout inside the package: this file is always at
+ * `<root>/src/guardian/paths.ts`.
+ */
+function piTaiPackageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 function findPiPackageRoot(entry: string | undefined): string | undefined {

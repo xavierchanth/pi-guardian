@@ -3,6 +3,8 @@
 **Status:** Complete  
 **Depends on:** I05, I06
 
+**Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
+
 ## Implemented foundation
 
 M3 now has a dedicated versioned isolated-workspace store under `jj-workspaces`. It is authoritative for allocation intent, source/root/head identity, writer generations, operation receipts, frozen reports, and incidents. New SDK workspace children retain only `workspaceId`; legacy attachments are compatibility projections.

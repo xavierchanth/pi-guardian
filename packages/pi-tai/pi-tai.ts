@@ -12,6 +12,7 @@ import {
 } from "./src/config/register.ts";
 import { registerCmux } from "./src/cmux/register.ts";
 import { registerAutoCompaction } from "./src/compaction/register.ts";
+import { registerContextTransfer } from "./src/context-transfer/register.ts";
 import { registerFooter } from "./src/footer/register.ts";
 import { registerApprovalGuardian } from "./src/guardian/register.ts";
 import { registerFirstPartyKeybindings } from "./src/keybindings/register.ts";
@@ -24,16 +25,18 @@ import {
 import { registerResponseEditor } from "./src/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
-import { registerSubagents, type SubagentRuntimeMode } from "./src/subagents/register.ts";
-import { registerWebTools } from "./src/web/register.ts";
-import type { HostServiceClientPort } from "./src/concurrency/host-repository.ts";
+import { registerAgents } from "./src/agents/register.ts";
+import type { BackendName } from "./src/agents/domain.ts";
+
+/** Where child sessions run. The legacy out-of-process launcher is retired. */
+export type SubagentRuntimeMode = "pi-cli" | "host-worker";
 import {
   createPiSessionWorkContextStore,
   type WorkContextStore,
 } from "./src/work-context/persistence.ts";
 
 export interface PiTaiRuntime {
-  mode: Exclude<SubagentRuntimeMode, "legacy-child-process">;
+  mode: SubagentRuntimeMode;
   config: PiTaiConfigService;
   workContext: WorkContextStore;
   titleGenerator: TitleGenerator;
@@ -41,8 +44,11 @@ export interface PiTaiRuntime {
   notificationSender: NotificationSender;
   capabilities: SessionCapabilityController;
   agentDir: string;
-  hostServices?: HostServiceClientPort;
   rootSessionId?: string;
+  /** Opt-in subagent backends beyond the built-in pi one. */
+  backends?: readonly BackendName[];
+  /** Harness used for subagents when a spawn names none. */
+  defaultBackend?: BackendName;
 }
 
 export type PiTaiRegistrar = (
@@ -56,8 +62,8 @@ export interface PiTaiRegistrars {
   compaction: PiTaiRegistrar;
   capabilities: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
+  contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
-  webTools: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
   sessionTitle: PiTaiRegistrar;
@@ -75,23 +81,19 @@ const productionRegistrars: PiTaiRegistrars = {
   capabilities: (pi, runtime) => registerCapabilityController(pi, runtime.capabilities),
   // I09: durable task tools are authoritative; update_plan remains injectable only for legacy test/package consumers.
   workContext: () => undefined,
+  contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
   responseEditor: (pi) => {
     registerResponseEditor(pi);
-  },
-  webTools: (pi) => {
-    registerWebTools(pi);
   },
   modelProfiles: (pi, runtime) => {
     registerModelProfiles(pi, runtime.config);
   },
   subagents: (pi, runtime) => {
-    registerSubagents(pi, {
-      runtime: runtime.mode,
-      capabilities: runtime.capabilities,
+    registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
-      ...(runtime.hostServices ? { hostServices: runtime.hostServices } : {}),
-      ...(runtime.rootSessionId ? { rootSessionId: runtime.rootSessionId } : {}),
+      ...(runtime.backends ? { backends: runtime.backends } : {}),
+      ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });
   },
   sessionTitle: (pi, runtime) => {
@@ -138,8 +140,8 @@ export function createPiTaiExtension(
     await registrars.compaction(pi, runtime);
     await registrars.capabilities(pi, runtime);
     await registrars.workContext(pi, runtime);
+    await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);
-    await registrars.webTools(pi, runtime);
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
     await registrars.sessionTitle(pi, runtime);

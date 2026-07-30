@@ -3,6 +3,8 @@
 **Status:** Completed  
 **Depends on:** I06, I08. Start after I13 checkpoint 4.
 
+**Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
+
 ## Outcome
 
 Completed in the I14 shared consolidation: the shared lane now records distinct base and working-change identities, validates and strips legacy managed-WIP records, and has no `ensure_wip_change` runtime/tool surface.
@@ -15,16 +17,18 @@ then integrate only independently reviewed work before the preserved user change
 
 ## The rule the rest of the system already follows
 
-Every document except the shared-source lane already states this:
+Every document except the shared-source lane already states this. The `docs/concurrency/` documents
+cited below have since been consolidated into a single [concurrency overview](../../concurrency/README.md),
+so they are named here without links:
 
 | Source | Statement |
 |---|---|
 | [`README.md`](../../../README.md) | Child workspace creation branches from recorded source `@-`, so source `@` may contain ongoing work. |
-| [`docs/concurrency/JJ.md`](../../concurrency/JJ.md) | The Orchestrator allocates from source `@-`, preserving source `@` bytes, description, and Change ID. |
-| [`docs/concurrency/STATE-MACHINES.md`](../../concurrency/STATE-MACHINES.md) | Source workspace creation branches from source `@-` and preserves source `@`. |
-| [`docs/concurrency/TESTING.md`](../../concurrency/TESTING.md) | Allocation from source `@-` preserves dirty source `@`. |
+| `docs/concurrency/JJ.md` | The Orchestrator allocates from source `@-`, preserving source `@` bytes, description, and Change ID. |
+| `docs/concurrency/STATE-MACHINES.md` | Source workspace creation branches from source `@-` and preserves source `@`. |
+| `docs/concurrency/TESTING.md` | Allocation from source `@-` preserves dirty source `@`. |
 | [`docs/concurrency/README.md`](../../concurrency/README.md) and [`docs/GLOSSARY.md`](../../GLOSSARY.md) | The isolated lane starts from source `@-`. |
-| [`docs/concurrency/TOOLS.md`](../../concurrency/TOOLS.md), [I07](I07-isolated-jj.md), and [I09](I09-concurrency-productization.md) | Workspace allocation uses source `@-`; review and integration preserve source `@`. |
+| `docs/concurrency/TOOLS.md`, [I07](I07-isolated-jj.md), and [I09](I09-concurrency-productization.md) | Workspace allocation uses source `@-`; review and integration preserve source `@`. |
 
 I06 delivered the shared lane as the sole dissenter: it preserves "the orchestrator's private WIP change"
 by seizing `@`.

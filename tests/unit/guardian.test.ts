@@ -261,14 +261,21 @@ test("Pi credentials and sessions review, safe state reads automatically, and wr
   await mkdir(workspace);
   await mkdir(outside);
   await mkdir(join(agentDir, "sessions"), { recursive: true });
+  await mkdir(join(agentDir, "pi-tai", "context-exports"), { recursive: true });
   for (const file of ["models.json", "settings.json", "trust.json", "models-store.json", "safe.json"]) {
     await writeFile(join(agentDir, file), "{}\n");
   }
   await symlink("safe.json", join(agentDir, "auth.json"));
   await symlink(outside, join(agentDir, "escape"));
   await writeFile(join(agentDir, "sessions", "conversation.jsonl"), "{}\n");
+  await writeFile(join(agentDir, "pi-tai", "context-exports", "ABCD2345.json"), "{}\n");
 
-  for (const path of ["auth.json", "models.json", "sessions/conversation.jsonl"]) {
+  for (const path of [
+    "auth.json",
+    "models.json",
+    "sessions/conversation.jsonl",
+    "pi-tai/context-exports/ABCD2345.json",
+  ]) {
     const decision = await checkFileToolPath(
       "read",
       { path: join(agentDir, path) },
@@ -593,57 +600,6 @@ test("custom tools that reuse file-tool names own their own policy", async () =>
   );
 });
 
-test("web_fetch is reviewed with canonical public-network evidence", async () => {
-  let request: ReviewRequest | undefined;
-  const state = registerWith(async (received) => {
-    request = received;
-    return allow();
-  });
-  assert.equal(
-    await state.handler(
-      toolEvent("web_fetch", { url: "https://Example.com/docs?q=1" }),
-      fakeContext(),
-    ),
-    undefined,
-  );
-  assert.equal(request?.action.toolName, "web_fetch");
-  assert.deepEqual(request?.reviewEvidence, {
-    type: "web-fetch",
-    requestedUrl: "https://Example.com/docs?q=1",
-    canonicalUrl: "https://example.com/docs?q=1",
-    hostname: "example.com",
-    method: "GET",
-    sendsCredentials: false,
-  });
-});
-
-test("web_fetch private targets are blocked before review", async () => {
-  let reviewed = false;
-  const state = registerWith(async () => {
-    reviewed = true;
-    return allow();
-  });
-  const result = await state.handler(
-    toolEvent("web_fetch", { url: "http://169.254.169.254/latest/meta-data" }),
-    fakeContext(),
-  ) as { block?: boolean; reason?: string };
-  assert.equal(result.block, true);
-  assert.match(result.reason ?? "", /non-public/);
-  assert.equal(reviewed, false);
-});
-
-test("hosted web_search remains outside Guardian review", async () => {
-  let reviewed = false;
-  const state = registerWith(async () => {
-    reviewed = true;
-    return allow();
-  });
-  assert.equal(
-    await state.handler(toolEvent("web_search", { query: "current docs" }), fakeContext()),
-    undefined,
-  );
-  assert.equal(reviewed, false);
-});
 
 test("reviewer resolves the internal identity from gpt-5.4 metadata", () => {
   const template = { provider: "openai-codex", id: "gpt-5.4-mini", name: "mini" };
@@ -691,6 +647,63 @@ test("reviewer session is isolated, tool-free, low-thinking, and strict", async 
   assert.deepEqual(sessionOptions?.tools, []);
   assert.deepEqual(sessionOptions?.customTools, []);
   assert.equal(sessionOptions?.thinkingLevel, "low");
+});
+
+test("packaged skills and Pi's own files are read without Guardian review", async () => {
+  const cwd = process.cwd();
+  // These live under node_modules, which git ignores by construction. Ignore
+  // status says nothing about reference material the agent is meant to read.
+  for (const target of [
+    "node_modules/@earendil-works/pi-coding-agent/README.md",
+    "node_modules/@earendil-works/pi-coding-agent/docs",
+    "packages/pi-tai/skills/dpic/SKILL.md",
+  ]) {
+    const decision = await checkFileToolPath("read", { path: target }, cwd);
+    assert.equal(decision.kind, "allow", `${target} should not require review`);
+  }
+});
+
+test("a credential file inside a read-only root still requires review", async () => {
+  const decision = await checkFileToolPath(
+    "read",
+    { path: "node_modules/@earendil-works/pi-coding-agent/.npmrc" },
+    process.cwd(),
+  );
+
+  assert.equal(decision.kind, "review");
+  assert.equal(decision.evidence?.triggers[0], "sensitive-path");
+});
+
+test("the read-only exception does not extend to unrelated ignored files", async () => {
+  const decision = await checkFileToolPath(
+    "read",
+    { path: "node_modules/typescript/package.json" },
+    process.cwd(),
+  );
+
+  assert.equal(decision.kind, "review", "only designated Pi and skill roots are excepted");
+});
+
+test("built-in file tools still cannot write into a read-only root", async () => {
+  const decision = await checkFileToolPath(
+    "write",
+    { path: "node_modules/@earendil-works/pi-coding-agent/README.md" },
+    process.cwd(),
+  );
+
+  assert.notEqual(decision.kind, "allow");
+});
+
+test("pi-tai's own resources are readable from an unrelated working directory", async () => {
+  // Pi-Tai may be checked out, installed under the agent directory, or pulled in
+  // as a dependency, so its location cannot be assumed from the workspace.
+  const [piTaiRoot] = defaultReadCandidates();
+  assert.ok(piTaiRoot.endsWith(join("packages", "pi-tai")), `unexpected root: ${piTaiRoot}`);
+
+  for (const relativePath of ["skills/dpic/SKILL.md", "prompts/dpic.md", "instructions/system.md"]) {
+    const decision = await checkFileToolPath("read", { path: join(piTaiRoot, relativePath) }, tmpdir());
+    assert.equal(decision.kind, "allow", `${relativePath} should be readable from any cwd`);
+  }
 });
 
 test("reviewer reports malformed output, timeout, cancellation, and provider failure", async () => {

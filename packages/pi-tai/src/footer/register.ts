@@ -1,7 +1,6 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionCapabilityController } from "../capabilities/controller.ts";
-import { reconstructSubagentState } from "../subagents/domain.ts";
 import type { WorkContextStore } from "../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
 
@@ -59,7 +58,6 @@ function createSnapshot(
   );
   const context = ctx.getContextUsage();
   const model = ctx.model;
-  const subagentState = reconstructSubagentState(entries);
   const capabilityOrder = ["subagents"];
   const capabilityLabels = [...capabilities.snapshot().capabilities]
     .filter((capability) => capability.serviceEnabled)
@@ -69,10 +67,7 @@ function createSnapshot(
       return (leftIndex < 0 ? capabilityOrder.length : leftIndex)
         - (rightIndex < 0 ? capabilityOrder.length : rightIndex);
     })
-    .map((capability) => {
-      if (capability.id === "subagents") return subagentState.agentName ?? "orchestrator";
-      return capability.label;
-    });
+    .map((capability) => capability.label);
   return {
     cwd: ctx.cwd,
     capabilities: capabilityLabels,

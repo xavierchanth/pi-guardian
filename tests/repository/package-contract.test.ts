@@ -36,27 +36,36 @@ test("source uses the current Pi distribution imports", () => {
   assert.deepEqual(legacy, []);
 });
 
-test("Pi-Tai packages a global instruction layer and declarative agent definitions", () => {
-  const system = join(root, "packages/pi-tai/instructions/system.md");
-  assert.ok(existsSync(system), system);
-  for (const name of ["orchestrator", "implementation-lead", "documenter", "worker", "reviewer", "scout", "researcher"]) {
-    const path = join(root, "packages/pi-tai/agents", `${name}.md`);
-    const content = readFileSync(path, "utf8");
-    assert.match(content, new RegExp(`name: ${name}`));
-    assert.match(content, /model: openai-codex\/gpt-5\.6-/);
-    assert.match(content, /effort:/);
-    assert.match(content, /tools:/);
+test("context-transfer domain and storage remain Pi-independent", () => {
+  for (const file of ["domain.ts", "storage.ts"]) {
+    const source = readFileSync(join(root, "packages/pi-tai/src/context-transfer", file), "utf8");
+    assert.doesNotMatch(source, /@earendil-works\//, file);
   }
 });
 
-test("grounded DPIC guidance is integrated into the Orchestrator", () => {
-  const orchestrator = readFileSync(join(root, "packages/pi-tai/agents/orchestrator.md"), "utf8");
-  assert.match(orchestrator, /Design–Plan–Implement–Closure/);
-  assert.match(orchestrator, /Move to Plan only when/);
-  assert.match(orchestrator, /intended outcome, repository behavior, boundaries, constraints, key decisions, and acceptance criteria/);
-  assert.match(orchestrator, /without requesting ceremonial approval/);
-  assert.equal(existsSync(join(root, "packages/pi-tai/skills/design")), false);
-  assert.equal(existsSync(join(root, "packages/pi-tai/skills/workspace")), false);
+test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
+  const instructions = readFileSync(join(root, "packages/pi-tai/instructions/system.md"), "utf8");
+  assert.ok(instructions.trim().length > 0);
+  // Roles are retired: a subagent is described by its objective and isolation,
+  // so there are no agent definition files to ship.
+  assert.equal(existsSync(join(root, "packages/pi-tai/agents/worker.md")), false);
+  assert.equal(existsSync(join(root, "packages/pi-tai/agents/orchestrator.md")), false);
+
+  // The workflow itself lives in the dpic skill; the prompt is a thin entry point
+  // that carries the work description and delegates to it.
+  const prompt = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
+  assert.match(prompt, /argument-hint: "\[work description\]"/);
+  assert.match(prompt, /\$\{ARGUMENTS:-/);
+  assert.match(prompt, /Load and follow the `dpic` skill/);
+  assert.doesNotMatch(prompt, /subagent_spawn/);
+
+  const dpic = readFileSync(join(root, "packages/pi-tai/skills/dpic/SKILL.md"), "utf8");
+  assert.match(dpic, /name: dpic/);
+  assert.match(dpic, /subagent_spawn/);
+  assert.match(dpic, /isolation: "workspace"/);
+  assert.match(dpic, /`continue` naming the finished subagent/);
+  assert.match(dpic, /shared index, manifest, README table, or numbered list/);
+  assert.match(dpic, /Delegation is not completion|Delegating is not finishing/);
 });
 
 test("checkpoint prompt accepts additional instructions", () => {
@@ -67,22 +76,39 @@ test("checkpoint prompt accepts additional instructions", () => {
   assert.match(prompt, /without weakening the safety requirements above/);
 });
 
-test("DPIC and task prompts activate proportionate work-order workflows", () => {
-  assert.equal(existsSync(join(root, "packages/pi-tai/prompts/implement.md")), false);
-  const dpic = readFileSync(join(root, "packages/pi-tai/prompts/dpic.md"), "utf8");
-  const task = readFileSync(join(root, "packages/pi-tai/prompts/task.md"), "utf8");
-  assert.match(dpic, /argument-hint: "\[work description\]"/);
-  assert.match(dpic, /Design–Plan–Implement–Closure/);
-  assert.match(dpic, /`large-product` work order/);
-  assert.match(task, /`small-product` work order/);
-  assert.match(task, /`small-product` class selects the Worker/i);
-  const source = readFileSync(join(root, "packages/pi-tai/src/subagents/register.ts"), "utf8");
-  assert.match(source, /\/dpic/);
-  assert.match(source, /\/task/);
-  assert.match(source, /enableRootSubagents/);
-  assert.match(source, /executionClass: StringEnum\(WORK_ORDER_EXECUTION_CLASSES\)/);
-  assert.match(source, /workOrderId: Type\.String/);
-  assert.doesNotMatch(source.match(/name: "workspace_subagent"[\s\S]*?name: "integrate_workspace"/)?.[0] ?? "", /task: taskPacketSchema|agent: StringEnum/);
+test("the subagent tool surface is the nine-tool set", () => {
+  const source = readFileSync(join(root, "packages/pi-tai/src/agents/register.ts"), "utf8");
+  const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)].map((match) => match[1]).sort();
+  assert.deepEqual(registered, [
+    "subagent_cancel", "subagent_check", "subagent_list", "subagent_send", "subagent_spawn",
+    "subagent_wait", "workspace_discard", "workspace_merge", "workspace_status"
+  ]);
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")), false,
+    "the retired 47-tool registrar is gone");
+});
+
+test("the packaged capability catalog and instruction assets agree", () => {
+  const catalog = JSON.parse(readFileSync(
+    join(root, "packages/pi-tai/src/agents/capabilities.json"),
+    "utf8",
+  )) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
+  assert.equal(catalog.version, 1);
+  assert.deepEqual(catalog.capabilities?.map((entry) => entry.name), ["researcher"]);
+  for (const capability of catalog.capabilities ?? []) {
+    assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
+    assert.ok(existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)));
+  }
+});
+
+test("the packaged model catalog declares every supported alias", () => {
+  const catalog = JSON.parse(readFileSync(
+    join(root, "packages/pi-tai/src/agents/models.json"),
+    "utf8",
+  )) as { version?: number; aliases?: Array<{ name?: string }> };
+  assert.equal(catalog.version, 1);
+  assert.deepEqual(catalog.aliases?.map((entry) => entry.name).sort(), [
+    "fable", "glm", "kimi", "luna", "opus", "sol", "sonnet", "terra",
+  ]);
 });
 
 test("version-control and invariant modeling skills are packaged", () => {
@@ -177,13 +203,11 @@ test("package composes only the reporting-only pi-cmux modules", () => {
   }
 });
 
-test("package ships web tools and their child-runtime dependencies", () => {
-  assert.ok(manifest.dependencies?.["html-to-text"]);
-  assert.ok(manifest.dependencies?.["ipaddr.js"]);
-  assert.ok(existsSync(join(root, "packages/pi-tai/src/web/register.ts")));
-  const childRuntime = readFileSync(join(root, "packages/pi-tai/subagent.ts"), "utf8");
-  assert.match(childRuntime, /registerWebTools\(pi\)/);
-  assert.ok(childRuntime.indexOf("registerWebTools(pi)") < childRuntime.indexOf("registerSubagents(pi"));
+test("package omits retired direct web tools and dependencies", () => {
+  assert.equal(manifest.dependencies?.["html-to-text"], undefined);
+  assert.equal(manifest.dependencies?.["ipaddr.js"], undefined);
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/web")), false);
+  assert.equal(existsSync(join(root, "packages/pi-tai/subagent.ts")), false);
 });
 
 function readFileOrDirectoryExists(path: string): boolean {

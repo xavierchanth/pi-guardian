@@ -9,11 +9,6 @@ import {
   FILE_TOOL_NAMES,
   type PathReviewEvidence,
 } from "./paths.ts";
-import {
-  WEB_FETCH_TOOL_NAME,
-  preflightWebFetch,
-  type WebFetchReviewEvidence,
-} from "../web/domain.ts";
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
 import { GUARDIAN_REVIEW_FAILED_EVENT } from "../notifications/events.ts";
@@ -53,7 +48,7 @@ export function registerApprovalGuardian(
   const recorder = options.recorder ?? createGuardianReviewRecorder();
 
   pi.on("tool_call", async (event, ctx) => {
-    let reviewEvidence: PathReviewEvidence | WebFetchReviewEvidence | undefined;
+    let reviewEvidence: PathReviewEvidence | undefined;
     if (event.toolName === "bash") {
       const cleanupDecision = await preflightManagedSubagentCleanup(
         event.input as Record<string, unknown>,
@@ -63,16 +58,7 @@ export function registerApprovalGuardian(
       if (cleanupDecision.kind === "allow") return undefined;
       // Non-runtime deletion forms still receive the task-aware model review below.
     }
-    if (event.toolName === WEB_FETCH_TOOL_NAME) {
-      const networkDecision = preflightWebFetch(event.input as Record<string, unknown>);
-      if (networkDecision.kind === "deny") {
-        return {
-          block: true,
-          reason: autonomousBlockReason(networkDecision.reason),
-        };
-      }
-      reviewEvidence = networkDecision.evidence;
-    } else if (FILE_TOOL_NAMES.has(event.toolName) && isBuiltinTool(pi, event.toolName)) {
+    if (FILE_TOOL_NAMES.has(event.toolName) && isBuiltinTool(pi, event.toolName)) {
       const pathDecision = await checkFileToolPath(
         event.toolName,
         event.input as Record<string, unknown>,

@@ -5,7 +5,6 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { WorkContextSnapshot } from "../work-context/domain.ts";
 import { buildReviewPrompt, type ProposedAction, type ReviewDecision } from "./policy.ts";
 import type { PathReviewEvidence } from "./paths.ts";
-import type { WebFetchReviewEvidence } from "../web/domain.ts";
 import type { ReviewResult } from "./reviewer.ts";
 
 export interface GuardianReviewRecordInput {
@@ -13,7 +12,7 @@ export interface GuardianReviewRecordInput {
   action: ProposedAction;
   messages: readonly unknown[];
   workContext?: WorkContextSnapshot;
-  reviewEvidence?: PathReviewEvidence | WebFetchReviewEvidence;
+  reviewEvidence?: PathReviewEvidence;
   mode: "tui" | "rpc" | "json" | "print";
   sessionId?: string;
   sessionFile?: string;

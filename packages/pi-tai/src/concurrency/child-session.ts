@@ -12,8 +12,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { SessionPolicyReader } from "../config/register.ts";
 import { registerAutoCompaction } from "../compaction/register.ts";
-import type { AgentDefinitionSnapshot } from "../subagents/store.ts";
-import { privateContextPaths } from "./persistence.ts";
+/** The subset of an agent definition a child session needs to start. */
+export interface AgentDefinitionSnapshot {
+  name: string;
+  provider: string;
+  model: string;
+  effort: string;
+  tools: readonly string[];
+}
+import { privateContextPaths } from "./paths.ts";
 
 type ModelRegistry = ExtensionContext["modelRegistry"];
 

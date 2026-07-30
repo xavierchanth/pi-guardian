@@ -3,6 +3,8 @@
 **Status:** Complete  
 **Depends on:** I08
 
+**Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
+
 ## Outcome
 
 Concurrency has complete custody/closure semantics, bounded multi-client projections, exact accounting, and no legacy child-process, polling, transcript, or broad workspace paths.

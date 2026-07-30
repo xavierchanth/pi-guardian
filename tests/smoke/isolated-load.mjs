@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const child = spawn("pi", ["-ne", "-e", ".", "--mode", "rpc"], {
@@ -23,6 +24,11 @@ const timeout = setTimeout(() => {
 }, 10_000);
 
 const lines = createInterface({ input: child.stdout });
+const shippedPrompt = await readFile(resolve(root, "packages/pi-tai/src/agents/prompt.ts"), "utf8");
+if (!shippedPrompt.includes('capability: \\"researcher\\"') || !shippedPrompt.includes("subagent_spawn")) {
+  throw new Error("shipped extension does not prompt researcher delegation");
+}
+
 let stateComplete = false;
 let commandsComplete = false;
 let complete = false;
@@ -74,10 +80,11 @@ lines.on("line", (line) => {
       names.has("design") ||
       names.has("implement") ||
       !names.has("dpic") ||
-      !names.has("task") ||
       !names.has("capabilities") ||
       !names.has("subagents") ||
-      !names.has("init-pi-tai") ||
+      !names.has("context-export") ||
+      !names.has("context-import") ||
+      names.has("init-pi-tai") ||
       names.has("parallelize") ||
       names.has("plan-status") ||
       names.has("collect-status") ||
