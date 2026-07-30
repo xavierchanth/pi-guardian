@@ -19,6 +19,7 @@ export function privateContextPaths(stateRoot: string, contextId: string): Priva
   const contextsRoot = resolve(stateRoot, "contexts");
   const root = resolve(contextsRoot, contextId);
   // Belt and braces against a traversal that slipped past the pattern.
-  if (dirname(root) !== contextsRoot) throw new Error("Private context path escaped its managed root.");
+  if (dirname(root) !== contextsRoot)
+    throw new Error("Private context path escaped its managed root.");
   return { root, sessions: join(root, "sessions"), artifacts: join(root, "artifacts") };
 }

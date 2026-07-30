@@ -33,12 +33,54 @@ export interface RepositoryEnrollmentReceiptV1 {
 }
 
 export type RepositoryEnrollmentV1 =
-  | { readonly version: 1; readonly phase: "planned"; readonly plan: RepositoryEnrollmentPlanV1; readonly plannedAt: string }
-  | { readonly version: 1; readonly phase: "initializing"; readonly plan: RepositoryEnrollmentPlanV1; readonly userAuthorizationId: string; readonly boundary: "authorized" | "repository_initialized" | "alias_configured" | "private_commits_configured" | "workspace_root_created"; readonly startedAt: string; readonly evidence: unknown }
-  | { readonly version: 1; readonly phase: "ready"; readonly receipt: RepositoryEnrollmentReceiptV1 }
-  | { readonly version: 1; readonly phase: "repair_required"; readonly receipt: RepositoryEnrollmentReceiptV1; readonly reason: string; readonly observedAt: string }
-  | { readonly version: 1; readonly phase: "attention_required"; readonly plan?: RepositoryEnrollmentPlanV1; readonly lastSafeBoundary: string; readonly reason: string; readonly evidence: unknown; readonly stoppedAt: string }
-  | { readonly version: 1; readonly phase: "revoked"; readonly receipt: RepositoryEnrollmentReceiptV1; readonly revokedAt: string; readonly reason: string };
+  | {
+      readonly version: 1;
+      readonly phase: "planned";
+      readonly plan: RepositoryEnrollmentPlanV1;
+      readonly plannedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "initializing";
+      readonly plan: RepositoryEnrollmentPlanV1;
+      readonly userAuthorizationId: string;
+      readonly boundary:
+        | "authorized"
+        | "repository_initialized"
+        | "alias_configured"
+        | "private_commits_configured"
+        | "workspace_root_created";
+      readonly startedAt: string;
+      readonly evidence: unknown;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "ready";
+      readonly receipt: RepositoryEnrollmentReceiptV1;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "repair_required";
+      readonly receipt: RepositoryEnrollmentReceiptV1;
+      readonly reason: string;
+      readonly observedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "attention_required";
+      readonly plan?: RepositoryEnrollmentPlanV1;
+      readonly lastSafeBoundary: string;
+      readonly reason: string;
+      readonly evidence: unknown;
+      readonly stoppedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "revoked";
+      readonly receipt: RepositoryEnrollmentReceiptV1;
+      readonly revokedAt: string;
+      readonly reason: string;
+    };
 
 export interface SessionWorkspaceIdentityV1 {
   readonly repositoryId: string;
@@ -54,17 +96,80 @@ export interface SessionWorkspaceIdentityV1 {
 }
 
 export type SessionWorkspaceCustodyV1 =
-  | { readonly version: 1; readonly phase: "allocating"; readonly repositoryId: string; readonly rootSessionId: string; readonly workspaceId: string; readonly operationId: string; readonly plannedPath: string; readonly startedAt: string }
-  | { readonly version: 1; readonly phase: "ready"; readonly identity: SessionWorkspaceIdentityV1; readonly generation: number; readonly verifiedAt: string }
-  | { readonly version: 1; readonly phase: "interrupted"; readonly identity: SessionWorkspaceIdentityV1; readonly priorGeneration: number; readonly reason: string; readonly interruptedAt: string }
-  | { readonly version: 1; readonly phase: "cleanup_pending"; readonly identity: SessionWorkspaceIdentityV1; readonly reason: string; readonly requestedAt: string }
-  | { readonly version: 1; readonly phase: "retired"; readonly identity: SessionWorkspaceIdentityV1; readonly retiredAt: string }
-  | { readonly version: 1; readonly phase: "attention_required"; readonly repositoryId: string; readonly rootSessionId: string; readonly workspaceId: string; readonly identity?: SessionWorkspaceIdentityV1; readonly lastSafeBoundary: string; readonly reason: string; readonly evidence: unknown; readonly stoppedAt: string };
+  | {
+      readonly version: 1;
+      readonly phase: "allocating";
+      readonly repositoryId: string;
+      readonly rootSessionId: string;
+      readonly workspaceId: string;
+      readonly operationId: string;
+      readonly plannedPath: string;
+      readonly startedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "ready";
+      readonly identity: SessionWorkspaceIdentityV1;
+      readonly generation: number;
+      readonly verifiedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "interrupted";
+      readonly identity: SessionWorkspaceIdentityV1;
+      readonly priorGeneration: number;
+      readonly reason: string;
+      readonly interruptedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "cleanup_pending";
+      readonly identity: SessionWorkspaceIdentityV1;
+      readonly reason: string;
+      readonly requestedAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "retired";
+      readonly identity: SessionWorkspaceIdentityV1;
+      readonly retiredAt: string;
+    }
+  | {
+      readonly version: 1;
+      readonly phase: "attention_required";
+      readonly repositoryId: string;
+      readonly rootSessionId: string;
+      readonly workspaceId: string;
+      readonly identity?: SessionWorkspaceIdentityV1;
+      readonly lastSafeBoundary: string;
+      readonly reason: string;
+      readonly evidence: unknown;
+      readonly stoppedAt: string;
+    };
 
 export type RepositoryMutationLeaseV1 =
   | { readonly phase: "available"; readonly repositoryId: string; readonly generation: number }
-  | { readonly phase: "leased"; readonly repositoryId: string; readonly generation: number; readonly leaseId: string; readonly rootSessionId: string; readonly runtimeGeneration: number; readonly operationId: string; readonly acquiredAt: string }
-  | { readonly phase: "interrupted"; readonly repositoryId: string; readonly generation: number; readonly priorLeaseId: string; readonly priorRootSessionId: string; readonly priorRuntimeGeneration: number; readonly operationId: string; readonly reason: string; readonly interruptedAt: string };
+  | {
+      readonly phase: "leased";
+      readonly repositoryId: string;
+      readonly generation: number;
+      readonly leaseId: string;
+      readonly rootSessionId: string;
+      readonly runtimeGeneration: number;
+      readonly operationId: string;
+      readonly acquiredAt: string;
+    }
+  | {
+      readonly phase: "interrupted";
+      readonly repositoryId: string;
+      readonly generation: number;
+      readonly priorLeaseId: string;
+      readonly priorRootSessionId: string;
+      readonly priorRuntimeGeneration: number;
+      readonly operationId: string;
+      readonly reason: string;
+      readonly interruptedAt: string;
+    };
 
 export interface ExactUsageEntryV1 {
   readonly usageEventId: string;
@@ -79,7 +184,13 @@ export interface ExactUsageEntryV1 {
   readonly output: number;
   readonly cacheRead: number;
   readonly cacheWrite: number;
-  readonly cost: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number; readonly total: number };
+  readonly cost: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly total: number;
+  };
   readonly recordedAt: string;
 }
 
@@ -161,26 +272,40 @@ export interface ConcurrencyTransactionV1 {
   readonly rootSessionId: string;
   readonly runtimeGeneration: number;
   readonly expectedRevision: number;
-  readonly events: readonly { readonly eventId: string; readonly type: string; readonly payload: unknown }[];
+  readonly events: readonly {
+    readonly eventId: string;
+    readonly type: string;
+    readonly payload: unknown;
+  }[];
   readonly state: unknown;
   readonly projection: ConcurrencyProjectionV1;
 }
 
-export function enrollmentPlanDigest(input: Omit<RepositoryEnrollmentPlanV1, "planDigest">): string {
+export function enrollmentPlanDigest(
+  input: Omit<RepositoryEnrollmentPlanV1, "planDigest">,
+): string {
   return digest(input);
 }
 
-export function enrollmentReceiptDigest(input: Omit<RepositoryEnrollmentReceiptV1, "receiptDigest">): string {
+export function enrollmentReceiptDigest(
+  input: Omit<RepositoryEnrollmentReceiptV1, "receiptDigest">,
+): string {
   return digest(input);
 }
 
-export function validateConcurrencyProjection(value: ConcurrencyProjectionV1): ConcurrencyProjectionV1 {
-  if (value.version !== CONCURRENCY_PROJECTION_VERSION) throw new Error("Unsupported concurrency projection version.");
+export function validateConcurrencyProjection(
+  value: ConcurrencyProjectionV1,
+): ConcurrencyProjectionV1 {
+  if (value.version !== CONCURRENCY_PROJECTION_VERSION)
+    throw new Error("Unsupported concurrency projection version.");
   managedId(value.rootSessionId, "root session");
   safeCounter(value.revision, "projection revision");
-  if (value.children.length > 256) throw new Error("Concurrency projection exceeds 256 child summaries.");
-  if (value.tasks.length > 256) throw new Error("Concurrency projection exceeds 256 task summaries.");
-  if (value.workspaces.length > 256) throw new Error("Concurrency projection exceeds 256 workspace summaries.");
+  if (value.children.length > 256)
+    throw new Error("Concurrency projection exceeds 256 child summaries.");
+  if (value.tasks.length > 256)
+    throw new Error("Concurrency projection exceeds 256 task summaries.");
+  if (value.workspaces.length > 256)
+    throw new Error("Concurrency projection exceeds 256 workspace summaries.");
   for (const child of value.children) {
     managedId(child.contextId, "child context");
     if (child.parentContextId) managedId(child.parentContextId, "parent context");
@@ -196,25 +321,34 @@ export function validateConcurrencyProjection(value: ConcurrencyProjectionV1): C
   return value;
 }
 
-export function validateConcurrencyTransaction(value: ConcurrencyTransactionV1): ConcurrencyTransactionV1 {
-  if (value.version !== CONCURRENCY_STATE_VERSION) throw new Error("Unsupported concurrency transaction version.");
+export function validateConcurrencyTransaction(
+  value: ConcurrencyTransactionV1,
+): ConcurrencyTransactionV1 {
+  if (value.version !== CONCURRENCY_STATE_VERSION)
+    throw new Error("Unsupported concurrency transaction version.");
   managedId(value.transactionId, "transaction");
   managedId(value.rootSessionId, "root session");
   safeCounter(value.runtimeGeneration, "runtime generation");
   safeCounter(value.expectedRevision, "expected revision");
-  if (value.events.length === 0 || value.events.length > 64) throw new Error("Concurrency transaction must contain 1 to 64 events.");
+  if (value.events.length === 0 || value.events.length > 64)
+    throw new Error("Concurrency transaction must contain 1 to 64 events.");
   const ids = new Set<string>();
   for (const event of value.events) {
     managedId(event.eventId, "event");
     if (ids.has(event.eventId)) throw new Error(`Duplicate concurrency event: ${event.eventId}`);
     ids.add(event.eventId);
-    if (!event.type.trim() || Buffer.byteLength(event.type, "utf8") > 128) throw new Error("Concurrency event type is invalid.");
+    if (!event.type.trim() || Buffer.byteLength(event.type, "utf8") > 128)
+      throw new Error("Concurrency event type is invalid.");
   }
-  if (value.projection.rootSessionId !== value.rootSessionId) throw new Error("Concurrency transaction projection belongs to another root session.");
-  if (value.projection.revision !== value.expectedRevision + 1) throw new Error("Concurrency projection revision must advance exactly once.");
+  if (value.projection.rootSessionId !== value.rootSessionId)
+    throw new Error("Concurrency transaction projection belongs to another root session.");
+  if (value.projection.revision !== value.expectedRevision + 1)
+    throw new Error("Concurrency projection revision must advance exactly once.");
   validateConcurrencyProjection(value.projection);
-  if (value.state === undefined) throw new Error("Concurrency transaction requires strict aggregate state.");
-  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 1024 * 1024) throw new Error("Concurrency transaction exceeds 1 MiB.");
+  if (value.state === undefined)
+    throw new Error("Concurrency transaction requires strict aggregate state.");
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 1024 * 1024)
+    throw new Error("Concurrency transaction exceeds 1 MiB.");
   return value;
 }
 
@@ -240,14 +374,20 @@ function digest(value: unknown): string {
 }
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`)
+      .join(",")}}`;
   return JSON.stringify(value);
 }
 function managedId(value: string, label: string): void {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)) throw new Error(`Invalid ${label} ID: ${value}`);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value))
+    throw new Error(`Invalid ${label} ID: ${value}`);
 }
 function safeCounter(value: number, label: string): void {
-  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} must be a nonnegative safe integer.`);
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error(`${label} must be a nonnegative safe integer.`);
 }
 function nonnegative(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be nonnegative.`);

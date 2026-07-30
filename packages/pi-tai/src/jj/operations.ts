@@ -82,11 +82,16 @@ interface WorkspaceRebaseReceiptBase {
   readonly operationId: JjOperationId;
 }
 
-export type WorkspaceRebaseReceipt = WorkspaceRebaseReceiptBase & (
-  | { readonly disposition: "range_equivalent"; readonly normalizedPatchHash: string }
-  | { readonly disposition: "range_changed"; readonly beforePatchHash: string; readonly afterPatchHash: string }
-  | { readonly disposition: "conflicted"; readonly conflictPaths: readonly string[] }
-);
+export type WorkspaceRebaseReceipt = WorkspaceRebaseReceiptBase &
+  (
+    | { readonly disposition: "range_equivalent"; readonly normalizedPatchHash: string }
+    | {
+        readonly disposition: "range_changed";
+        readonly beforePatchHash: string;
+        readonly afterPatchHash: string;
+      }
+    | { readonly disposition: "conflicted"; readonly conflictPaths: readonly string[] }
+  );
 
 export type WorkspacePurpose = "relocation" | "delegation";
 
@@ -105,10 +110,11 @@ interface WorkspaceReportReceiptBase {
   readonly operationId: JjOperationId;
 }
 
-export type WorkspaceReportReceipt = WorkspaceReportReceiptBase & (
-  | { readonly range: "empty" }
-  | { readonly range: "nonempty"; readonly contentTipChangeId: ChangeId }
-);
+export type WorkspaceReportReceipt = WorkspaceReportReceiptBase &
+  (
+    | { readonly range: "empty" }
+    | { readonly range: "nonempty"; readonly contentTipChangeId: ChangeId }
+  );
 
 export interface IntegrationReceipt {
   readonly workspaceId: WorkspaceId;
@@ -129,7 +135,9 @@ export interface ChangeInserter {
 }
 
 export interface SharedChangeCheckpointer {
-  checkpointChange(claim: CheckpointableFileSetClaim): Promise<JjOperationResult<CheckpointChangeReceipt>>;
+  checkpointChange(
+    claim: CheckpointableFileSetClaim,
+  ): Promise<JjOperationResult<CheckpointChangeReceipt>>;
 }
 
 export interface WorkspaceCheckpointer {
@@ -154,11 +162,15 @@ export interface WorkspaceRebaser {
 }
 
 export interface WorkspaceReporter {
-  prepareWorkspaceReport(workspace: FrozenWorkspaceHandle): Promise<JjOperationResult<WorkspaceReportReceipt>>;
+  prepareWorkspaceReport(
+    workspace: FrozenWorkspaceHandle,
+  ): Promise<JjOperationResult<WorkspaceReportReceipt>>;
 }
 
 export interface WorkspaceIntegrator {
-  integrateWorkspace(approval: ApprovedWorkspaceIntegration): Promise<JjOperationResult<IntegrationReceipt>>;
+  integrateWorkspace(
+    approval: ApprovedWorkspaceIntegration,
+  ): Promise<JjOperationResult<IntegrationReceipt>>;
 }
 
 export interface JjOperations

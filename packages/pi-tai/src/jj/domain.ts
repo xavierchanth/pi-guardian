@@ -56,14 +56,16 @@ export function changeId(value: string): ChangeId {
 }
 
 export function workspaceName(value: string): WorkspaceName {
-  if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(value)) throw new Error(`Invalid JJ workspace name: ${value}`);
+  if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(value))
+    throw new Error(`Invalid JJ workspace name: ${value}`);
   return value as WorkspaceName;
 }
 
 export function changeDescription(value: string): ChangeDescription {
   const normalized = value.trim();
   if (!normalized) throw new Error("JJ change description must not be empty.");
-  if (Buffer.byteLength(normalized, "utf8") > 4096) throw new Error("JJ change description exceeds 4096 bytes.");
+  if (Buffer.byteLength(normalized, "utf8") > 4096)
+    throw new Error("JJ change description exceeds 4096 bytes.");
   return normalized as ChangeDescription;
 }
 
@@ -121,7 +123,11 @@ export function isolatedWorkspaceWriteLease(
   workspaceId: WorkspaceId,
   leaseId: WorkspaceWriteLeaseId,
 ): IsolatedWorkspaceWriteLease {
-  return { kind: "isolated_workspace_write_lease", workspaceId, leaseId } as IsolatedWorkspaceWriteLease;
+  return {
+    kind: "isolated_workspace_write_lease",
+    workspaceId,
+    leaseId,
+  } as IsolatedWorkspaceWriteLease;
 }
 
 export function checkpointableFileSetClaim(claimId: FileSetClaimId): CheckpointableFileSetClaim {
@@ -135,7 +141,12 @@ export function workspaceRebaseLease(
   return { kind: "workspace_rebase_lease", workspaceId, leaseId } as WorkspaceRebaseLease;
 }
 
-export function conflictResolutionLease(workspaceId: WorkspaceId, claimId: FileSetClaimId): ConflictResolutionLease { return { kind: "conflict_resolution_lease", workspaceId, claimId } as ConflictResolutionLease; }
+export function conflictResolutionLease(
+  workspaceId: WorkspaceId,
+  claimId: FileSetClaimId,
+): ConflictResolutionLease {
+  return { kind: "conflict_resolution_lease", workspaceId, claimId } as ConflictResolutionLease;
+}
 
 export function frozenWorkspaceHandle(workspaceId: WorkspaceId): FrozenWorkspaceHandle {
   return { kind: "frozen_workspace", workspaceId } as FrozenWorkspaceHandle;
@@ -145,5 +156,9 @@ export function approvedWorkspaceIntegration(
   integrationId: IntegrationId,
   workspaceId: WorkspaceId,
 ): ApprovedWorkspaceIntegration {
-  return { kind: "approved_workspace_integration", integrationId, workspaceId } as ApprovedWorkspaceIntegration;
+  return {
+    kind: "approved_workspace_integration",
+    integrationId,
+    workspaceId,
+  } as ApprovedWorkspaceIntegration;
 }

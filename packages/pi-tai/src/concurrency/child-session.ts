@@ -84,7 +84,9 @@ export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPor
     const errors: string[] = [];
     const bridgeFactory: InlineExtension = {
       name: `pi-tai-child-bridge-${request.contextId}`,
-      factory: (pi) => { bridge = pi; },
+      factory: (pi) => {
+        bridge = pi;
+      },
     };
     const compactionFactory: InlineExtension = {
       name: `pi-tai-child-compaction-${request.contextId}`,
@@ -109,8 +111,12 @@ export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPor
     });
     await resourceLoader.reload({ resolveProjectTrust: async () => true });
     const model = request.modelRegistry.find(request.agent.provider, request.agent.model);
-    if (!model) throw new Error(`Child model not found: ${request.agent.provider}/${request.agent.model}`);
-    const compatibility = request.modelRegistry as unknown as { runtime?: unknown; authStorage?: unknown };
+    if (!model)
+      throw new Error(`Child model not found: ${request.agent.provider}/${request.agent.model}`);
+    const compatibility = request.modelRegistry as unknown as {
+      runtime?: unknown;
+      authStorage?: unknown;
+    };
     const options: Record<string, unknown> = {
       cwd: request.cwd,
       agentDir: request.agentDir ?? getAgentDir(),
@@ -133,13 +139,22 @@ export class PrivateChildSessionFactory implements PrivateChildSessionFactoryPor
       await created.session.bindExtensions({
         mode: "rpc",
         shutdownHandler: () => {},
-        onError: (error) => { errors.push(`${error.extensionPath}:${error.event}:${error.error}`); },
+        onError: (error) => {
+          errors.push(`${error.extensionPath}:${error.event}:${error.error}`);
+        },
       });
       if (!bridge) throw new Error("Private child protocol bridge did not load.");
-      if (errors.length) throw new Error(`Private child extension binding failed: ${errors.join("; ")}`);
+      if (errors.length)
+        throw new Error(`Private child extension binding failed: ${errors.join("; ")}`);
       const sessionFile = created.session.sessionFile;
       if (!sessionFile) throw new Error("Private child session is not file-backed.");
-      return new SdkPrivateChildSessionHandle(request.contextId, created.session, sessionFile, paths.sessions, bridge);
+      return new SdkPrivateChildSessionHandle(
+        request.contextId,
+        created.session,
+        sessionFile,
+        paths.sessions,
+        bridge,
+      );
     } catch (error) {
       created.session.dispose();
       throw error;
@@ -155,7 +170,13 @@ class SdkPrivateChildSessionHandle implements PrivateChildSessionHandle {
   readonly sessionDir: string;
   readonly bridge: ExtensionAPI;
 
-  constructor(contextId: string, session: AgentSession, sessionFile: string, sessionDir: string, bridge: ExtensionAPI) {
+  constructor(
+    contextId: string,
+    session: AgentSession,
+    sessionFile: string,
+    sessionDir: string,
+    bridge: ExtensionAPI,
+  ) {
     this.contextId = contextId;
     this.session = session;
     this.sessionId = session.sessionId;
@@ -165,15 +186,24 @@ class SdkPrivateChildSessionHandle implements PrivateChildSessionHandle {
   }
 
   send(message: PrivateChildProtocolMessage): void {
-    this.bridge.sendMessage({
-      customType: message.customType,
-      content: message.content,
-      display: false,
-      details: message.details,
-    }, { deliverAs: message.delivery, triggerTurn: message.triggerTurn });
+    this.bridge.sendMessage(
+      {
+        customType: message.customType,
+        content: message.content,
+        display: false,
+        details: message.details,
+      },
+      { deliverAs: message.delivery, triggerTurn: message.triggerTurn },
+    );
   }
 
-  abort(): Promise<void> { return this.session.abort(); }
-  waitForIdle(): Promise<void> { return this.session.waitForIdle(); }
-  dispose(): void { this.session.dispose(); }
+  abort(): Promise<void> {
+    return this.session.abort();
+  }
+  waitForIdle(): Promise<void> {
+    return this.session.waitForIdle();
+  }
+  dispose(): void {
+    this.session.dispose();
+  }
 }

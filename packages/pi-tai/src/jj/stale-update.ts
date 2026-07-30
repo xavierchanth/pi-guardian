@@ -27,7 +27,10 @@ export interface StaleUpdateOutcome {
 }
 
 export function parseChangeIds(value: string): string[] {
-  return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 export function displacedChangeIds(before: readonly string[], after: readonly string[]): string[] {
@@ -53,10 +56,11 @@ export async function updateStaleSafely(options: {
   const displaced = displacedChangeIds(before, after);
   if (displaced.length) {
     throw new Error(
-      `${options.context} displaced uncommitted work from ${options.location} into divergent change(s) ${displaced.join(", ")}. `
-      + "The work is preserved in those changes and must be reconciled before continuing.",
+      `${options.context} displaced uncommitted work from ${options.location} into divergent change(s) ${displaced.join(", ")}. ` +
+        "The work is preserved in those changes and must be reconciled before continuing.",
     );
   }
-  if (/recovery/i.test(output)) throw new Error(`${options.context} created recovery history while updating stale metadata.`);
+  if (/recovery/i.test(output))
+    throw new Error(`${options.context} created recovery history while updating stale metadata.`);
   return { output, displacedChangeIds: displaced };
 }

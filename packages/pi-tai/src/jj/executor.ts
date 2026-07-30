@@ -43,8 +43,19 @@ export type JjExecutionResult =
 
 export type JjProbeResult =
   | { kind: "available"; binary: string; version: typeof SUPPORTED_JJ_VERSION }
-  | { kind: "unavailable"; failure: Extract<JjExecutionFailure, { kind: "not_found" | "spawn_failed" | "timed_out" | "cancelled" }> }
-  | { kind: "unsupported"; binary: string; expected: typeof SUPPORTED_JJ_VERSION; observed: string };
+  | {
+      kind: "unavailable";
+      failure: Extract<
+        JjExecutionFailure,
+        { kind: "not_found" | "spawn_failed" | "timed_out" | "cancelled" }
+      >;
+    }
+  | {
+      kind: "unsupported";
+      binary: string;
+      expected: typeof SUPPORTED_JJ_VERSION;
+      observed: string;
+    };
 
 export interface JjExecutor {
   execute(request: JjExecutionRequest): Promise<JjExecutionResult>;
@@ -70,7 +81,10 @@ export class JjProcessExecutor implements JjExecutor {
   constructor(options: JjProcessExecutorOptions = {}) {
     this.binary = options.binary ?? "jj";
     this.requiredVersion = options.requiredVersion ?? SUPPORTED_JJ_VERSION;
-    this.defaultTimeoutMs = positiveInteger(options.defaultTimeoutMs ?? DEFAULT_JJ_TIMEOUT_MS, "default timeout");
+    this.defaultTimeoutMs = positiveInteger(
+      options.defaultTimeoutMs ?? DEFAULT_JJ_TIMEOUT_MS,
+      "default timeout",
+    );
     this.defaultOutputLimitBytes = positiveInteger(
       options.defaultOutputLimitBytes ?? DEFAULT_JJ_OUTPUT_LIMIT_BYTES,
       "default output limit",
@@ -94,9 +108,10 @@ export class JjProcessExecutor implements JjExecutor {
     if (probe.kind !== "available") {
       return {
         kind: "failure",
-        failure: probe.kind === "unsupported"
-          ? { kind: "unsupported_version", expected: probe.expected, observed: probe.observed }
-          : probe.failure,
+        failure:
+          probe.kind === "unsupported"
+            ? { kind: "unsupported_version", expected: probe.expected, observed: probe.observed }
+            : probe.failure,
         stdout: "",
         stderr: "",
         durationMs: elapsed(started),
@@ -121,12 +136,16 @@ export class JjProcessExecutor implements JjExecutor {
     );
     if (result.kind === "failure") {
       if (
-        result.failure.kind === "not_found"
-        || result.failure.kind === "spawn_failed"
-        || result.failure.kind === "timed_out"
-        || result.failure.kind === "cancelled"
-      ) return { kind: "unavailable", failure: result.failure };
-      return { kind: "unavailable", failure: { kind: "spawn_failed", reason: renderFailure(result.failure) } };
+        result.failure.kind === "not_found" ||
+        result.failure.kind === "spawn_failed" ||
+        result.failure.kind === "timed_out" ||
+        result.failure.kind === "cancelled"
+      )
+        return { kind: "unavailable", failure: result.failure };
+      return {
+        kind: "unavailable",
+        failure: { kind: "spawn_failed", reason: renderFailure(result.failure) },
+      };
     }
     const observed = (parseJjVersion(result.stdout) ?? result.stdout.trim()) || "<unparseable>";
     if (observed !== this.requiredVersion) {
@@ -186,17 +205,36 @@ export class JjProcessExecutor implements JjExecutor {
       child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
       child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
       child.once("error", (error: NodeJS.ErrnoException) => {
-        const reason: JjExecutionFailure = error.code === "ENOENT"
-          ? { kind: "not_found", binary: this.binary }
-          : { kind: "spawn_failed", reason: error.message };
+        const reason: JjExecutionFailure =
+          error.code === "ENOENT"
+            ? { kind: "not_found", binary: this.binary }
+            : { kind: "spawn_failed", reason: error.message };
         finish(failure(reason, stdout.toString("utf8"), stderr.toString("utf8"), started));
       });
       child.once("close", (code, closeSignal) => {
         const out = stdout.toString("utf8");
         const err = stderr.toString("utf8");
         if (disposition) return finish(failure(disposition, out, err, started));
-        if (code === 0) return finish({ kind: "success", stdout: out, stderr: err, exitCode: 0, durationMs: elapsed(started) });
-        return finish(failure({ kind: "exited", exitCode: code ?? 1, ...(closeSignal ? { signal: closeSignal } : {}) }, out, err, started));
+        if (code === 0)
+          return finish({
+            kind: "success",
+            stdout: out,
+            stderr: err,
+            exitCode: 0,
+            durationMs: elapsed(started),
+          });
+        return finish(
+          failure(
+            {
+              kind: "exited",
+              exitCode: code ?? 1,
+              ...(closeSignal ? { signal: closeSignal } : {}),
+            },
+            out,
+            err,
+            started,
+          ),
+        );
       });
       const onAbort = () => stop({ kind: "cancelled" });
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -220,7 +258,9 @@ export class ScriptedJjExecutor implements JjExecutor {
     this.probeResult = probeResult;
   }
 
-  probe(): Promise<JjProbeResult> { return Promise.resolve(this.probeResult); }
+  probe(): Promise<JjProbeResult> {
+    return Promise.resolve(this.probeResult);
+  }
 
   execute(request: JjExecutionRequest): Promise<JjExecutionResult> {
     this.requests.push(request);
@@ -245,10 +285,13 @@ function failure(
   return { kind: "failure", failure: reason, stdout, stderr, durationMs: elapsed(started) };
 }
 
-function elapsed(started: number): number { return Math.max(0, performance.now() - started); }
+function elapsed(started: number): number {
+  return Math.max(0, performance.now() - started);
+}
 
 function positiveInteger(value: number, label: string): number {
-  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`JJ ${label} must be a positive integer.`);
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new Error(`JJ ${label} must be a positive integer.`);
   return value;
 }
 
@@ -258,12 +301,19 @@ function parseJjVersion(output: string): string | undefined {
 
 function renderFailure(value: JjExecutionFailure): string {
   switch (value.kind) {
-    case "not_found": return `JJ binary not found: ${value.binary}`;
-    case "unsupported_version": return `Unsupported JJ version ${value.observed}; expected ${value.expected}.`;
-    case "spawn_failed": return `JJ process failed to start: ${value.reason}`;
-    case "exited": return `JJ exited with status ${value.exitCode}${value.signal ? ` (${value.signal})` : ""}.`;
-    case "cancelled": return "JJ execution was cancelled.";
-    case "timed_out": return `JJ execution timed out after ${value.timeoutMs}ms.`;
-    case "output_limit_exceeded": return `JJ ${value.stream} exceeded ${value.limitBytes} bytes.`;
+    case "not_found":
+      return `JJ binary not found: ${value.binary}`;
+    case "unsupported_version":
+      return `Unsupported JJ version ${value.observed}; expected ${value.expected}.`;
+    case "spawn_failed":
+      return `JJ process failed to start: ${value.reason}`;
+    case "exited":
+      return `JJ exited with status ${value.exitCode}${value.signal ? ` (${value.signal})` : ""}.`;
+    case "cancelled":
+      return "JJ execution was cancelled.";
+    case "timed_out":
+      return `JJ execution timed out after ${value.timeoutMs}ms.`;
+    case "output_limit_exceeded":
+      return `JJ ${value.stream} exceeded ${value.limitBytes} bytes.`;
   }
 }
