@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { WorkContextSnapshot } from "../../work-context/domain.ts";
 import { buildReviewPrompt, type ProposedAction, type ReviewDecision } from "./policy.ts";
 import type { PathReviewEvidence } from "./paths.ts";
 import type { ReviewResult } from "./reviewer.ts";
@@ -11,7 +10,6 @@ export interface GuardianReviewRecordInput {
   result: ReviewResult;
   action: ProposedAction;
   messages: readonly unknown[];
-  workContext?: WorkContextSnapshot;
   reviewEvidence?: PathReviewEvidence;
   mode: "tui" | "rpc" | "json" | "print";
   sessionId?: string;
@@ -82,11 +80,6 @@ function toRecord(
     action: input.action,
     ...(decision ? { decision } : {}),
     reason,
-    reviewerInput: buildReviewPrompt(
-      input.messages,
-      input.action,
-      input.workContext,
-      input.reviewEvidence,
-    ),
+    reviewerInput: buildReviewPrompt(input.messages, input.action, input.reviewEvidence),
   };
 }

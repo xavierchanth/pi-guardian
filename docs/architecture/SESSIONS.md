@@ -16,7 +16,6 @@ The Host durably owns:
 - current revision and event cursor;
 - foreground operation and runtime health;
 - model/provider/effort configuration required for continuation;
-- work context and task-plan snapshots;
 - child contexts, execution cycles, questions, event acknowledgement, and recovery dispositions;
 - workspace custody, stable JJ Change IDs, operation and review receipts;
 - artifacts and retention metadata;

@@ -22,24 +22,16 @@ import {
   type NotificationSender,
 } from "./src/terminal/notifications/index.ts";
 import { registerResponseEditor } from "./src/terminal/response-editor/register.ts";
-import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
-import { registerSessionTitle } from "./src/session-title/register.ts";
 import { registerBtw } from "./src/terminal/sidebar/register.ts";
 import { registerAgents } from "./src/core/subagents/register.ts";
 import type { BackendName } from "./src/core/subagents/domain.ts";
 
 /** Where child sessions run. The legacy out-of-process launcher is retired. */
 export type SubagentRuntimeMode = "pi-cli" | "host-worker";
-import {
-  createPiSessionWorkContextStore,
-  type WorkContextStore,
-} from "./src/work-context/persistence.ts";
 
 export interface PiTaiRuntime {
   mode: SubagentRuntimeMode;
   config: PiTaiConfigService;
-  workContext: WorkContextStore;
-  titleGenerator: TitleGenerator;
   queryTerminalBackground: QueryTerminalBackground;
   notificationSender: NotificationSender;
   agentDir: string;
@@ -56,12 +48,10 @@ export interface PiTaiRegistrars {
   keybindings: PiTaiRegistrar;
   config: PiTaiRegistrar;
   compaction: PiTaiRegistrar;
-  workContext: PiTaiRegistrar;
   contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
-  sessionTitle: PiTaiRegistrar;
   sidebar: PiTaiRegistrar;
   cmux: PiTaiRegistrar;
   notifications: PiTaiRegistrar;
@@ -74,8 +64,6 @@ const productionRegistrars: PiTaiRegistrars = {
   keybindings: (pi, runtime) => registerFirstPartyKeybindings(pi, runtime.agentDir),
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   compaction: (pi, runtime) => registerAutoCompaction(pi, runtime.config),
-  // I09: durable task tools are authoritative; update_plan remains injectable only for legacy test/package consumers.
-  workContext: () => undefined,
   contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
   responseEditor: (pi) => {
     registerResponseEditor(pi);
@@ -91,9 +79,6 @@ const productionRegistrars: PiTaiRegistrars = {
       ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });
   },
-  sessionTitle: (pi, runtime) => {
-    registerSessionTitle(pi, runtime.config, runtime.titleGenerator);
-  },
   sidebar: (pi) => registerBtw(pi),
   cmux: async (pi, runtime) => {
     await registerCmux(pi, runtime.config);
@@ -101,12 +86,9 @@ const productionRegistrars: PiTaiRegistrars = {
   notifications: (pi, runtime) => {
     registerNotifications(pi, runtime.config, runtime.notificationSender);
   },
-  guardian: (pi, runtime) =>
-    registerApprovalGuardian(pi, {
-      workContext: () => runtime.workContext.current(),
-    }),
-  footer: (pi, runtime) => {
-    registerFooter(pi, runtime.workContext);
+  guardian: (pi) => registerApprovalGuardian(pi),
+  footer: (pi) => {
+    registerFooter(pi);
   },
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
@@ -117,8 +99,6 @@ function createProductionRuntime(): PiTaiRuntime {
   return {
     mode: "pi-cli",
     config: createPiTaiConfigService(),
-    workContext: createPiSessionWorkContextStore(),
-    titleGenerator: generateModelTitle,
     queryTerminalBackground,
     notificationSender: sendNativeTerminalNotification,
     agentDir: getAgentDir(),
@@ -134,12 +114,10 @@ export function createPiTaiExtension(
     await registrars.keybindings(pi, runtime);
     await registrars.config(pi, runtime);
     await registrars.compaction(pi, runtime);
-    await registrars.workContext(pi, runtime);
     await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);
-    await registrars.sessionTitle(pi, runtime);
     await registrars.sidebar(pi, runtime);
     await registrars.cmux(pi, runtime);
     await registrars.notifications(pi, runtime);

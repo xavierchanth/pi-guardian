@@ -16,18 +16,14 @@ import {
   DEFAULT_CLIENT_PREFERENCES,
   DEFAULT_HOST_MACHINE_CONFIG,
   DEFAULT_SESSION_POLICY,
-  TITLE_EFFORTS,
   type AnsiThemeConfig,
   type CmuxConfig,
   type CompactionConfig,
   type NotificationsConfig,
   type ResolvedPiTaiConfig,
-  type SessionTitleConfig,
-  type TitleEffort,
 } from "./schema.ts";
 
 interface PartialPiTaiConfig {
-  sessionTitle?: Partial<SessionTitleConfig>;
   ansiTheme?: Partial<AnsiThemeConfig>;
   notifications?: Partial<NotificationsConfig>;
   cmux?: Partial<CmuxConfig>;
@@ -66,11 +62,6 @@ export function loadPiTaiConfig(options: LoadPiTaiConfigOptions): LoadedPiTaiCon
 
   const config: ResolvedPiTaiConfig = Object.freeze({
     sessionPolicy: Object.freeze({
-      sessionTitle: Object.freeze({
-        ...DEFAULT_SESSION_POLICY.sessionTitle,
-        ...global.sessionTitle,
-        ...project.sessionTitle,
-      }),
       compaction: Object.freeze({
         ...DEFAULT_SESSION_POLICY.compaction,
         ...global.compaction,
@@ -141,7 +132,6 @@ function readConfig(
 
   for (const key of Object.keys(value)) {
     if (
-      key !== "sessionTitle" &&
       key !== "ansiTheme" &&
       key !== "notifications" &&
       key !== "cmux" &&
@@ -154,7 +144,6 @@ function readConfig(
 
   return {
     config: {
-      sessionTitle: parseSessionTitle(value.sessionTitle, path, warnings),
       ansiTheme: parseAnsiTheme(value.ansiTheme, path, warnings),
       notifications: parseNotifications(value.notifications, path, warnings),
       cmux: parseCmux(value.cmux, path, warnings),
@@ -232,53 +221,6 @@ function valueAt(config: PartialPiTaiConfig, path: string): unknown {
     value = value[key];
   }
   return value;
-}
-
-function parseSessionTitle(
-  value: unknown,
-  path: string,
-  warnings: string[],
-): Partial<SessionTitleConfig> | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    warnings.push(`Invalid sessionTitle in ${path}: expected an object.`);
-    return undefined;
-  }
-
-  warnUnknown(
-    value,
-    new Set(["provider", "model", "effort", "maxWords", "fallback"]),
-    "sessionTitle",
-    path,
-    warnings,
-  );
-  const result: Partial<SessionTitleConfig> = {};
-  assignNonEmptyString(value, "provider", result, path, warnings);
-  assignNonEmptyString(value, "model", result, path, warnings);
-
-  if (value.effort !== undefined) {
-    if (typeof value.effort === "string" && TITLE_EFFORTS.includes(value.effort as TitleEffort)) {
-      result.effort = value.effort as TitleEffort;
-    } else {
-      warnings.push(`Invalid sessionTitle.effort in ${path}.`);
-    }
-  }
-  if (value.maxWords !== undefined) {
-    if (
-      Number.isInteger(value.maxWords) &&
-      (value.maxWords as number) >= 1 &&
-      (value.maxWords as number) <= 20
-    ) {
-      result.maxWords = value.maxWords as number;
-    } else {
-      warnings.push(`Invalid sessionTitle.maxWords in ${path}: expected an integer from 1 to 20.`);
-    }
-  }
-  if (value.fallback !== undefined) {
-    if (value.fallback === "heuristic") result.fallback = "heuristic";
-    else warnings.push(`Invalid sessionTitle.fallback in ${path}: expected heuristic.`);
-  }
-  return result;
 }
 
 function parseAnsiTheme(

@@ -1,1 +1,1 @@
-{"sessionTitle":{"provider":"u","model":"um","effort":"low","maxWords":8,"fallback":"heuristic"},"modelProfiles":[{"name":"u","provider":"p","model":"m","effort":"low"}]}
+{"modelProfiles":[{"name":"u","provider":"p","model":"m","effort":"low"}]}

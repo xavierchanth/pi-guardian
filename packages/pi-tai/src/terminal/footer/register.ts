@@ -1,16 +1,15 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { WorkContextStore } from "../../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
 
-export function registerFooter(pi: ExtensionAPI, workContext: WorkContextStore): void {
+export function registerFooter(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 
     ctx.ui.setFooter((_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
-        return renderFooterRows(createSnapshot(pi, ctx, workContext), width).map(
+        return renderFooterRows(createSnapshot(pi, ctx), width).map(
           (row) => theme.fg(row.leftColor, row.left) + theme.fg("text", row.padding + row.right),
         );
       },
@@ -18,11 +17,7 @@ export function registerFooter(pi: ExtensionAPI, workContext: WorkContextStore):
   });
 }
 
-function createSnapshot(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  workContext: WorkContextStore,
-): FooterSnapshot {
+function createSnapshot(pi: ExtensionAPI, ctx: ExtensionContext): FooterSnapshot {
   const usage: FooterUsage = {
     input: 0,
     output: 0,
@@ -42,20 +37,11 @@ function createSnapshot(
     usage.cost += entryUsage.cost.total;
   }
 
-  const work = workContext.current();
-  const activeIndex = work?.plan.findIndex((item) => item.status === "in_progress") ?? -1;
-  const active = activeIndex >= 0 ? work?.plan[activeIndex] : undefined;
-  const complete = Boolean(
-    work?.plan.length && work.plan.every((item) => item.status === "completed"),
-  );
   const context = ctx.getContextUsage();
   const model = ctx.model;
   return {
     cwd: ctx.cwd,
-    goal: work?.goal,
-    currentStep: active?.content ?? (complete ? "Complete" : undefined),
-    currentStepNumber: active ? activeIndex + 1 : complete ? work?.plan.length : undefined,
-    totalSteps: work?.plan.length ?? 0,
+    totalSteps: 0,
     usage,
     contextWindow: context?.contextWindow ?? model?.contextWindow ?? 0,
     contextPercent: context?.percent ?? null,

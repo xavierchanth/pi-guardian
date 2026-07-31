@@ -7,7 +7,6 @@ The core is the reusable implementation of Pi-Tai's session and agent behavior. 
 ## Responsibilities
 
 - session runtime semantics;
-- work context and task plans;
 - agent definitions, role authority, and routing;
 - parent/child concurrency and usage accounting;
 - Guardian policy and review requests;
@@ -23,7 +22,6 @@ Representative only:
 ```ts
 interface PiTaiCore {
   sessions: SessionRuntime;
-  workContext: WorkContextService;
   agents: AgentCoordinator;
   guardian: ActionReviewer;
   workspaces: WorkspaceCoordinator;
@@ -55,13 +53,11 @@ Ports describe behavior, not implementation technology. SQLite, Pi journals, Uni
 
 ### Sessions
 
-Validates foreground operations, context continuation, work context, usage, and lifecycle emissions. Product identity remains supplied by the Host.
+Validates foreground operations, context continuation, usage, and lifecycle emissions. Product identity remains supplied by the Host.
 
 ### Agents and concurrency
 
 Owns task packets, role graph, child contexts, events, acknowledgement, waits, restart intent, file/workspace coordination, and completion gates. See [Concurrency](../concurrency/README.md).
-
-### Work context
 
 Provides:
 

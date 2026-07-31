@@ -117,17 +117,10 @@ The direct Pi extension reads these files at session start:
 <project>/.pi/pi-tai.json
 ```
 
-Project configuration is loaded only for a trusted project. It may override unprivileged compaction and client-preference fields, but model-selecting `sessionTitle` and `modelProfiles` values are ignored with a warning. Host-managed sessions instead have the Host resolve and pin session policy at creation; their runtime worker does not reread these files. See [Pi-Tai settings](SETTINGS.md) for ownership, precedence, field constraints, and defaults.
+Project configuration is loaded only for a trusted project. It may override unprivileged compaction and client-preference fields, but model-selecting `modelProfiles` values are ignored with a warning. Host-managed sessions instead have the Host resolve and pin session policy at creation; their runtime worker does not reread these files. See [Pi-Tai settings](SETTINGS.md) for ownership, precedence, field constraints, and defaults.
 
 ```json
 {
-  "sessionTitle": {
-    "provider": "provider-id",
-    "model": "luna-model-id",
-    "effort": "minimal",
-    "maxWords": 6,
-    "fallback": "heuristic"
-  },
   "ansiTheme": {
     "darkTheme": "ansi-dark",
     "lightTheme": "ansi-light",

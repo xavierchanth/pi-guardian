@@ -14,7 +14,6 @@ export interface FieldDescriptor {
 }
 
 /**
- * Keyed by dotted path into ResolvedPiTaiConfig, e.g. "sessionPolicy.sessionTitle.provider".
  * A flat record rather than a nested structure so it ports directly to a Rust HashMap in
  * I13 D9 and serializes cleanly for a future `/config explain`.
  */
@@ -22,11 +21,6 @@ export type ConfigProvenance = Readonly<Record<string, FieldOrigin>>;
 
 export const FIELD_DESCRIPTORS: Readonly<Record<string, FieldDescriptor>> = Object.freeze({
   // SessionPolicy — privileged: selects models and spends tokens
-  "sessionPolicy.sessionTitle.provider": { scope: "session", privileged: true },
-  "sessionPolicy.sessionTitle.model": { scope: "session", privileged: true },
-  "sessionPolicy.sessionTitle.effort": { scope: "session", privileged: true },
-  "sessionPolicy.sessionTitle.maxWords": { scope: "session", privileged: true },
-  "sessionPolicy.sessionTitle.fallback": { scope: "session", privileged: true },
   // SessionPolicy — unprivileged: pure agent behavior
   "sessionPolicy.compaction.enabled": { scope: "session", privileged: false },
   "sessionPolicy.compaction.thresholdPercent": { scope: "session", privileged: false },

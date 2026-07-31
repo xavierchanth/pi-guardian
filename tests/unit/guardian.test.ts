@@ -25,7 +25,6 @@ import {
   type ReviewRequest,
   type ReviewResult,
 } from "../../packages/pi-tai/src/core/guardian/reviewer.ts";
-import type { WorkContextSnapshot } from "../../packages/pi-tai/src/work-context/domain.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -139,13 +138,18 @@ test("ordinary agent bash calls get fresh reviews", async () => {
 });
 
 test("inside-boundary unignored built-in file tools bypass model review", async () => {
+  const { workspace } = await gitFixture();
+  await writeFile(join(workspace, "package.json"), "{}\n");
   let reviews = 0;
   const { handler } = registerWith(async () => {
     reviews++;
     return allow();
   });
 
-  const result = await handler(toolEvent("read", { path: "package.json" }), fakeContext());
+  const result = await handler(toolEvent("read", { path: "package.json" }), {
+    ...fakeContext(),
+    cwd: workspace,
+  });
   assert.equal(result, undefined);
   assert.equal(reviews, 0);
 });
@@ -397,16 +401,11 @@ test("read-only tools may inspect configured skill and Pi roots without allowing
   }
 });
 
-test("review prompt preserves roles, action, evidence, work context, and autonomy doctrine", () => {
+test("review prompt preserves roles, action, evidence, and autonomy doctrine", () => {
   const action = {
     toolName: "bash",
     arguments: { command: "rg token src" },
     cwd: "/workspace",
-  };
-  const workContext: WorkContextSnapshot = {
-    goal: "Inspect the repository",
-    explanation: "Confirm the exact target",
-    plan: [{ content: "Search source", status: "in_progress" }],
   };
   const prompt = buildReviewPrompt(
     [
@@ -415,7 +414,6 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
       { role: "toolResult", content: "previous failure" },
     ],
     action,
-    workContext,
     { triggers: ["gitignored"] },
   );
 
@@ -423,8 +421,6 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
   assert.match(prompt, /Inspect the implementation/);
   assert.match(prompt, /role="assistant"/);
   assert.match(prompt, /previous failure/);
-  assert.match(prompt, /<work_context>/);
-  assert.match(prompt, /Inspect the repository/);
   assert.match(prompt, /<review_evidence>/);
   assert.match(prompt, /gitignored/);
   assert.match(prompt, /"command":"rg token src"/);
@@ -434,27 +430,6 @@ test("review prompt preserves roles, action, evidence, work context, and autonom
   assert.match(REVIEWER_SYSTEM_PROMPT, /development SaaS backend/);
   assert.match(REVIEWER_SYSTEM_PROMPT, /linting, tests, builds, benchmarks/);
   assert.match(REVIEWER_SYSTEM_PROMPT, /Authenticated development deployments, remote checks/);
-});
-
-test("every bash review receives the latest structured work context explicitly", async () => {
-  const snapshot: WorkContextSnapshot = {
-    goal: "Ship Guardian",
-    plan: [
-      { content: "Implement review", status: "completed" },
-      { content: "Verify behavior", status: "in_progress", priority: "high" },
-    ],
-  };
-  let request: ReviewRequest | undefined;
-  const { handler } = registerWith(
-    async (received) => {
-      request = received;
-      return allow();
-    },
-    () => snapshot,
-  );
-
-  await handler(bashEvent("npm test"), fakeContext());
-  assert.deepEqual(request?.workContext, snapshot);
 });
 
 test("strict parser allows ordinary work and makes every related high-risk action human-only", () => {
@@ -842,10 +817,7 @@ async function gitFixture() {
   return { workspace, agentDir };
 }
 
-function registerWith(
-  reviewer: (request: ReviewRequest) => Promise<ReviewResult>,
-  workContext?: () => WorkContextSnapshot | undefined,
-) {
+function registerWith(reviewer: (request: ReviewRequest) => Promise<ReviewResult>) {
   let handler: (event: never, ctx: never) => Promise<unknown> = async () => undefined;
   const emitted: Array<{ name: string; data: unknown }> = [];
   const recorded: any[] = [];
@@ -869,7 +841,6 @@ function registerWith(
   } as unknown as ExtensionAPI;
   registerApprovalGuardian(pi, {
     reviewer,
-    workContext,
     recorder: async (input) => {
       recorded.push(input);
     },

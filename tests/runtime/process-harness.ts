@@ -103,7 +103,6 @@ export class RuntimeProcessHarness {
 
 export const pinnedPolicyParams = {
   sessionPolicy: {
-    sessionTitle: { effort: "minimal", maxWords: 6, fallback: "heuristic" },
     compaction: { enabled: true, thresholdPercent: 90 },
     modelProfiles: [
       { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },

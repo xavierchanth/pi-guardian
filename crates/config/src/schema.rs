@@ -3,17 +3,6 @@ use specta::Type;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum TitleEffort {
-    Minimal,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
 pub enum ThinkingEffort {
     Off,
     Minimal,
@@ -22,18 +11,6 @@ pub enum ThinkingEffort {
     High,
     Xhigh,
     Max,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTitleConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    pub effort: TitleEffort,
-    pub max_words: u32,
-    pub fallback: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
@@ -56,7 +33,6 @@ pub struct ModelProfile {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPolicy {
-    pub session_title: SessionTitleConfig,
     pub compaction: CompactionConfig,
     pub model_profiles: Vec<ModelProfile>,
 }
@@ -105,13 +81,6 @@ pub struct ResolvedPiTaiConfig {
 pub fn default_config() -> ResolvedPiTaiConfig {
     ResolvedPiTaiConfig {
         session_policy: SessionPolicy {
-            session_title: SessionTitleConfig {
-                provider: None,
-                model: None,
-                effort: TitleEffort::Minimal,
-                max_words: 6,
-                fallback: "heuristic".into(),
-            },
             compaction: CompactionConfig {
                 enabled: true,
                 threshold_percent: 90.0,

@@ -109,7 +109,8 @@ export async function checkFileToolPath(
       );
     }
 
-    const sensitive = sensitiveTrigger(target, workspace);
+    const readBoundary = readRoots.find((root) => contains(root, target.canonicalPath));
+    const sensitive = sensitiveTrigger(target, readBoundary ?? workspace);
     if (sensitive) {
       return review(target, requestedPath, sensitive.trigger, sensitive.detail);
     }
@@ -344,7 +345,7 @@ function deny(canonicalPath: string, reason: string): PathDecision {
  * `<root>/src/core/guardian/paths.ts`.
  */
 function piTaiPackageRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }
 
 function findPiPackageRoot(entry: string | undefined): string | undefined {

@@ -10,7 +10,6 @@ import {
   type PathReviewEvidence,
 } from "./paths.ts";
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
-import type { WorkContextSnapshot } from "../../work-context/domain.ts";
 import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../terminal/notifications/events.ts";
 import {
   isDestructiveCandidate,
@@ -32,7 +31,6 @@ export interface HumanExecutionRequiredNotice {
 export interface GuardianOptions {
   reviewer?: ActionReviewer;
   recorder?: GuardianReviewRecorder;
-  workContext?: () => WorkContextSnapshot | undefined;
   delegationStoreRoot?: string;
   onHumanExecutionRequired?: (notice: HumanExecutionRequiredNotice) => void | Promise<void>;
 }
@@ -75,7 +73,6 @@ export function registerApprovalGuardian(pi: ExtensionAPI, options: GuardianOpti
     let result: ReviewResult;
     let canonicalCwd: string;
     const messages = collectConversation(ctx);
-    const workContext = options.workContext?.();
     let action: ReviewRequest["action"];
     try {
       canonicalCwd = await canonicalizeCwd(ctx.cwd);
@@ -88,7 +85,6 @@ export function registerApprovalGuardian(pi: ExtensionAPI, options: GuardianOpti
         modelRegistry: ctx.modelRegistry,
         cwd: canonicalCwd,
         messages,
-        workContext,
         reviewEvidence,
         action,
         signal: ctx.signal,
@@ -110,7 +106,6 @@ export function registerApprovalGuardian(pi: ExtensionAPI, options: GuardianOpti
         result,
         action,
         messages,
-        workContext,
         reviewEvidence,
         mode: ctx.mode,
         sessionId: ctx.sessionManager.getSessionId(),

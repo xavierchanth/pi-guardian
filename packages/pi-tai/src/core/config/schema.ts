@@ -1,17 +1,5 @@
 import { DEFAULT_MODEL_PROFILES, type ModelProfile } from "../model-profiles/domain.ts";
 
-export const TITLE_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
-export type TitleEffort = (typeof TITLE_EFFORTS)[number];
-
-export interface SessionTitleConfig {
-  provider?: string;
-  model?: string;
-  effort: TitleEffort;
-  maxWords: number;
-  fallback: "heuristic";
-}
-
 export interface AnsiThemeConfig {
   darkTheme: string;
   lightTheme: string;
@@ -37,7 +25,6 @@ export interface CompactionConfig {
  * resolved by the authority that owns the session rather than by whichever client is attached.
  */
 export interface SessionPolicy {
-  sessionTitle: SessionTitleConfig;
   compaction: CompactionConfig;
   modelProfiles: readonly ModelProfile[];
 }
@@ -66,11 +53,6 @@ export interface ResolvedPiTaiConfig {
 }
 
 export const DEFAULT_SESSION_POLICY: SessionPolicy = Object.freeze({
-  sessionTitle: Object.freeze({
-    effort: "minimal",
-    maxWords: 6,
-    fallback: "heuristic",
-  }),
   compaction: Object.freeze({
     enabled: true,
     thresholdPercent: 90,

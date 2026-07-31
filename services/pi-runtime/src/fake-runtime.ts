@@ -32,7 +32,7 @@ export class FakeRuntimePort implements RuntimePort {
     return {
       methods: [],
       tools: [],
-      commands: ["continue", "plan-status"],
+      commands: ["continue"],
       extensionErrors: [],
     };
   }

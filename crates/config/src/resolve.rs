@@ -105,7 +105,6 @@ fn parse_layer(
     }
     for key in object.keys() {
         if ![
-            "sessionTitle",
             "ansiTheme",
             "notifications",
             "cmux",
@@ -118,12 +117,6 @@ fn parse_layer(
         }
     }
     let mut result = BTreeMap::new();
-    parse_session_title(
-        object.get("sessionTitle"),
-        &layer.path,
-        warnings,
-        &mut result,
-    );
     parse_ansi_theme(object.get("ansiTheme"), &layer.path, warnings, &mut result);
     parse_notifications(
         object.get("notifications"),
@@ -206,62 +199,6 @@ fn put(out: &mut BTreeMap<String, Value>, path: &str, value: impl Into<Value>) {
     out.insert(path.into(), value.into());
 }
 
-fn parse_session_title(
-    value: Option<&Value>,
-    path: &str,
-    warnings: &mut Vec<String>,
-    out: &mut BTreeMap<String, Value>,
-) {
-    let Some(v) = object(value, "sessionTitle", path, warnings) else {
-        return;
-    };
-    unknowns(
-        v,
-        &["provider", "model", "effort", "maxWords", "fallback"],
-        "sessionTitle",
-        path,
-        warnings,
-    );
-    for key in ["provider", "model"] {
-        if let Some(value) = v.get(key) {
-            if let Some(s) = string(value) {
-                put(out, &format!("sessionPolicy.sessionTitle.{key}"), s);
-            } else {
-                warnings.push(format!(
-                    "Invalid {key} in {path}: expected a non-empty string."
-                ));
-            }
-        }
-    }
-    if let Some(value) = v.get("effort") {
-        if value
-            .as_str()
-            .is_some_and(|v| ["minimal", "low", "medium", "high", "xhigh", "max"].contains(&v))
-        {
-            put(out, "sessionPolicy.sessionTitle.effort", value.clone());
-        } else {
-            warnings.push(format!("Invalid sessionTitle.effort in {path}."));
-        }
-    }
-    if let Some(value) = v.get("maxWords") {
-        if let Some(number) = json_u64(value).filter(|v| (1..=20).contains(v)) {
-            put(out, "sessionPolicy.sessionTitle.maxWords", number);
-        } else {
-            warnings.push(format!(
-                "Invalid sessionTitle.maxWords in {path}: expected an integer from 1 to 20."
-            ));
-        }
-    }
-    if let Some(value) = v.get("fallback") {
-        if value == "heuristic" {
-            put(out, "sessionPolicy.sessionTitle.fallback", value.clone());
-        } else {
-            warnings.push(format!(
-                "Invalid sessionTitle.fallback in {path}: expected heuristic."
-            ));
-        }
-    }
-}
 fn parse_ansi_theme(
     value: Option<&Value>,
     path: &str,
@@ -468,23 +405,6 @@ fn apply(
 ) {
     for (path, value) in values {
         match path.as_str() {
-            "sessionPolicy.sessionTitle.provider" => {
-                config.session_policy.session_title.provider = serde_json::from_value(value).ok()
-            }
-            "sessionPolicy.sessionTitle.model" => {
-                config.session_policy.session_title.model = serde_json::from_value(value).ok()
-            }
-            "sessionPolicy.sessionTitle.effort" => {
-                config.session_policy.session_title.effort = serde_json::from_value(value).unwrap()
-            }
-            "sessionPolicy.sessionTitle.maxWords" => {
-                config.session_policy.session_title.max_words =
-                    serde_json::from_value(value).unwrap()
-            }
-            "sessionPolicy.sessionTitle.fallback" => {
-                config.session_policy.session_title.fallback =
-                    serde_json::from_value(value).unwrap()
-            }
             "sessionPolicy.compaction.enabled" => {
                 config.session_policy.compaction.enabled = serde_json::from_value(value).unwrap()
             }

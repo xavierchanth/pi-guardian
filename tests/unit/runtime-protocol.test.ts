@@ -41,7 +41,6 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
 
 test("session create policy round trips through strict method schemas", () => {
   const policy = {
-    sessionTitle: { effort: "minimal", maxWords: 6, fallback: "heuristic" },
     compaction: { enabled: true, thresholdPercent: 90 },
     modelProfiles: [
       { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },

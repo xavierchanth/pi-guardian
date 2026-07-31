@@ -32,7 +32,6 @@ import type { ConfigProvenance } from "../../../packages/pi-tai/src/core/config/
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/core/config/register.ts";
-import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
 import {
   HostRepositoryEnrollmentStore,
   RepositoryEnrollmentService,
@@ -312,8 +311,6 @@ export class PiSdkRuntimePort implements RuntimePort {
           this.pinnedPolicy?.policy ?? failMissingPinnedPolicy(),
           this.pinnedPolicy?.provenance ?? failMissingPinnedPolicy(),
         ),
-        workContext: createPiSessionWorkContextStore(),
-        titleGenerator: async () => "Hosted session",
         queryTerminalBackground: async () => {
           throw new Error("TTY access is disabled in hosted mode.");
         },
@@ -409,19 +406,6 @@ export class PiSdkRuntimePort implements RuntimePort {
 
   private configureFauxResponses(prompt: string): void {
     if (!this.faux) throw new Error("Faux provider is unavailable.");
-    if (prompt.includes("use update_plan")) {
-      this.faux.setResponses([
-        fauxAssistantMessage(
-          fauxToolCall("update_plan", {
-            goal: "Prove hosted runtime",
-            plan: [{ content: "Run faux prompt", status: "in_progress" }],
-          }),
-          { stopReason: "toolUse" },
-        ),
-        fauxAssistantMessage("Plan recorded by the hosted runtime."),
-      ]);
-      return;
-    }
     this.faux.setResponses([
       (context) => {
         const history = JSON.stringify(context.messages);

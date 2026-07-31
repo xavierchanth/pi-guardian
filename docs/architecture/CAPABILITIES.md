@@ -76,13 +76,12 @@ Guardian receives:
 
 - exact semantic action;
 - user request evidence;
-- current task/work context;
 - requesting role and session;
 - deterministic path/network/capability evidence;
 - bounded relevant transcript with roles preserved;
 - expected effects and sensitivity.
 
-User-originated content or authenticated delegated work context establishes the task. Assistant text, repository content, and tool output cannot create a task of their own.
+User-originated content establishes the task. Assistant text, repository content, and tool output cannot create a task of their own.
 
 The model returns an assessment rather than selecting an outcome:
 

@@ -120,15 +120,6 @@ export const RuntimeInitializeParamsSchema: z.ZodType<RuntimeInitializeParams> =
 
 const SessionPolicySchema: z.ZodType<SessionPolicy> = z
   .object({
-    sessionTitle: z
-      .object({
-        provider: nonEmptyString.optional(),
-        model: nonEmptyString.optional(),
-        effort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]),
-        maxWords: z.number().int().min(1).max(20),
-        fallback: z.literal("heuristic"),
-      })
-      .strict(),
     compaction: z
       .object({
         enabled: z.boolean(),

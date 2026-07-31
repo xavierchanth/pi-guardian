@@ -210,7 +210,7 @@ export type SessionCreateParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Deserialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
@@ -221,7 +221,7 @@ export type SessionCreateParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Serialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
 };
@@ -240,7 +240,7 @@ export type SessionOpenParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Deserialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
@@ -251,21 +251,12 @@ export type SessionOpenParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Serialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
 };
 
-export type SessionPolicy = SessionPolicy_Serialize | SessionPolicy_Deserialize;
-
-export type SessionPolicy_Deserialize = {
-	sessionTitle: SessionTitleConfig_Deserialize,
-	compaction: CompactionConfig,
-	modelProfiles: ModelProfile[],
-};
-
-export type SessionPolicy_Serialize = {
-	sessionTitle: SessionTitleConfig_Serialize,
+export type SessionPolicy = {
 	compaction: CompactionConfig,
 	modelProfiles: ModelProfile[],
 };
@@ -293,24 +284,6 @@ export type SessionTextParams = {
 	text: string,
 };
 
-export type SessionTitleConfig = SessionTitleConfig_Serialize | SessionTitleConfig_Deserialize;
-
-export type SessionTitleConfig_Deserialize = {
-	provider?: string | null,
-	model?: string | null,
-	effort: TitleEffort,
-	maxWords: number,
-	fallback: string,
-};
-
-export type SessionTitleConfig_Serialize = {
-	provider?: string | null,
-	model?: string | null,
-	effort: TitleEffort,
-	maxWords: number,
-	fallback: string,
-};
-
 export type SessionTitleData = SessionTitleData_Serialize | SessionTitleData_Deserialize;
 
 export type SessionTitleData_Deserialize = {
@@ -332,8 +305,6 @@ export type ThinkingInfo = {
 };
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export type TitleEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ToolLifecycleData = ToolLifecycleData_Serialize | ToolLifecycleData_Deserialize;
 

@@ -132,15 +132,6 @@ async function smoke(
   const sessionFile = created.result.sessionFile as string;
   const sessionId = created.result.sessionId as string;
   const idleRssKiB = await rss(worker.child.pid);
-  await worker.command("plan", "session.prompt", { turnId: "turn-plan", text: "use update_plan" });
-  await worker.waitFor((frame) => frame.event === "session.idle" && frame.turnId === "turn-plan");
-  if (
-    !worker.frames.some(
-      (frame) => frame.event === "tool.end" && frame.data.toolName === "update_plan",
-    )
-  ) {
-    throw new Error("packaged Pi-Tai update_plan execution missing");
-  }
   await worker.command("persist", "session.prompt", {
     turnId: "turn-persist",
     text: "first persisted turn",
@@ -205,7 +196,7 @@ async function smoke(
   }
   const diagnostics = `${worker.stderr}\n${reopened.stderr}`;
   if (
-    ["use update_plan", "slow response", "first persisted turn", "verify history"].some((prompt) =>
+    ["slow response", "first persisted turn", "verify history"].some((prompt) =>
       diagnostics.includes(prompt),
     )
   ) {

@@ -13,7 +13,6 @@ import {
   type ProposedAction,
   type ReviewDecision,
 } from "./policy.ts";
-import type { WorkContextSnapshot } from "../../work-context/domain.ts";
 
 export const REVIEWER_MODEL = "openai-codex/codex-auto-review";
 export const REVIEW_TIMEOUT_MS = 30_000;
@@ -30,7 +29,6 @@ export interface ReviewRequest {
   modelRegistry: ModelRegistry;
   cwd: string;
   messages: readonly unknown[];
-  workContext?: WorkContextSnapshot;
   reviewEvidence?: unknown;
   action: ProposedAction;
   signal?: AbortSignal;
@@ -87,14 +85,7 @@ export function createModelReviewer(dependencies: ReviewerDependencies = {}) {
       );
       session = await raceAbort(sessionPromise, signal);
       await raceAbort(
-        session.prompt(
-          buildReviewPrompt(
-            request.messages,
-            request.action,
-            request.workContext,
-            request.reviewEvidence,
-          ),
-        ),
+        session.prompt(buildReviewPrompt(request.messages, request.action, request.reviewEvidence)),
         signal,
         session,
       );
