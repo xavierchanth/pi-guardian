@@ -10,7 +10,7 @@ import {
   type PathReviewEvidence,
 } from "./paths.ts";
 import { reviewAction, type ReviewRequest, type ReviewResult } from "./reviewer.ts";
-import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../terminal/notifications/events.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "./events.ts";
 import {
   isDestructiveCandidate,
   preflightManagedSubagentCleanup,

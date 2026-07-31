@@ -1,9 +1,4 @@
-import {
-  fauxAssistantMessage,
-  fauxProvider,
-  fauxToolCall,
-  type FauxProviderHandle,
-} from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, type FauxProviderHandle } from "@earendil-works/pi-ai";
 import {
   ModelRuntime,
   SessionManager,
@@ -27,20 +22,18 @@ import type {
   SessionTextParams,
   ThinkingInfo,
 } from "@pi-tai/runtime-protocol";
-import type { SessionPolicy } from "../../../packages/pi-tai/src/core/config/schema.ts";
-import type { ConfigProvenance } from "../../../packages/pi-tai/src/core/config/provenance.ts";
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
-import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/core/config/register.ts";
 import {
+  createPinnedPiTaiConfigService,
   HostRepositoryEnrollmentStore,
-  RepositoryEnrollmentService,
-} from "../../../packages/pi-tai/src/core/jj/repository-enrollment.ts";
-import {
   HostRepositoryMutationCoordinator,
   HostSessionWorkspaceStore,
+  RepositoryEnrollmentService,
   SessionWorkspaceService,
-} from "../../../packages/pi-tai/src/core/jj/session-workspace.ts";
+  type ConfigProvenance,
+  type SessionPolicy,
+} from "../../../packages/pi-tai/core.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
 import type { HostServicePort } from "./host-services.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";

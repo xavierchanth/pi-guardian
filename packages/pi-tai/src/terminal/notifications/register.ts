@@ -2,7 +2,10 @@ import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isCmuxIntegrationActive } from "../cmux/register.ts";
 import type { ClientPreferencesReader } from "../../core/config/register.ts";
-import { GUARDIAN_REVIEW_FAILED_EVENT, type GuardianReviewFailedEvent } from "./events.ts";
+import {
+  GUARDIAN_REVIEW_FAILED_EVENT,
+  type GuardianReviewFailedEvent,
+} from "../../core/guardian/events.ts";
 import { sendNativeTerminalNotification, type NotificationSender } from "./native.ts";
 
 const MAX_IDENTITY_LENGTH = 80;

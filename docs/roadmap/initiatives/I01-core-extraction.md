@@ -35,17 +35,13 @@ These leave the runtime path entirely: the `session_start` configuration reload 
 
 ## Two structural blockers
 
-### The runtime worker reaches into the extension's source directory
+### The runtime worker source-directory reach-in (resolved structural slice)
 
-`services/pi-runtime/src/pi-runtime.ts:32-37` imports six modules from `packages/pi-tai` by relative path (`../../../packages/pi-tai/pi-tai.ts`, `src/config/register.ts`, `src/work-context/persistence.ts`, `src/jj/repository-enrollment.ts`, `src/jj/session-workspace.ts`).
-
-This violates `REPOSITORY.md` — "No top-level application reaches into another application's source directory" — and is the concrete mechanism by which the worker acquires the filesystem configuration authority that I13 D4 removes. It is also the seam extraction has to cut: these six imports are approximately the real surface area of `@pi-tai/core` as the worker uses it today.
-
-Resolve it as part of extraction rather than by adding a package alias, so the import list is forced to become an intentional public surface instead of an accident of path depth. The extraction is cheaper than it looks: `jj/`, `workspaces/`, and the non-`register` half of `concurrency/` — roughly 65 files — already have no Pi imports at all, and several remaining couplings are type-only or a single helper (`getAgentDir`, `CONFIG_DIR_NAME`, `truncateToWidth`, `AssistantMessage`).
+The worker now imports extension composition from `packages/pi-tai/pi-tai.ts` and reusable services from the stable `packages/pi-tai/core.ts` facade. Repository tests prohibit deep imports from apps, bins, and services. This removes the original source-directory blocker without claiming the broader `@pi-tai/core` package extraction is complete.
 
 ### `subagents/register.ts` must be dismantled
 
-The file is approximately 2,190 lines. It mixes dependency wiring, tool schema definitions, Host projection publishing, and a TUI widget; `:166` is a single filter expression spanning three nested ternaries over workspace phases. **This is the file that must be dismantled when the Pi extension shell goes away**, so every tool added to it is deferred cost.
+The registrar has been reduced from its historical size to roughly 700 lines, and dashboard rendering, lifecycle management, backend logic, catalogs, and workspace isolation now have explicit modules under `src/core/subagents`. It still combines nine-tool declarations with registration wiring. Splitting those remaining concerns is honestly deferred until shared ACP declarations require it; doing so mechanically in this bounded structural slice would risk the preserved public tool contract.
 
 Split along the seams already present: wiring, tool declarations, host projection, UI. Declare tools as data — a `tools/` module exporting `{ name, schema, handler }` — with `pi.registerTool` as one thin adapter over it. The ACP and Host surfaces then reuse the same declarations instead of reimplementing them, and client productization becomes adapter isolation rather than a rewrite.
 

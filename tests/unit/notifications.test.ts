@@ -5,7 +5,7 @@ import {
   DEFAULT_CLIENT_PREFERENCES,
   type NotificationsConfig,
 } from "../../packages/pi-tai/src/core/config/schema.ts";
-import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/terminal/notifications/events.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/core/guardian/events.ts";
 import { terminalNotificationSequence } from "../../packages/pi-tai/src/terminal/notifications/native.ts";
 import { registerNotifications } from "../../packages/pi-tai/src/terminal/notifications/register.ts";
 

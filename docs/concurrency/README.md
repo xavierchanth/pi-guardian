@@ -6,13 +6,14 @@ why it is shaped the way it is.
 
 Two modules do the work, and they know almost nothing about each other:
 
-- **`src/isolation/`** manages JJ workspaces. It has no concept of an agent — a
+- **`src/core/isolation/`** manages JJ workspaces. It has no concept of an agent — a
   workspace is a directory plus a range of changes, and its owner is an opaque label.
-- **`src/agents/`** manages subagents. It has no concept of version control — a
+- **`src/core/subagents/`** coherently owns subagent tools, backends, catalogs,
+  lifecycle, and dashboard. Its manager has no concept of version control — a
   subagent gets a working directory, and where that directory came from is not its
   problem.
 
-`src/agents/isolated.ts` is the only place they meet. Keeping them apart means a
+`src/core/subagents/isolated.ts` is the only place they meet. Keeping them apart means a
 failure in version control is diagnosable without reasoning about process spawning,
 and vice versa.
 
@@ -172,7 +173,7 @@ request.
 The OpenCode Go aliases require OpenCode credentials configured in Pi under the
 `opencode-go` provider (`OPENCODE_API_KEY` or `/login`). The versioned source of
 truth for every alias, provider/model ID, default effort, compatible harness, and
-purpose is [`src/agents/models.json`](../../packages/pi-tai/src/agents/models.json).
+purpose is [`src/core/subagents/models.json`](../../packages/pi-tai/src/core/subagents/models.json).
 Pi-Tai validates that catalog when it loads and refuses malformed or incompatible
 entries.
 

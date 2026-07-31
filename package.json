@@ -1,7 +1,7 @@
 {
   "name": "pi-tai",
   "version": "0.1.0",
-  "description": "A guarded Pi distribution with durable task context, managed isolated workspaces, a Design–Plan–Implement–Confirm subagent workflow, independent session naming, and terminal-aware themes.",
+  "description": "A guarded Pi distribution with managed isolated subagents, a Design\u2013Plan\u2013Implement\u2013Confirm workflow, and terminal-aware themes.",
   "type": "module",
   "keywords": [
     "pi-package",

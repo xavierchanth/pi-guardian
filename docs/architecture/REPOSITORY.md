@@ -67,9 +67,9 @@ proof from silently becoming architecture before its replacement is demonstrated
 | `crates/runtime-supervisor` | **Retain** | Worker process supervision is a Host responsibility distinct from runtime behavior. |
 | `packages/host-client` | **Retain for now** | Shared typed client exists; I04 must confirm both ACP and desktop use it before treating the extraction as final. |
 | `packages/host-protocol` | **Retain** | Generated TypeScript client↔Host DTO package mirrors the Rust source of truth. |
-| `packages/pi-tai` | **Unresolved: move/split** | Current shipped extension contains presentation and domain behavior. I01 decides movement into `core`/Pi adapter boundaries; retain in place until behavior is covered behind interfaces. |
+| `packages/pi-tai` | **Retain; internal boundary delivered** | `src/core` owns reusable runtime behavior, `src/terminal` owns presentation, and root `core.ts` is the stable service facade. Further package extraction remains an I01 decision. |
 | `packages/runtime-protocol` | **Retain** | Generated TypeScript worker DTO package mirrors the Rust source of truth. |
-| `services/pi-runtime` | **Retain, then repair imports** | Executable Pi SDK worker is the intended deployment boundary. Its direct relative imports from `packages/pi-tai` violate the target boundary; I01 must extract stable exports and I03 must switch the service, with tests, before those imports are removed. |
+| `services/pi-runtime` | **Retain** | Executable Pi SDK worker consumes only the `pi-tai.ts` composition facade and `core.ts` service facade; repository tests prohibit source-directory imports. |
 | `tests` | **Retain** | Cross-boundary integration, runtime, repository, smoke, and focused unit verification belongs outside individual deployables. |
 | `evals` | **Retain** | Opt-in behavioral benchmarks are engineering evidence, not shipped runtime authority. |
 | `fixtures` | **Retain** | Shared protocol and cross-language conformance data must remain consumable by both toolchains. |

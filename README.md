@@ -164,20 +164,15 @@ pi -ne -e . "Reply with exactly: pi-tai-loaded"
 ```text
 justfile                            local Pi-Tai terminal launcher
 packages/pi-tai/pi-tai.ts           Pi extension composition root
-packages/pi-tai/src/config/         trusted Pi-Tai configuration
-packages/pi-tai/src/compaction/     percentage-based automatic compaction
-packages/pi-tai/src/keybindings/    first-party keyboard mappings
-packages/pi-tai/src/concurrency/    Host-backed task, event, projection, usage, and migration state
-packages/pi-tai/src/subagents/      packaged instructions composed into a session's system prompt
-packages/pi-tai/src/agents/         subagent tools, harnesses, model aliases, and result delivery
-packages/pi-tai/src/isolation/      managed JJ workspace allocation, merge, and reclamation
-packages/pi-tai/src/jj/             enrolled repository and managed JJ workspace operations
+packages/pi-tai/core.ts             stable facade for reusable core services
+packages/pi-tai/src/core/           runtime behavior and domain services
+packages/pi-tai/src/core/subagents/ nine public tools, backends, catalogs, lifecycle, and dashboard
+packages/pi-tai/src/core/isolation/ managed JJ workspace allocation, merge, and reclamation
+packages/pi-tai/src/core/jj/        enrolled repository and managed JJ workspace operations
+packages/pi-tai/src/terminal/       terminal-only themes, chrome, input, and notifications
 packages/pi-tai/skills/             specialized version-control, invariant, DPIC, and documentation guidance
 packages/pi-tai/prompts/            checkpoint and DPIC prompt commands
-packages/pi-tai/src/session-title/  independent title generation
-packages/pi-tai/src/guardian/       standalone action review and path boundaries
-packages/pi-tai/src/notifications/  native review/completion notifications
-packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
+packages/pi-tai/src/core/guardian/  standalone action review and path boundaries
 packages/pi-tai/themes/             packaged dark and light themes
 apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract

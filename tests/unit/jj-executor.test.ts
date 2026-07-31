@@ -12,7 +12,10 @@ import {
   workspaceRebaseLease,
   workspaceWriteLeaseId,
 } from "../../packages/pi-tai/src/core/jj/domain.ts";
-import { JjProcessExecutor, SUPPORTED_JJ_VERSION } from "../../packages/pi-tai/src/core/jj/executor.ts";
+import {
+  JjProcessExecutor,
+  SUPPORTED_JJ_VERSION,
+} from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 async function fakeJj(body: string): Promise<{ root: string; binary: string }> {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-fake-jj-"));

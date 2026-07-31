@@ -12,7 +12,7 @@ export function loadPackagedInstructions(): PiTaiInstructionSet {
 }
 
 function readInstruction(name: string): string {
-  const path = fileURLToPath(new URL(`../../instructions/${name}`, import.meta.url));
+  const path = fileURLToPath(new URL(`../../../instructions/${name}`, import.meta.url));
   try {
     return readFileSync(path, "utf8");
   } catch (error) {

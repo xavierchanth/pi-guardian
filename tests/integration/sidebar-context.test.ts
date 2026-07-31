@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SessionManager, buildSessionContext } from "@earendil-works/pi-coding-agent";
-import { BTW_ENTRY_TYPE, type BtwEntry } from "../../packages/pi-tai/src/terminal/sidebar/domain.ts";
+import {
+  BTW_ENTRY_TYPE,
+  type BtwEntry,
+} from "../../packages/pi-tai/src/terminal/sidebar/domain.ts";
 
 test("persisted /btw entries stay outside context after reload and branch", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-tai-btw-"));
