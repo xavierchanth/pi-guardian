@@ -6,7 +6,6 @@ import type {
   SessionOpenParams,
   SessionPromptParams,
   SessionRelocateWorkspaceParams,
-  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -44,10 +43,6 @@ export interface RuntimePort {
   cancel(turnId: string): Promise<boolean>;
   setModel(params: SessionSetModelParams): Promise<ModelInfo>;
   setThinking(params: SessionSetThinkingParams): Promise<ThinkingInfo>;
-  setCapability(
-    params: SessionSetCapabilityParams,
-    emit: RuntimeEventSink,
-  ): Promise<RuntimeCapabilities>;
   relocateWorkspace(
     params: SessionRelocateWorkspaceParams,
     emit: RuntimeEventSink,

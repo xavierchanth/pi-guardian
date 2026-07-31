@@ -3,7 +3,11 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { RuntimeProcessHarness, initializeParams } from "../../tests/runtime/process-harness.ts";
+import {
+  RuntimeProcessHarness,
+  initializeParams,
+  pinnedPolicyParams,
+} from "../../tests/runtime/process-harness.ts";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
@@ -114,11 +118,10 @@ async function smoke(
     agentDir,
     sessionDir,
     faux: true,
+    ...pinnedPolicyParams,
   });
   if (!created.ok) throw new Error(`session.create failed: ${JSON.stringify(created)}`);
   const sessionReady = await worker.waitFor((frame) => frame.event === "session.ready");
-  if (!sessionReady.data.capabilities.tools.includes("update_plan"))
-    throw new Error("Pi-Tai update_plan tool missing");
   if (!sessionReady.data.capabilities.commands.includes("continue"))
     throw new Error("Pi-Tai continue command missing");
   if (sessionReady.data.capabilities.extensionErrors.length > 0) {
@@ -166,7 +169,9 @@ async function smoke(
     agentDir,
     sessionDir,
     faux: true,
+    ...pinnedPolicyParams,
   });
+  if (!opened.ok) throw new Error(`session.open failed: ${JSON.stringify(opened)}`);
   if (opened.result.sessionId !== sessionId)
     throw new Error("packaged worker did not reopen the same Pi session");
   await reopened.command("history", "session.prompt", {

@@ -26,12 +26,12 @@ class MemoryWritable extends EventEmitter {
 }
 
 const initialize = {
-  protocolVersion: 2,
+  protocolVersion: 3,
   kind: "command",
   id: "init",
   method: "runtime.initialize",
   params: {
-    protocol: { minVersion: 2, maxVersion: 2 },
+    protocol: { minVersion: 3, maxVersion: 3 },
     workerId: "worker-test",
     runtimeGeneration: 3,
   },
@@ -49,7 +49,7 @@ const pinnedPolicyParams = {
 };
 
 function command(id: string, method: string, params: unknown) {
-  return { protocolVersion: 2, kind: "command", id, method, params };
+  return { protocolVersion: 3, kind: "command", id, method, params };
 }
 
 test("JSONL reader uses LF framing and keeps Unicode separators inside JSON strings", async () => {
@@ -122,7 +122,7 @@ test("worker rejects a protocol v1 supervisor after the required-policy version 
   );
 });
 
-test("worker exposes typed capability mutation and workspace relocation", async () => {
+test("worker exposes typed workspace relocation", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-capability-"));
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
@@ -137,24 +137,12 @@ test("worker exposes typed capability mutation and workspace relocation", async 
     }),
   );
   await worker.handleValue(
-    command("enable", "session.set_capability", {
-      capabilityId: "jj-workspaces",
-      enabled: true,
-    }),
-  );
-  await worker.handleValue(
     command("relocate", "session.relocate_workspace", {
       backend: "jj",
       name: "focused",
     }),
   );
   const frames = output.frames();
-  assert.ok(
-    frames.some(
-      (frame) => frame.id === "enable" && frame.result.sessionCapabilities[0].toolsExposed,
-    ),
-  );
-  assert.ok(frames.some((frame) => frame.event === "session.capabilities_changed"));
   assert.ok(
     frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")),
   );

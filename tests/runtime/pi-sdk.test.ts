@@ -136,28 +136,6 @@ test("Pi SDK port loads Pi-Tai, persists faux history, and reopens it", async ()
   await second.shutdown();
 });
 
-test("Pi SDK runtime does not expose workspace backends as capabilities", async () => {
-  const paths = await fixture();
-  const port = new PiSdkRuntimePort();
-  await port.createSession({ ...paths, faux: true }, () => {});
-  const capabilities = await port.capabilities();
-  assert.equal(
-    capabilities.sessionCapabilities.some(
-      (capability) => capability.id === "jj-workspaces" || capability.id === "git-worktrees",
-    ),
-    false,
-  );
-  await assert.rejects(
-    port.setCapability({ capabilityId: "git-worktrees", enabled: true }, () => {}),
-    /Unknown capability/,
-  );
-  await assert.rejects(
-    port.relocateWorkspace({ backend: "git", name: "hosted-focused" }, () => {}),
-    /ask the agent for a workspace/,
-  );
-  await port.shutdown();
-});
-
 test("Pi SDK session replacement rebinds events to only the new session", async () => {
   const firstPaths = await fixture();
   const secondPaths = await fixture();

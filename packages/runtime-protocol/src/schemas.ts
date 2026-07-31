@@ -17,14 +17,12 @@ import type {
   RuntimeProtocolError,
   RuntimeResponse,
   SessionCancelParams,
-  SessionCapabilityState,
   SessionCreateParams,
   SessionInfo,
   SessionOpenParams,
   SessionPolicy,
   SessionPromptParams,
   SessionRelocateWorkspaceParams,
-  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -34,7 +32,7 @@ import type {
   ToolLifecycleData,
 } from "./generated.ts";
 
-export const CURRENT_RUNTIME_PROTOCOL_VERSION = 2;
+export const CURRENT_RUNTIME_PROTOCOL_VERSION = 3;
 export const MAX_PROTOCOL_STRING_LENGTH = 1_000_000;
 
 const nonEmptyString = z.string().min(1).max(MAX_PROTOCOL_STRING_LENGTH);
@@ -255,13 +253,6 @@ export const SessionSetThinkingParamsSchema: z.ZodType<SessionSetThinkingParams>
   })
   .strict();
 
-export const SessionSetCapabilityParamsSchema: z.ZodType<SessionSetCapabilityParams> = z
-  .object({
-    capabilityId: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/),
-    enabled: z.boolean(),
-  })
-  .strict();
-
 export const SessionRelocateWorkspaceParamsSchema: z.ZodType<SessionRelocateWorkspaceParams> = z
   .object({
     backend: z.enum(["jj", "git"]),
@@ -271,22 +262,11 @@ export const SessionRelocateWorkspaceParamsSchema: z.ZodType<SessionRelocateWork
 
 export const EmptyParamsSchema: z.ZodType<EmptyParams> = strictEmpty;
 
-export const SessionCapabilityStateSchema: z.ZodType<SessionCapabilityState> = z
-  .object({
-    id: nonEmptyString,
-    available: z.boolean(),
-    serviceEnabled: z.boolean(),
-    toolsExposed: z.boolean(),
-    reason: nonEmptyString.optional(),
-  })
-  .strict();
-
 export const RuntimeCapabilitiesSchema: z.ZodType<RuntimeCapabilities> = z
   .object({
     methods: z.array(nonEmptyString),
     tools: z.array(nonEmptyString),
     commands: z.array(nonEmptyString),
-    sessionCapabilities: z.array(SessionCapabilityStateSchema),
     extensionErrors: z.array(nonEmptyString),
   })
   .strict();

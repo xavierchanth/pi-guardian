@@ -37,7 +37,7 @@ These leave the runtime path entirely: the `session_start` configuration reload 
 
 ### The runtime worker reaches into the extension's source directory
 
-`services/pi-runtime/src/pi-runtime.ts:32-37` imports six modules from `packages/pi-tai` by relative path (`../../../packages/pi-tai/pi-tai.ts`, plus `src/capabilities/controller.ts`, `src/config/register.ts`, `src/work-context/persistence.ts`, `src/jj/repository-enrollment.ts`, `src/jj/session-workspace.ts`).
+`services/pi-runtime/src/pi-runtime.ts:32-37` imports six modules from `packages/pi-tai` by relative path (`../../../packages/pi-tai/pi-tai.ts`, `src/config/register.ts`, `src/work-context/persistence.ts`, `src/jj/repository-enrollment.ts`, `src/jj/session-workspace.ts`).
 
 This violates `REPOSITORY.md` — "No top-level application reaches into another application's source directory" — and is the concrete mechanism by which the worker acquires the filesystem configuration authority that I13 D4 removes. It is also the seam extraction has to cut: these six imports are approximately the real surface area of `@pi-tai/core` as the worker uses it today.
 

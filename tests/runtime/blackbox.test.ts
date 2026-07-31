@@ -111,7 +111,7 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
     /first persisted turn|verify history|slow response/,
   );
   for (const frame of [...first.frames, ...second.frames]) {
-    assert.equal(frame.protocolVersion, 2);
+    assert.equal(frame.protocolVersion, 3);
   }
 });
 

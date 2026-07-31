@@ -19,7 +19,6 @@ import {
   type SessionOpenParams,
   type SessionPromptParams,
   type SessionRelocateWorkspaceParams,
-  type SessionSetCapabilityParams,
   type SessionSetModelParams,
   type SessionSetThinkingParams,
   type SessionTextParams,
@@ -207,8 +206,6 @@ export class RuntimeWorker {
         return this.setModel(command, params as SessionSetModelParams);
       case "session.set_thinking":
         return this.setThinking(command, params as SessionSetThinkingParams);
-      case "session.set_capability":
-        return this.setCapability(command, params as SessionSetCapabilityParams);
       case "session.relocate_workspace":
         return this.relocateWorkspace(command, params as SessionRelocateWorkspaceParams);
       case "session.dispose":
@@ -365,17 +362,6 @@ export class RuntimeWorker {
   ): Promise<void> {
     this.requireSessionIdle();
     await this.writeSuccess(command, await this.port.setThinking(params));
-  }
-
-  private async setCapability(
-    command: RuntimeCommand,
-    params: SessionSetCapabilityParams,
-  ): Promise<void> {
-    this.requireSessionIdle();
-    await this.writeSuccess(
-      command,
-      await this.port.setCapability(params, (event) => this.emit(event)),
-    );
   }
 
   private async relocateWorkspace(

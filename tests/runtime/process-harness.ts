@@ -37,7 +37,7 @@ export class RuntimeProcessHarness {
   }
 
   command(id: string, method: string, params: unknown): Promise<any> {
-    this.send({ protocolVersion: 2, kind: "command", id, method, params });
+    this.send({ protocolVersion: 3, kind: "command", id, method, params });
     return this.waitFor((frame) => frame.kind === "response" && frame.id === id);
   }
 
@@ -113,7 +113,7 @@ export const pinnedPolicyParams = {
 };
 
 export const initializeParams = (generation: number) => ({
-  protocol: { minVersion: 2, maxVersion: 2 },
+  protocol: { minVersion: 3, maxVersion: 3 },
   workerId: `worker-${generation}`,
   runtimeGeneration: generation,
 });

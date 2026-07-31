@@ -1,10 +1,9 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { queryTerminalBackground, type QueryTerminalBackground } from "./src/terminal/ansi-theme/query.ts";
-import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
 import {
-  registerCapabilityController,
-  SessionCapabilityController,
-} from "./src/capabilities/index.ts";
+  queryTerminalBackground,
+  type QueryTerminalBackground,
+} from "./src/terminal/ansi-theme/query.ts";
+import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
 import {
   createPiTaiConfigService,
   registerPiTaiConfig,
@@ -43,7 +42,6 @@ export interface PiTaiRuntime {
   titleGenerator: TitleGenerator;
   queryTerminalBackground: QueryTerminalBackground;
   notificationSender: NotificationSender;
-  capabilities: SessionCapabilityController;
   agentDir: string;
   rootSessionId?: string;
   /** Opt-in subagent backends beyond the built-in pi one. */
@@ -58,7 +56,6 @@ export interface PiTaiRegistrars {
   keybindings: PiTaiRegistrar;
   config: PiTaiRegistrar;
   compaction: PiTaiRegistrar;
-  capabilities: PiTaiRegistrar;
   workContext: PiTaiRegistrar;
   contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
@@ -77,7 +74,6 @@ const productionRegistrars: PiTaiRegistrars = {
   keybindings: (pi, runtime) => registerFirstPartyKeybindings(pi, runtime.agentDir),
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   compaction: (pi, runtime) => registerAutoCompaction(pi, runtime.config),
-  capabilities: (pi, runtime) => registerCapabilityController(pi, runtime.capabilities),
   // I09: durable task tools are authoritative; update_plan remains injectable only for legacy test/package consumers.
   workContext: () => undefined,
   contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
@@ -110,7 +106,7 @@ const productionRegistrars: PiTaiRegistrars = {
       workContext: () => runtime.workContext.current(),
     }),
   footer: (pi, runtime) => {
-    registerFooter(pi, runtime.workContext, runtime.capabilities);
+    registerFooter(pi, runtime.workContext);
   },
   ansiTheme: (pi, runtime) => {
     registerAnsiTheme(pi, runtime.config, runtime.queryTerminalBackground);
@@ -125,7 +121,6 @@ function createProductionRuntime(): PiTaiRuntime {
     titleGenerator: generateModelTitle,
     queryTerminalBackground,
     notificationSender: sendNativeTerminalNotification,
-    capabilities: new SessionCapabilityController(),
     agentDir: getAgentDir(),
   };
 }
@@ -139,7 +134,6 @@ export function createPiTaiExtension(
     await registrars.keybindings(pi, runtime);
     await registrars.config(pi, runtime);
     await registrars.compaction(pi, runtime);
-    await registrars.capabilities(pi, runtime);
     await registrars.workContext(pi, runtime);
     await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);

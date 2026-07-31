@@ -15,29 +15,29 @@ rl.on('line', (line) => {
   if (command.method === 'runtime.initialize') {
     generation = command.params.runtimeGeneration;
     process.stdout.write(JSON.stringify({
-      protocolVersion: 2, kind: 'response', id: command.id, ok: true,
+      protocolVersion: 3, kind: 'response', id: command.id, ok: true,
       result: {
-        protocolVersion: 2,
+        protocolVersion: 3,
         workerId: command.params.workerId,
         runtimeGeneration: generation,
-        capabilities: { methods: [], tools: [], commands: [], sessionCapabilities: [], extensionErrors: [] }
+        capabilities: { methods: [], tools: [], commands: [], extensionErrors: [] }
       }
     }) + '\n');
   } else if (command.method === 'test.echo') {
     process.stdout.write(JSON.stringify({
-      protocolVersion: 2, kind: 'response', id: command.id, ok: true, result: command.params
+      protocolVersion: 3, kind: 'response', id: command.id, ok: true, result: command.params
     }) + '\n');
     process.stdout.write(JSON.stringify({
-      protocolVersion: 2, kind: 'event', workerSequence: 1,
+      protocolVersion: 3, kind: 'event', workerSequence: 1,
       runtimeGeneration: generation - 1, event: 'stale.event', data: {}
     }) + '\n');
     process.stdout.write(JSON.stringify({
-      protocolVersion: 2, kind: 'event', workerSequence: 2,
+      protocolVersion: 3, kind: 'event', workerSequence: 2,
       runtimeGeneration: generation, event: 'runtime.ready', data: {}
     }) + '\n');
   } else if (command.method === 'runtime.shutdown') {
     process.stdout.write(JSON.stringify({
-      protocolVersion: 2, kind: 'response', id: command.id, ok: true, result: {}
+      protocolVersion: 3, kind: 'response', id: command.id, ok: true, result: {}
     }) + '\n');
     process.exit(0);
   }

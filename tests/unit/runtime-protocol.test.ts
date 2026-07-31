@@ -31,13 +31,6 @@ test("Zod consumes shared runtime fixtures and method-specific parameters", () =
     "assistant.text_delta",
   );
   assert.deepEqual(
-    decodeMethodParams("session.set_capability", {
-      capabilityId: "jj-workspaces",
-      enabled: true,
-    }),
-    { capabilityId: "jj-workspaces", enabled: true },
-  );
-  assert.deepEqual(
     decodeMethodParams("session.relocate_workspace", {
       backend: "git",
       name: "focused-task",
@@ -90,7 +83,7 @@ test("session create policy round trips through strict method schemas", () => {
 
 test("generic envelopes preserve unsupported methods while known params validate separately", () => {
   const command = decodeRuntimeCommand({
-    protocolVersion: 2,
+    protocolVersion: 3,
     kind: "command",
     id: "unknown-1",
     method: "future.method",
@@ -116,7 +109,7 @@ test("runtime schemas reject unknown fields, unsafe counters, and invalid respon
   );
   assert.equal(
     RuntimeResponseSchema.safeParse({
-      protocolVersion: 2,
+      protocolVersion: 3,
       kind: "response",
       id: "bad",
       ok: false,
@@ -127,7 +120,7 @@ test("runtime schemas reject unknown fields, unsafe counters, and invalid respon
 
 test("response constructors validate outbound frames", () => {
   assert.deepEqual(successResponse("ok-1", {}), {
-    protocolVersion: 2,
+    protocolVersion: 3,
     kind: "response",
     id: "ok-1",
     ok: true,
@@ -140,7 +133,7 @@ test("response constructors validate outbound frames", () => {
       retryable: false,
     }),
     {
-      protocolVersion: 2,
+      protocolVersion: 3,
       kind: "response",
       id: "bad-1",
       ok: false,

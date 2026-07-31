@@ -1,21 +1,16 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { SessionCapabilityController } from "../../capabilities/controller.ts";
 import type { WorkContextStore } from "../../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
 
-export function registerFooter(
-  pi: ExtensionAPI,
-  workContext: WorkContextStore,
-  capabilities: SessionCapabilityController,
-): void {
+export function registerFooter(pi: ExtensionAPI, workContext: WorkContextStore): void {
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
 
     ctx.ui.setFooter((_tui, theme) => ({
       invalidate() {},
       render(width: number): string[] {
-        return renderFooterRows(createSnapshot(pi, ctx, workContext, capabilities), width).map(
+        return renderFooterRows(createSnapshot(pi, ctx, workContext), width).map(
           (row) => theme.fg(row.leftColor, row.left) + theme.fg("text", row.padding + row.right),
         );
       },
@@ -27,7 +22,6 @@ function createSnapshot(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   workContext: WorkContextStore,
-  capabilities: SessionCapabilityController,
 ): FooterSnapshot {
   const usage: FooterUsage = {
     input: 0,
@@ -56,21 +50,8 @@ function createSnapshot(
   );
   const context = ctx.getContextUsage();
   const model = ctx.model;
-  const capabilityOrder = ["subagents"];
-  const capabilityLabels = [...capabilities.snapshot().capabilities]
-    .filter((capability) => capability.serviceEnabled)
-    .sort((left, right) => {
-      const leftIndex = capabilityOrder.indexOf(left.id);
-      const rightIndex = capabilityOrder.indexOf(right.id);
-      return (
-        (leftIndex < 0 ? capabilityOrder.length : leftIndex) -
-        (rightIndex < 0 ? capabilityOrder.length : rightIndex)
-      );
-    })
-    .map((capability) => capability.label);
   return {
     cwd: ctx.cwd,
-    capabilities: capabilityLabels,
     goal: work?.goal,
     currentStep: active?.content ?? (complete ? "Complete" : undefined),
     currentStepNumber: active ? activeIndex + 1 : complete ? work?.plan.length : undefined,

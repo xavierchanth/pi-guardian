@@ -91,21 +91,10 @@ export type QueueData = {
 
 export type ResponseFrameKind = "response";
 
-export type RuntimeCapabilities = RuntimeCapabilities_Serialize | RuntimeCapabilities_Deserialize;
-
-export type RuntimeCapabilities_Deserialize = {
+export type RuntimeCapabilities = {
 	methods: string[],
 	tools: string[],
 	commands: string[],
-	sessionCapabilities: SessionCapabilityState_Deserialize[],
-	extensionErrors: string[],
-};
-
-export type RuntimeCapabilities_Serialize = {
-	methods: string[],
-	tools: string[],
-	commands: string[],
-	sessionCapabilities: SessionCapabilityState_Serialize[],
 	extensionErrors: string[],
 };
 
@@ -163,14 +152,14 @@ export type RuntimeInitializeResult_Deserialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities_Deserialize,
+	capabilities: RuntimeCapabilities,
 };
 
 export type RuntimeInitializeResult_Serialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities_Serialize,
+	capabilities: RuntimeCapabilities,
 };
 
 export type RuntimeProtocolError = RuntimeProtocolError_Serialize | RuntimeProtocolError_Deserialize;
@@ -211,24 +200,6 @@ export type RuntimeResponse_Serialize = {
 
 export type SessionCancelParams = {
 	turnId: string,
-};
-
-export type SessionCapabilityState = SessionCapabilityState_Serialize | SessionCapabilityState_Deserialize;
-
-export type SessionCapabilityState_Deserialize = {
-	id: string,
-	available: boolean,
-	serviceEnabled: boolean,
-	toolsExposed: boolean,
-	reason: string | null,
-};
-
-export type SessionCapabilityState_Serialize = {
-	id: string,
-	available: boolean,
-	serviceEnabled: boolean,
-	toolsExposed: boolean,
-	reason?: string | null,
 };
 
 export type SessionCreateParams = SessionCreateParams_Serialize | SessionCreateParams_Deserialize;
@@ -307,11 +278,6 @@ export type SessionPromptParams = {
 export type SessionRelocateWorkspaceParams = {
 	backend: WorkspaceBackend,
 	name: string,
-};
-
-export type SessionSetCapabilityParams = {
-	capabilityId: string,
-	enabled: boolean,
 };
 
 export type SessionSetModelParams = {

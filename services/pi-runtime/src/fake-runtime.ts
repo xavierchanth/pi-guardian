@@ -9,7 +9,6 @@ import type {
   SessionOpenParams,
   SessionPromptParams,
   SessionRelocateWorkspaceParams,
-  SessionSetCapabilityParams,
   SessionSetModelParams,
   SessionSetThinkingParams,
   SessionTextParams,
@@ -34,7 +33,6 @@ export class FakeRuntimePort implements RuntimePort {
       methods: [],
       tools: [],
       commands: ["continue", "plan-status"],
-      sessionCapabilities: [],
       extensionErrors: [],
     };
   }
@@ -107,27 +105,6 @@ export class FakeRuntimePort implements RuntimePort {
   async setThinking(params: SessionSetThinkingParams): Promise<ThinkingInfo> {
     this.thinking = { level: params.level };
     return this.thinking;
-  }
-
-  async setCapability(
-    params: SessionSetCapabilityParams,
-    emit: RuntimeEventSink,
-  ): Promise<RuntimeCapabilities> {
-    const capabilities = await this.capabilities();
-    capabilities.sessionCapabilities = [
-      {
-        id: params.capabilityId,
-        available: true,
-        serviceEnabled: params.enabled,
-        toolsExposed: params.enabled,
-      },
-    ];
-    emit({
-      event: "session.capabilities_changed",
-      sessionId: this.session?.sessionId,
-      data: { capabilities },
-    });
-    return capabilities;
   }
 
   async relocateWorkspace(

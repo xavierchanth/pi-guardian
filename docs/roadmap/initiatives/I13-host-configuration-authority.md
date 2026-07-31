@@ -110,7 +110,7 @@ ACP already provides the vocabulary. [Confirm exact shapes against the pinned v2
 | ACP concept | Maps to |
 |---|---|
 | Session modes (`SessionModeState`; `session/set_mode`) | `modelProfiles` |
-| Available commands | `/effort`, `/subagents`, `/capabilities` |
+| Available commands | `/effort`, `/subagents` |
 | Model selection (`session/set_model`) | Profile provider/model |
 | `session/request_permission` | Guardian non-allow, if D10 enables it |
 | Agent-owned terminal updates | Host-owned shell execution projected to clients; see O1 |

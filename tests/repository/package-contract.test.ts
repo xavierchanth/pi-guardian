@@ -34,9 +34,21 @@ test("source uses the current Pi distribution imports", () => {
   assert.deepEqual(legacy, []);
 });
 
+test("the legacy session capability controller is absent from the package", () => {
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/capabilities")), false);
+  const source = walkSource(join(root, "packages/pi-tai"))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  assert.doesNotMatch(source, /SessionCapabilityController|sessionCapabilities|set_capability/);
+  assert.doesNotMatch(source, /registerCommand\(["']capabilities["']/);
+});
+
 test("context-transfer domain and storage remain Pi-independent", () => {
   for (const file of ["domain.ts", "storage.ts"]) {
-    const source = readFileSync(join(root, "packages/pi-tai/src/context-transfer", file), "utf8");
+    const source = readFileSync(
+      join(root, "packages/pi-tai/src/core/context-transfer", file),
+      "utf8",
+    );
     assert.doesNotMatch(source, /@earendil-works\//, file);
   }
 });
@@ -92,7 +104,7 @@ test("the subagent tool surface is the nine-tool set", () => {
     "workspace_status",
   ]);
   assert.equal(
-    existsSync(join(root, "packages/pi-tai/src/core/subagents/register.ts")),
+    existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")),
     false,
     "the retired 47-tool registrar is gone",
   );
@@ -110,7 +122,9 @@ test("the packaged capability catalog and instruction assets agree", () => {
   for (const capability of catalog.capabilities ?? []) {
     assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
     assert.ok(
-      existsSync(join(root, "packages/pi-tai/src/core/subagents/capabilities", capability.instructions!)),
+      existsSync(
+        join(root, "packages/pi-tai/src/core/subagents/capabilities", capability.instructions!),
+      ),
     );
   }
 });
