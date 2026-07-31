@@ -42,6 +42,7 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Complete | — | A question answered from bounded coherent session context that leaves no trace in it |
 | I17 | [Researcher capability subagent](initiatives/I17-capability-subagents.md) | Complete | — | External research moves behind a specialized Codex subagent |
 | I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Complete | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
+| I19 | [Configuration ownership and feature policy](initiatives/I19-configuration-ownership.md) | Planned | I01, I02, I03 | Terminal preferences and Host-owned session/machine policy have explicit, non-widening ownership |
 
 ## Dependency graph
 
@@ -66,6 +67,7 @@ graph TD
   I16[I16 /btw sidebar query — complete]
   I17[I17 Capability subagents — complete]
   I18[I18 Context transfer — complete]
+  I19[I19 Configuration ownership]
 
   I00 --> I01
   I00 --> I02
@@ -74,6 +76,9 @@ graph TD
   I02 --> I04
   I03 --> I04
   I00 --> I18
+  I01 --> I19
+  I02 --> I19
+  I03 --> I19
 
   I05 --> I06
   I05 --> I07
@@ -103,6 +108,7 @@ Concurrency/JJ and Host/core work can proceed in parallel. Their convergence poi
 | Concurrency/JJ | I05 → I06 → I07 → I08 → I09 → I14 |
 | Clients | I04 → I10 → I11 |
 | Machine capabilities | {I02, I03, I04} → I12 |
+| Configuration ownership | {I01, I02, I03} → I19 |
 | Session affordances | I15 and I16 complete; I18 runs independently |
 
 I13 is retained only as a record of delivered checkpoints 1–7 and is not a forcing function.
