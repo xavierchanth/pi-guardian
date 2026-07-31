@@ -3,14 +3,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { changeId } from "../../packages/pi-tai/src/jj/domain.ts";
-import { jjSuccess, ScriptedJjExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
-import { FileSharedSourceStore } from "../../packages/pi-tai/src/jj/persistence.ts";
+import { changeId } from "../../packages/pi-tai/src/core/jj/domain.ts";
+import { jjSuccess, ScriptedJjExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
+import { FileSharedSourceStore } from "../../packages/pi-tai/src/core/jj/persistence.ts";
 import {
   exactChange,
   JjRepositoryKernel,
   literalRootFileset,
-} from "../../packages/pi-tai/src/jj/repository.ts";
+} from "../../packages/pi-tai/src/core/jj/repository.ts";
 
 const CURRENT = "a".repeat(32);
 const PARENT = "b".repeat(32);

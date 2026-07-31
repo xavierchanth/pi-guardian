@@ -1,6 +1,6 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { queryTerminalBackground, type QueryTerminalBackground } from "./src/ansi-theme/query.ts";
-import { registerAnsiTheme } from "./src/ansi-theme/register.ts";
+import { queryTerminalBackground, type QueryTerminalBackground } from "./src/terminal/ansi-theme/query.ts";
+import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
 import {
   registerCapabilityController,
   SessionCapabilityController,
@@ -9,25 +9,25 @@ import {
   createPiTaiConfigService,
   registerPiTaiConfig,
   type PiTaiConfigService,
-} from "./src/config/register.ts";
-import { registerCmux } from "./src/cmux/register.ts";
-import { registerAutoCompaction } from "./src/compaction/register.ts";
-import { registerContextTransfer } from "./src/context-transfer/register.ts";
-import { registerFooter } from "./src/footer/register.ts";
-import { registerApprovalGuardian } from "./src/guardian/register.ts";
-import { registerFirstPartyKeybindings } from "./src/keybindings/register.ts";
-import { registerModelProfiles } from "./src/model-profiles/register.ts";
+} from "./src/core/config/register.ts";
+import { registerCmux } from "./src/terminal/cmux/register.ts";
+import { registerAutoCompaction } from "./src/core/compaction/register.ts";
+import { registerContextTransfer } from "./src/core/context-transfer/register.ts";
+import { registerFooter } from "./src/terminal/footer/register.ts";
+import { registerApprovalGuardian } from "./src/core/guardian/register.ts";
+import { registerFirstPartyKeybindings } from "./src/terminal/keybindings/register.ts";
+import { registerModelProfiles } from "./src/core/model-profiles/register.ts";
 import {
   registerNotifications,
   sendNativeTerminalNotification,
   type NotificationSender,
-} from "./src/notifications/index.ts";
-import { registerResponseEditor } from "./src/response-editor/register.ts";
+} from "./src/terminal/notifications/index.ts";
+import { registerResponseEditor } from "./src/terminal/response-editor/register.ts";
 import { generateModelTitle, type TitleGenerator } from "./src/session-title/generate.ts";
 import { registerSessionTitle } from "./src/session-title/register.ts";
-import { registerBtw } from "./src/sidebar/register.ts";
-import { registerAgents } from "./src/agents/register.ts";
-import type { BackendName } from "./src/agents/domain.ts";
+import { registerBtw } from "./src/terminal/sidebar/register.ts";
+import { registerAgents } from "./src/core/subagents/register.ts";
+import type { BackendName } from "./src/core/subagents/domain.ts";
 
 /** Where child sessions run. The legacy out-of-process launcher is retired. */
 export type SubagentRuntimeMode = "pi-cli" | "host-worker";

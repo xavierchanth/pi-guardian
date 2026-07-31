@@ -6,13 +6,13 @@ import test from "node:test";
 import {
   FileRepositoryEnrollmentStore,
   RepositoryEnrollmentService,
-} from "../../packages/pi-tai/src/jj/repository-enrollment.ts";
+} from "../../packages/pi-tai/src/core/jj/repository-enrollment.ts";
 import {
   FileSessionWorkspaceStore,
   InMemoryRepositoryLeaseStore,
   RepositoryMutationCoordinator,
   SessionWorkspaceService,
-} from "../../packages/pi-tai/src/jj/session-workspace.ts";
+} from "../../packages/pi-tai/src/core/jj/session-workspace.ts";
 import { RealJjFixture } from "../support/real-jj-fixture.ts";
 
 test("multiple Host sessions receive independent private workspaces without changing user @", async () => {

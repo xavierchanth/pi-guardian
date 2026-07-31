@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { WorkContextSnapshot } from "../work-context/domain.ts";
+import type { WorkContextSnapshot } from "../../work-context/domain.ts";
 import { buildReviewPrompt, type ProposedAction, type ReviewDecision } from "./policy.ts";
 import type { PathReviewEvidence } from "./paths.ts";
 import type { ReviewResult } from "./reviewer.ts";

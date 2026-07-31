@@ -7,7 +7,7 @@ import {
   FileSharedSourceStore,
   validateSharedSource,
   type PersistedSharedSourceV1,
-} from "../../packages/pi-tai/src/jj/persistence.ts";
+} from "../../packages/pi-tai/src/core/jj/persistence.ts";
 
 const CHANGE_A = "a".repeat(32);
 const CHANGE_B = "b".repeat(32);

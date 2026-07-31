@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
-import { registerAutoCompaction } from "../../packages/pi-tai/src/compaction/register.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
+import { registerAutoCompaction } from "../../packages/pi-tai/src/core/compaction/register.ts";
 
 type Handler = (event: unknown, ctx: any) => Promise<void> | void;
 

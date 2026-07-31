@@ -3,9 +3,9 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { CodexBackend } from "../../packages/pi-tai/src/agents/backends/codex.ts";
-import { researchAvailability } from "../../packages/pi-tai/src/agents/backends/codex-protocol.ts";
-import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/agents/domain.ts";
+import { CodexBackend } from "../../packages/pi-tai/src/core/subagents/backends/codex.ts";
+import { researchAvailability } from "../../packages/pi-tai/src/core/subagents/backends/codex-protocol.ts";
+import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 
 /**
  * A stand-in for `codex app-server` that speaks the same newline-delimited

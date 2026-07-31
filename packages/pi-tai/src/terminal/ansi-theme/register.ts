@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
-import type { ClientPreferencesReader } from "../config/register.ts";
+import type { ClientPreferencesReader } from "../../core/config/register.ts";
 import { detectThemeMode, type ThemeMode } from "./color.ts";
 import type { QueryTerminalBackground } from "./query.ts";
 

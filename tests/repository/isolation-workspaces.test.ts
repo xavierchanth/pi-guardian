@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import {
   InMemoryWorkspaceRegistry,
   JjCli,
   WorkspaceManager,
-} from "../../packages/pi-tai/src/isolation/index.ts";
+} from "../../packages/pi-tai/src/core/isolation/index.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];

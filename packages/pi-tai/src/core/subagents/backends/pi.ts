@@ -4,7 +4,7 @@ import {
   type PrivateChildSessionFactoryPort,
   type PrivateChildSessionHandle,
 } from "../../concurrency/child-session.ts";
-import type { SessionPolicyReader } from "../../config/register.ts";
+import type { SessionPolicyReader } from "../../../core/config/register.ts";
 import {
   EventChannel,
   type AvailabilityResult,

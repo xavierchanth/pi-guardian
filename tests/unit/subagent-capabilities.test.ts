@@ -4,8 +4,8 @@ import {
   CAPABILITIES,
   CAPABILITY_NAMES,
   parseCapabilityCatalog,
-} from "../../packages/pi-tai/src/agents/capabilities.ts";
-import { resolveModel } from "../../packages/pi-tai/src/agents/models.ts";
+} from "../../packages/pi-tai/src/core/subagents/capabilities.ts";
+import { resolveModel } from "../../packages/pi-tai/src/core/subagents/models.ts";
 
 describe("capability subagent catalog", () => {
   it("packages researcher as the sole versioned alias", () => {

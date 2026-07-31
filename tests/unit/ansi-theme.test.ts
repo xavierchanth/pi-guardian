@@ -5,7 +5,7 @@ import {
   detectThemeMode,
   parseRgbSpec,
   relativeLuminance,
-} from "../../packages/pi-tai/src/ansi-theme/color.ts";
+} from "../../packages/pi-tai/src/terminal/ansi-theme/color.ts";
 
 test("parses OSC RGB specifications", () => {
   assert.equal(parseRgbSpec("rgb:ffff/8000/0000"), "#ff8000");

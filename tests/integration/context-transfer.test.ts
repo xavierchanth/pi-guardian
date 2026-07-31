@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { ContextTransferArtifact } from "../../packages/pi-tai/src/context-transfer/domain.ts";
-import { registerContextTransfer } from "../../packages/pi-tai/src/context-transfer/register.ts";
-import type { ContextTransferStore } from "../../packages/pi-tai/src/context-transfer/storage.ts";
+import type { ContextTransferArtifact } from "../../packages/pi-tai/src/core/context-transfer/domain.ts";
+import { registerContextTransfer } from "../../packages/pi-tai/src/core/context-transfer/register.ts";
+import type { ContextTransferStore } from "../../packages/pi-tai/src/core/context-transfer/storage.ts";
 
 function harness(options: { summarize?: () => Promise<string | undefined>; ids?: string[] } = {}) {
   const commands = new Map<string, { handler(args: string, ctx: any): Promise<void> }>();

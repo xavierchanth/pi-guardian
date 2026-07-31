@@ -1,7 +1,7 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { SessionCapabilityController } from "../capabilities/controller.ts";
-import type { WorkContextStore } from "../work-context/persistence.ts";
+import type { SessionCapabilityController } from "../../capabilities/controller.ts";
+import type { WorkContextStore } from "../../work-context/persistence.ts";
 import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
 
 export function registerFooter(

@@ -7,7 +7,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import type { SessionPolicyReader } from "../config/register.ts";
+import type { SessionPolicyReader } from "../../core/config/register.ts";
 import {
   FileWorkspaceRegistry,
   JjCli,
@@ -16,8 +16,8 @@ import {
   type WorkspaceRecord,
 } from "../isolation/index.ts";
 import { JjProcessExecutor } from "../jj/executor.ts";
-import { composePiTaiInstructions } from "../subagents/domain.ts";
-import { loadPackagedInstructions, type InstructionLoader } from "../subagents/instructions.ts";
+import { composePiTaiInstructions } from "./charter-domain.ts";
+import { loadPackagedInstructions, type InstructionLoader } from "./instructions.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
 import {
   CAPABILITIES,

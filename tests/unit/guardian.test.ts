@@ -9,22 +9,22 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   checkFileToolPath,
   defaultReadCandidates,
-} from "../../packages/pi-tai/src/guardian/paths.ts";
+} from "../../packages/pi-tai/src/core/guardian/paths.ts";
 import {
   REVIEWER_SYSTEM_PROMPT,
   buildReviewPrompt,
   parseReviewDecision,
   preflightManagedSubagentCleanup,
-} from "../../packages/pi-tai/src/guardian/policy.ts";
-import { registerApprovalGuardian } from "../../packages/pi-tai/src/guardian/register.ts";
-import { createGuardianReviewRecorder } from "../../packages/pi-tai/src/guardian/records.ts";
+} from "../../packages/pi-tai/src/core/guardian/policy.ts";
+import { registerApprovalGuardian } from "../../packages/pi-tai/src/core/guardian/register.ts";
+import { createGuardianReviewRecorder } from "../../packages/pi-tai/src/core/guardian/records.ts";
 import {
   createModelReviewer,
   REVIEW_TIMEOUT_MS,
   resolveReviewerModel,
   type ReviewRequest,
   type ReviewResult,
-} from "../../packages/pi-tai/src/guardian/reviewer.ts";
+} from "../../packages/pi-tai/src/core/guardian/reviewer.ts";
 import type { WorkContextSnapshot } from "../../packages/pi-tai/src/work-context/domain.ts";
 
 const execFileAsync = promisify(execFile);

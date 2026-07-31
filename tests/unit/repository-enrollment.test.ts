@@ -6,7 +6,7 @@ import test from "node:test";
 import {
   FileRepositoryEnrollmentStore,
   RepositoryEnrollmentService,
-} from "../../packages/pi-tai/src/jj/repository-enrollment.ts";
+} from "../../packages/pi-tai/src/core/jj/repository-enrollment.ts";
 import { RealJjFixture } from "../support/real-jj-fixture.ts";
 
 test("repository enrollment preserves user workspace and installs private pi-tai policy", async () => {

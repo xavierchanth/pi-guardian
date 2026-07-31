@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionPolicyReader } from "../config/register.ts";
-import { PROFILE_CYCLE_SHORTCUT } from "../keybindings/register.ts";
+import type { SessionPolicyReader } from "../../core/config/register.ts";
+import { PROFILE_CYCLE_SHORTCUT } from "../../terminal/keybindings/register.ts";
 import { THINKING_EFFORTS, type ModelProfile, type ThinkingEffort } from "./domain.ts";
 
 export function registerModelProfiles(pi: ExtensionAPI, config: SessionPolicyReader): void {

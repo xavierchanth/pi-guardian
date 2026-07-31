@@ -7,7 +7,7 @@ import {
   changeId,
   type AbsolutePath,
   type ChangeId,
-} from "../../packages/pi-tai/src/jj/domain.ts";
+} from "../../packages/pi-tai/src/core/jj/domain.ts";
 import {
   JjProcessExecutor,
   renderJjExecutionFailure,
@@ -16,7 +16,7 @@ import {
   type JjExecutionResult,
   type JjExecutor,
   type JjProbeResult,
-} from "../../packages/pi-tai/src/jj/executor.ts";
+} from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 const CHANGE_TEMPLATE =
   'change_id ++ "|" ++ parents.map(|c| c.change_id()).join(",") ++ "|" ++ if(empty, "empty", "nonempty") ++ "|" ++ if(conflict, "conflicted", "clean") ++ "|" ++ description.first_line() ++ "\\n"';

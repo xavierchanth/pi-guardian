@@ -1,6 +1,6 @@
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionTitleConfig } from "../config/schema.ts";
+import type { SessionTitleConfig } from "../core/config/schema.ts";
 
 export interface GenerateTitleInput {
   prompt: string;

@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { SessionPolicyReader } from "../config/register.ts";
+import type { SessionPolicyReader } from "../core/config/register.ts";
 import type { TitleGenerator } from "./generate.ts";
 import { heuristicSessionTitle, isMeaningfulPrompt, normalizeSessionTitle } from "./normalize.ts";
 

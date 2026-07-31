@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BackendRegistry } from "../../packages/pi-tai/src/agents/backend.ts";
-import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
+import { BackendRegistry } from "../../packages/pi-tai/src/core/subagents/backend.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
 import {
   applyEvent,
   contextUtilisation,
   emptySnapshot,
-} from "../../packages/pi-tai/src/agents/domain.ts";
-import { SubagentManager } from "../../packages/pi-tai/src/agents/manager.ts";
+} from "../../packages/pi-tai/src/core/subagents/domain.ts";
+import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
 
 function managerWith(
   backends: StubBackend[],

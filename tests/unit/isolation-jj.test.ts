@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { JjCli } from "../../packages/pi-tai/src/isolation/jj.ts";
-import type { JjExecutionRequest, JjExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+import { JjCli } from "../../packages/pi-tai/src/core/isolation/jj.ts";
+import type { JjExecutionRequest, JjExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 function recording(stdout = ""): { cli: JjCli; requests: JjExecutionRequest[] } {
   const requests: JjExecutionRequest[] = [];

@@ -4,10 +4,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_CLIENT_PREFERENCES,
   type NotificationsConfig,
-} from "../../packages/pi-tai/src/config/schema.ts";
-import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/notifications/events.ts";
-import { terminalNotificationSequence } from "../../packages/pi-tai/src/notifications/native.ts";
-import { registerNotifications } from "../../packages/pi-tai/src/notifications/register.ts";
+} from "../../packages/pi-tai/src/core/config/schema.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/terminal/notifications/events.ts";
+import { terminalNotificationSequence } from "../../packages/pi-tai/src/terminal/notifications/native.ts";
+import { registerNotifications } from "../../packages/pi-tai/src/terminal/notifications/register.ts";
 
 interface HarnessOptions {
   sessionName?: string;

@@ -5,17 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { BackendRegistry } from "../../packages/pi-tai/src/agents/backend.ts";
-import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
-import { IsolatedSubagents } from "../../packages/pi-tai/src/agents/isolated.ts";
-import { SubagentManager } from "../../packages/pi-tai/src/agents/manager.ts";
-import type { SubagentSnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
+import { BackendRegistry } from "../../packages/pi-tai/src/core/subagents/backend.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
+import { IsolatedSubagents } from "../../packages/pi-tai/src/core/subagents/isolated.ts";
+import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
+import type { SubagentSnapshot } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 import {
   InMemoryWorkspaceRegistry,
   JjCli,
   WorkspaceManager,
-} from "../../packages/pi-tai/src/isolation/index.ts";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+} from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];

@@ -11,8 +11,8 @@ import {
   renderSubagentDetail,
   scrollDetail,
   type DashboardRow,
-} from "../../packages/pi-tai/src/agents/dashboard.ts";
-import { emptySnapshot, type SubagentSnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
+} from "../../packages/pi-tai/src/core/subagents/dashboard.ts";
+import { emptySnapshot, type SubagentSnapshot } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 
 const NOW = Date.parse("2026-01-01T00:05:00.000Z");
 const WIDTH = 96;

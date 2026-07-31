@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
-import { registerAgents } from "../../packages/pi-tai/src/agents/register.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
+import { registerAgents } from "../../packages/pi-tai/src/core/subagents/register.ts";
 import {
   FileWorkspaceRegistry,
   JjCli,
   WorkspaceManager,
-} from "../../packages/pi-tai/src/isolation/index.ts";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+} from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];

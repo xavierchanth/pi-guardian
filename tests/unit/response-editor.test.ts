@@ -5,13 +5,13 @@ import {
   extractResponse,
   findLastAssistantText,
   formatResponseDocument,
-} from "../../packages/pi-tai/src/response-editor/document.ts";
+} from "../../packages/pi-tai/src/terminal/response-editor/document.ts";
 import {
   buildEditorArguments,
   isNeovimInvocation,
   NEOVIM_RESPONSE_POSITION_COMMAND,
   parseEditorCommand,
-} from "../../packages/pi-tai/src/response-editor/command.ts";
+} from "../../packages/pi-tai/src/terminal/response-editor/command.ts";
 
 test("response document shows a fenced preview and a blank response block", () => {
   assert.equal(

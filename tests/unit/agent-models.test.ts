@@ -5,7 +5,7 @@ import {
   MODEL_CATALOG,
   parseModelCatalog,
   resolveModel,
-} from "../../packages/pi-tai/src/agents/models.ts";
+} from "../../packages/pi-tai/src/core/subagents/models.ts";
 
 function choice(input: Parameters<typeof resolveModel>[0]) {
   const result = resolveModel(input);

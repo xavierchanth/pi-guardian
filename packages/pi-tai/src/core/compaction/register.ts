@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionPolicyReader } from "../config/register.ts";
+import type { SessionPolicyReader } from "../../core/config/register.ts";
 
 export function registerAutoCompaction(pi: ExtensionAPI, config: SessionPolicyReader): void {
   let compactionInProgress = false;

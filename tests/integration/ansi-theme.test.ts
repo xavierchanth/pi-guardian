@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/config/schema.ts";
-import { queryTerminalBackground } from "../../packages/pi-tai/src/ansi-theme/query.ts";
-import { registerAnsiTheme } from "../../packages/pi-tai/src/ansi-theme/register.ts";
+import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/core/config/schema.ts";
+import { queryTerminalBackground } from "../../packages/pi-tai/src/terminal/ansi-theme/query.ts";
+import { registerAnsiTheme } from "../../packages/pi-tai/src/terminal/ansi-theme/register.ts";
 
 type Handler = (event: unknown, ctx: any) => unknown;
 

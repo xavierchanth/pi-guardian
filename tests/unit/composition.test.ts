@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPiTaiExtension } from "../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
-import { createPiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
+import { createPiTaiConfigService } from "../../packages/pi-tai/src/core/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../packages/pi-tai/src/work-context/persistence.ts";
 
 test("composition root registers every feature once in order", async () => {

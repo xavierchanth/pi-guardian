@@ -6,7 +6,7 @@ import {
   validateConcurrencyTransaction,
   type ConcurrencyProjectionV1,
   type ExactUsageEntryV1,
-} from "../../packages/pi-tai/src/concurrency/productization.ts";
+} from "../../packages/pi-tai/src/core/concurrency/productization.ts";
 
 function projection(revision = 1): ConcurrencyProjectionV1 {
   return {

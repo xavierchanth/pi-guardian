@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
-import { DEFAULT_MODEL_PROFILES } from "../../packages/pi-tai/src/model-profiles/domain.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
+import { DEFAULT_MODEL_PROFILES } from "../../packages/pi-tai/src/core/model-profiles/domain.ts";
 import {
   matchingProfile,
   registerModelProfiles,
-} from "../../packages/pi-tai/src/model-profiles/register.ts";
+} from "../../packages/pi-tai/src/core/model-profiles/register.ts";
 
 type CommandHandler = (args: string, ctx: any) => Promise<void>;
 

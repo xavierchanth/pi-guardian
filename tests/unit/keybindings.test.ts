@@ -10,7 +10,7 @@ import {
   registerFirstPartyKeybindings,
   THINKING_CYCLE_KEYBINDING,
   THINKING_CYCLE_SHORTCUT,
-} from "../../packages/pi-tai/src/keybindings/register.ts";
+} from "../../packages/pi-tai/src/terminal/keybindings/register.ts";
 
 function temporaryAgentDir(): string {
   return mkdtempSync(join(tmpdir(), "pi-tai-keybindings-"));

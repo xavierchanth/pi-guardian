@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadPiTaiConfig } from "../../packages/pi-tai/src/config/load.ts";
+import { loadPiTaiConfig } from "../../packages/pi-tai/src/core/config/load.ts";
 
 const corpusRoot = join(import.meta.dirname, "../../fixtures/config");
 

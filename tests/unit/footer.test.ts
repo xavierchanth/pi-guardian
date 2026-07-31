@@ -3,13 +3,13 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
-import { registerFooter } from "../../packages/pi-tai/src/footer/register.ts";
+import { registerFooter } from "../../packages/pi-tai/src/terminal/footer/register.ts";
 import {
   footerRowText,
   formatWorkspacePath,
   renderFooterRows,
   type FooterSnapshot,
-} from "../../packages/pi-tai/src/footer/render.ts";
+} from "../../packages/pi-tai/src/terminal/footer/render.ts";
 import type { WorkContextStore } from "../../packages/pi-tai/src/work-context/persistence.ts";
 
 const snapshot: FooterSnapshot = {

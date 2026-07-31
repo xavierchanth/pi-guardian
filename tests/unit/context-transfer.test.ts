@@ -9,8 +9,8 @@ import {
   encodeId,
   normalizeId,
   parseContextTransferArtifact,
-} from "../../packages/pi-tai/src/context-transfer/domain.ts";
-import { createFileContextTransferStore } from "../../packages/pi-tai/src/context-transfer/storage.ts";
+} from "../../packages/pi-tai/src/core/context-transfer/domain.ts";
+import { createFileContextTransferStore } from "../../packages/pi-tai/src/core/context-transfer/storage.ts";
 const source = {
   cwd: "/work",
   sessionId: "s",

@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadPiTaiConfig } from "../../packages/pi-tai/src/config/load.ts";
-import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/config/provenance.ts";
+import { loadPiTaiConfig } from "../../packages/pi-tai/src/core/config/load.ts";
+import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/core/config/provenance.ts";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "pi-tai-config-"));

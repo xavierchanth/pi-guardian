@@ -10,7 +10,7 @@ import {
   type ExtensionContext,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import type { SessionPolicyReader } from "../config/register.ts";
+import type { SessionPolicyReader } from "../../core/config/register.ts";
 import { registerAutoCompaction } from "../compaction/register.ts";
 /** The subset of an agent definition a child session needs to start. */
 export interface AgentDefinitionSnapshot {

@@ -341,7 +341,7 @@ function deny(canonicalPath: string, reason: string): PathDecision {
  * Pi-Tai may be checked out in a workspace, installed under the agent
  * directory, or pulled in as a dependency, so its path cannot be assumed. What
  * does hold is the layout inside the package: this file is always at
- * `<root>/src/guardian/paths.ts`.
+ * `<root>/src/core/guardian/paths.ts`.
  */
 function piTaiPackageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");

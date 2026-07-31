@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti";
-import type { ClientPreferencesReader } from "../config/register.ts";
+import type { ClientPreferencesReader } from "../../core/config/register.ts";
 
 const initializedConfigs = new WeakSet<object>();
 

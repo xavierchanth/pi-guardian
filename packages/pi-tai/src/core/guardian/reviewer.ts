@@ -13,7 +13,7 @@ import {
   type ProposedAction,
   type ReviewDecision,
 } from "./policy.ts";
-import type { WorkContextSnapshot } from "../work-context/domain.ts";
+import type { WorkContextSnapshot } from "../../work-context/domain.ts";
 
 export const REVIEWER_MODEL = "openai-codex/codex-auto-review";
 export const REVIEW_TIMEOUT_MS = 30_000;

@@ -76,7 +76,7 @@ test("checkpoint prompt accepts additional instructions", () => {
 });
 
 test("the subagent tool surface is the nine-tool set", () => {
-  const source = readFileSync(join(root, "packages/pi-tai/src/agents/register.ts"), "utf8");
+  const source = readFileSync(join(root, "packages/pi-tai/src/core/subagents/register.ts"), "utf8");
   const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)]
     .map((match) => match[1])
     .sort();
@@ -92,7 +92,7 @@ test("the subagent tool surface is the nine-tool set", () => {
     "workspace_status",
   ]);
   assert.equal(
-    existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")),
+    existsSync(join(root, "packages/pi-tai/src/core/subagents/register.ts")),
     false,
     "the retired 47-tool registrar is gone",
   );
@@ -100,7 +100,7 @@ test("the subagent tool surface is the nine-tool set", () => {
 
 test("the packaged capability catalog and instruction assets agree", () => {
   const catalog = JSON.parse(
-    readFileSync(join(root, "packages/pi-tai/src/agents/capabilities.json"), "utf8"),
+    readFileSync(join(root, "packages/pi-tai/src/core/subagents/capabilities.json"), "utf8"),
   ) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
   assert.equal(catalog.version, 1);
   assert.deepEqual(
@@ -110,14 +110,14 @@ test("the packaged capability catalog and instruction assets agree", () => {
   for (const capability of catalog.capabilities ?? []) {
     assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
     assert.ok(
-      existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)),
+      existsSync(join(root, "packages/pi-tai/src/core/subagents/capabilities", capability.instructions!)),
     );
   }
 });
 
 test("the packaged model catalog declares every supported alias", () => {
   const catalog = JSON.parse(
-    readFileSync(join(root, "packages/pi-tai/src/agents/models.json"), "utf8"),
+    readFileSync(join(root, "packages/pi-tai/src/core/subagents/models.json"), "utf8"),
   ) as { version?: number; aliases?: Array<{ name?: string }> };
   assert.equal(catalog.version, 1);
   assert.deepEqual(catalog.aliases?.map((entry) => entry.name).sort(), [
@@ -203,7 +203,7 @@ test("desktop manager uses Tauri 2, Vite, React Compiler, and Tailwind", () => {
 
 test("package ships standalone Guardian and required support files", () => {
   assert.equal(manifest.dependencies?.["pi-approval-guardian"], undefined);
-  assert.ok(existsSync(join(root, "packages/pi-tai/src/guardian/reviewer.ts")));
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/core/guardian/reviewer.ts")));
   assert.ok(manifest.files?.includes("justfile"));
   assert.ok(existsSync(join(root, "justfile")));
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);

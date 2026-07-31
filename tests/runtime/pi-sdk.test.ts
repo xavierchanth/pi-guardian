@@ -5,8 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
 import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
-import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/config/provenance.ts";
-import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
+import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/core/config/provenance.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
 
 function pinnedPolicy() {

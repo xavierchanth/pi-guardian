@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { boundContext, answerText } from "../../packages/pi-tai/src/sidebar/domain.ts";
+import { boundContext, answerText } from "../../packages/pi-tai/src/terminal/sidebar/domain.ts";
 
 test("sidebar context trimming keeps an assistant tool call with its result", () => {
   const old = { role: "user", content: "x".repeat(500) };

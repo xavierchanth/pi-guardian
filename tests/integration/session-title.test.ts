@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/config/schema.ts";
+import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
 import { registerSessionTitle } from "../../packages/pi-tai/src/session-title/register.ts";
 
 type Handler = (event: any, ctx: any) => unknown;

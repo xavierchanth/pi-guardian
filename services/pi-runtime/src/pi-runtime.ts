@@ -28,22 +28,22 @@ import type {
   SessionTextParams,
   ThinkingInfo,
 } from "@pi-tai/runtime-protocol";
-import type { SessionPolicy } from "../../../packages/pi-tai/src/config/schema.ts";
-import type { ConfigProvenance } from "../../../packages/pi-tai/src/config/provenance.ts";
+import type { SessionPolicy } from "../../../packages/pi-tai/src/core/config/schema.ts";
+import type { ConfigProvenance } from "../../../packages/pi-tai/src/core/config/provenance.ts";
 import { join } from "node:path";
 import { createPiTaiExtension } from "../../../packages/pi-tai/pi-tai.ts";
 import { SessionCapabilityController } from "../../../packages/pi-tai/src/capabilities/controller.ts";
-import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/config/register.ts";
+import { createPinnedPiTaiConfigService } from "../../../packages/pi-tai/src/core/config/register.ts";
 import { createPiSessionWorkContextStore } from "../../../packages/pi-tai/src/work-context/persistence.ts";
 import {
   HostRepositoryEnrollmentStore,
   RepositoryEnrollmentService,
-} from "../../../packages/pi-tai/src/jj/repository-enrollment.ts";
+} from "../../../packages/pi-tai/src/core/jj/repository-enrollment.ts";
 import {
   HostRepositoryMutationCoordinator,
   HostSessionWorkspaceStore,
   SessionWorkspaceService,
-} from "../../../packages/pi-tai/src/jj/session-workspace.ts";
+} from "../../../packages/pi-tai/src/core/jj/session-workspace.ts";
 import type { DiagnosticSink } from "./diagnostics.ts";
 import type { HostServicePort } from "./host-services.ts";
 import { mapAgentSessionEvent } from "./event-map.ts";

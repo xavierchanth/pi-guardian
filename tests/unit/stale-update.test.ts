@@ -4,7 +4,7 @@ import {
   DIVERGENT_ARGV,
   displacedChangeIds,
   updateStaleSafely,
-} from "../../packages/pi-tai/src/jj/stale-update.ts";
+} from "../../packages/pi-tai/src/core/jj/stale-update.ts";
 
 function harness(
   divergentBefore: string[],
