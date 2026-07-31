@@ -58,7 +58,7 @@ export class PiBackend implements SubagentBackend {
 
   async spawn(task: SpawnTask): Promise<SubagentSession> {
     const handle = await this.factory.create({
-      contextId: task.id,
+      contextId: task.durableId ?? task.id,
       cwd: task.cwd,
       stateRoot: this.options.stateRoot,
       ...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}),
@@ -83,6 +83,7 @@ export class PiBackend implements SubagentBackend {
 
 class PiSubagentSession implements SubagentSession {
   readonly events: AsyncIterable<SubagentEvent>;
+  readonly sessionFile: string;
   private readonly handle: PrivateChildSessionHandle;
   private readonly channel = new EventChannel();
   private readonly unsubscribe: () => void;
@@ -93,6 +94,7 @@ class PiSubagentSession implements SubagentSession {
 
   constructor(handle: PrivateChildSessionHandle, task: SpawnTask) {
     this.handle = handle;
+    this.sessionFile = handle.sessionFile;
     this.events = this.channel.events;
     this.unsubscribe = handle.session.subscribe((event) => this.translate(event));
     this.channel.push({ type: "run_started" });

@@ -40,6 +40,8 @@ export interface SubagentSession {
    * harnesses that support it; `undefined` means every turn starts fresh.
    */
   readonly resumeToken?: string;
+  /** Private durable handle captured for later explicit reopen; never exposed by tools/UI. */
+  readonly sessionFile?: string;
   /** Steers an in-flight run, or starts a new one when idle. */
   send(text: string): Promise<void>;
   interrupt(): Promise<void>;

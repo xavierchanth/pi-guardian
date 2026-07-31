@@ -32,6 +32,7 @@ import { registerSubagentDashboard } from "./dashboard-view.ts";
 import { type BackendName, contextUtilisation, type SubagentSnapshot } from "./domain.ts";
 import { type InstructionLoader, loadPackagedInstructions } from "./instructions.ts";
 import { IsolatedSubagents } from "./isolated.ts";
+import { PiBranchLifecycleStore } from "./lifecycle.ts";
 import { SubagentManager } from "./manager.ts";
 import { MODEL_ALIAS_NAMES, MODEL_ALIASES, resolveModel } from "./models.ts";
 import {
@@ -144,6 +145,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     let isolated!: IsolatedSubagents;
     const agents = new SubagentManager({
       registry: new BackendRegistry(backends),
+      // Injected workspace managers are repository-test harnesses without a Pi
+      // journal. Real composition fails closed when lifecycle persistence is absent.
+      requireLifecycleStore: !dependencies.workspaces,
       onSettled: async (snapshot) => {
         await isolated.reclaimIfEmpty(snapshot);
       },
@@ -572,7 +576,9 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   }));
 
   pi.on("session_start", async (_event, ctx) => {
-    const { workspaces, isolated } = await requireRuntime(ctx);
+    const { workspaces, isolated, agents } = await requireRuntime(ctx);
+    if (!dependencies.workspaces)
+      await agents.attachLifecycleStore(new PiBranchLifecycleStore(pi, ctx.sessionManager));
     // Reclaim what a crashed session left behind before the model can trip over it.
     const swept = await workspaces.sweep(isolated.activeOwners()).catch(() => []);
     const attention = swept.filter((entry) => entry.disposition === "needs_attention");
@@ -590,6 +596,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         { deliverAs: "nextTurn", triggerTurn: false },
       );
     }
+  });
+
+  // Pi can move between branches without starting a new process. Re-fold branch
+  // facts while the manager safely carries its genuinely live handles forward.
+  pi.on("session_tree", async (_event, ctx) => {
+    const { agents } = await requireRuntime(ctx);
+    if (!dependencies.workspaces)
+      await agents.attachLifecycleStore(new PiBranchLifecycleStore(pi, ctx.sessionManager));
   });
 
   /**

@@ -4,6 +4,21 @@ Pi-Tai can hand a self-contained task to a background agent that works in its ow
 checkout, then fold the result back in. This document describes how that works and
 why it is shaped the way it is.
 
+## Durable lifecycle foundation
+
+The first durability foundation is landed: subagents have opaque UUID authority IDs
+while the nine public tools continue to use session-local `sa-N` labels. Versioned
+lifecycle facts are folded from Pi's active branch (`getBranch()`), re-folded on
+session start and tree navigation, and spawning fails closed when the host cannot
+append an intent/running fact. Pi child journals use the durable ID as context and
+their private session-file handle is captured, but children are **not** automatically
+resumed. In-memory pruning no longer consumes pending delivery state.
+
+Later phases remain pending: workspace-registry durable custody/root partitioning,
+report artifacts and delivery ledger/channel separation, explicit continuation and
+recreation, archive UI, and retention. Pi custom entries are an adapter behind the
+`SubagentLifecycleStore` port, not a claim that Pi files are final Host authority.
+
 Two modules do the work, and they know almost nothing about each other:
 
 - **`packages/pi-tai/src/core/isolation/`** manages JJ workspaces. It has no concept of an agent — a

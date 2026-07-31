@@ -20,7 +20,10 @@ export type SubagentStatus = "running" | "done" | "error";
 export type RunOutcome = "completed" | "failed" | "interrupted";
 
 export interface SpawnTask {
+  /** Session-local public label. */
   readonly id: string;
+  /** Opaque authority identity, never rendered in the public tool surface. */
+  readonly durableId?: string;
   /** The task itself: must stand alone, with no reliance on the parent's context. */
   readonly prompt: string;
   /** The child's charter: how to work, and what "done" means. */
@@ -84,6 +87,7 @@ export interface LiveTool {
 
 export interface SubagentSnapshot {
   readonly id: string;
+  readonly durableId: string;
   readonly backend: BackendName;
   readonly title: string;
   readonly cwd: string;
@@ -116,6 +120,7 @@ export const MAX_ERROR_TEXT_BYTES = 4096;
 
 export function emptySnapshot(input: {
   id: string;
+  durableId?: string;
   backend: BackendName;
   title: string;
   cwd: string;
@@ -125,6 +130,7 @@ export function emptySnapshot(input: {
 }): SubagentSnapshot {
   return {
     id: input.id,
+    durableId: input.durableId ?? input.id,
     backend: input.backend,
     title: input.title,
     cwd: input.cwd,

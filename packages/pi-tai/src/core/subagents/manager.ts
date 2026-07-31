@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { BackendRegistry, SubagentBackend, SubagentSession } from "./backend.ts";
 import {
   applyEvent,
@@ -8,6 +9,7 @@ import {
   type SubagentSnapshot,
 } from "./domain.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
+import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
 
 export const MAX_RUNNING_SUBAGENTS = 4;
 export const MAX_TRACKED_SUBAGENTS = 64;
@@ -43,6 +45,8 @@ export interface SubagentManagerOptions {
    * on failure, which is what keeps a crashed spawn from leaking a workspace.
    */
   readonly onSettled?: (snapshot: SubagentSnapshot) => void | Promise<void>;
+  readonly lifecycleStore?: SubagentLifecycleStore;
+  readonly requireLifecycleStore?: boolean;
 }
 
 interface Entry {
@@ -77,6 +81,9 @@ export class SubagentManager {
    */
   private reserved = 0;
   private sequence = 0;
+  private lifecycleStore?: SubagentLifecycleStore;
+  private generation = 1;
+  private readonly requireLifecycleStore: boolean;
 
   constructor(options: SubagentManagerOptions) {
     this.registry = options.registry;
@@ -84,6 +91,54 @@ export class SubagentManager {
     this.maxTracked = options.maxTracked ?? MAX_TRACKED_SUBAGENTS;
     this.clock = options.now ?? (() => new Date().toISOString());
     if (options.onSettled) this.onSettled = options.onSettled;
+    if (options.lifecycleStore) this.lifecycleStore = options.lifecycleStore;
+    this.requireLifecycleStore = options.requireLifecycleStore ?? false;
+  }
+
+  /** Re-folds the active branch. Live handles are carried forward on tree moves. */
+  async attachLifecycleStore(store: SubagentLifecycleStore): Promise<void> {
+    this.lifecycleStore = store;
+    const folded = foldLifecycle(await store.load());
+    this.sequence = Math.max(this.sequence, folded.maxSequence);
+    for (const record of folded.records.values()) {
+      if ([...this.entries.values()].some((entry) => entry.snapshot.durableId === record.durableId))
+        continue;
+      // Historical records are observational only. An unproved prior run is never called running.
+      const disposition = record.disposition === "done" ? "done" : "error";
+      const backend = this.registry.get(record.backend);
+      if (!backend) continue;
+      const resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
+      const snapshot = {
+        ...emptySnapshot({
+          id: record.displayId,
+          durableId: record.durableId,
+          backend: record.backend,
+          title: record.title,
+          cwd: record.cwd,
+          createdAt: record.createdAt,
+        }),
+        status: disposition,
+        ...(disposition === "error"
+          ? {
+              errorText:
+                record.disposition === "running"
+                  ? "Interrupted by session reload."
+                  : "Spawn did not reach a durable running state.",
+            }
+          : {}),
+        settledAt: record.updatedAt,
+      } as SubagentSnapshot;
+      const settled = Promise.resolve(snapshot);
+      this.entries.set(record.displayId, {
+        snapshot,
+        backend,
+        task: undefined as unknown as SpawnTask,
+        settled,
+        resolveSettled,
+        abort: new AbortController(),
+      });
+    }
+    this.generation += 1;
   }
 
   subscribe(listener: (snapshot: SubagentSnapshot) => void): () => void {
@@ -111,7 +166,24 @@ export class SubagentManager {
     }
     this.reserved += 1;
     const id = `sa-${++this.sequence}`;
+    const durableId = randomUUID();
     try {
+      if (!this.lifecycleStore && this.requireLifecycleStore)
+        throw new Error(
+          "Subagent lifecycle persistence is unavailable; refusing to start an unowned child.",
+        );
+      await this.lifecycleStore?.append({
+        version: 1,
+        type: "spawn_intent",
+        durableId,
+        displayId: id,
+        sequence: this.sequence,
+        generation: this.generation,
+        backend: request.backend,
+        title: request.title,
+        cwd: request.cwd,
+        at: this.clock(),
+      });
       const backend = await this.registry.require(request.backend);
       const abort = new AbortController();
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
@@ -121,6 +193,7 @@ export class SubagentManager {
       const entry: Entry = {
         snapshot: emptySnapshot({
           id,
+          durableId,
           backend: request.backend,
           title: request.title,
           cwd: request.cwd,
@@ -139,6 +212,7 @@ export class SubagentManager {
 
       const task: SpawnTask = {
         id,
+        durableId,
         prompt: request.prompt,
         systemPrompt: request.systemPrompt,
         cwd: request.cwd,
@@ -152,7 +226,27 @@ export class SubagentManager {
       };
       entry.task = task;
       try {
+        // Running is durable before the backend receives control.
+        await this.lifecycleStore?.append({
+          version: 1,
+          type: "running",
+          durableId,
+          generation: this.generation,
+          at: this.clock(),
+        });
         entry.session = await backend.spawn(task);
+        if (entry.session.sessionFile) {
+          await this.lifecycleStore
+            ?.append({
+              version: 1,
+              type: "running",
+              durableId,
+              generation: this.generation,
+              at: this.clock(),
+              resumeHandle: { kind: "pi_session_file", value: entry.session.sessionFile },
+            })
+            .catch(() => {});
+        }
       } catch (error) {
         this.finish(entry, { type: "backend_error", message: describe(error) });
         throw error;
@@ -334,6 +428,22 @@ export class SubagentManager {
   private finish(entry: Entry, event: Parameters<typeof applyEvent>[1]): void {
     if (entry.snapshot.status !== "running") return;
     this.update(entry, applyEvent(entry.snapshot, event, this.clock()));
+    const disposition =
+      event.type === "run_settled" && event.outcome === "completed"
+        ? "done"
+        : event.type === "run_settled" && event.outcome === "interrupted"
+          ? "interrupted"
+          : "failed";
+    void this.lifecycleStore
+      ?.append({
+        version: 1,
+        type: "terminal",
+        durableId: entry.snapshot.durableId,
+        generation: this.generation,
+        disposition,
+        at: this.clock(),
+      })
+      .catch(() => {});
     this.reserved = Math.max(0, this.reserved - 1);
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
@@ -364,7 +474,7 @@ export class SubagentManager {
       if (entry.snapshot.status === "running") continue;
       entry.session?.dispose();
       this.entries.delete(id);
-      this.delivery.consume(id);
+      // Durable pending delivery is not consumed by an in-memory eviction.
     }
   }
 }
