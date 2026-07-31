@@ -1,7 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionPolicyReader } from "../../core/config/register.ts";
-export const PROFILE_CYCLE_SHORTCUT = "shift+tab";
-import { THINKING_EFFORTS, type ModelProfile, type ThinkingEffort } from "./domain.ts";
+import type { SessionPolicyReader } from "../config/register.ts";
+import {
+  PROFILE_CYCLE_SHORTCUT,
+  THINKING_EFFORTS,
+  type ModelProfile,
+  type ThinkingEffort,
+} from "./domain.ts";
 
 export function registerModelProfiles(pi: ExtensionAPI, config: SessionPolicyReader): void {
   const profiles = () => config.sessionPolicy().modelProfiles;

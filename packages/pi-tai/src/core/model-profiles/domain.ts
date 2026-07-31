@@ -1,3 +1,5 @@
+export const PROFILE_CYCLE_SHORTCUT = "shift+tab";
+
 export const THINKING_EFFORTS = [
   "off",
   "minimal",

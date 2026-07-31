@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export { PROFILE_CYCLE_SHORTCUT } from "../../core/model-profiles/register.ts";
-import { PROFILE_CYCLE_SHORTCUT } from "../../core/model-profiles/register.ts";
+export { PROFILE_CYCLE_SHORTCUT } from "../../core/model-profiles/domain.ts";
+import { PROFILE_CYCLE_SHORTCUT } from "../../core/model-profiles/domain.ts";
 export const THINKING_CYCLE_SHORTCUT = "ctrl+alt+t";
 export const THINKING_CYCLE_KEYBINDING = "app.thinking.cycle";
 

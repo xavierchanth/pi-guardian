@@ -114,7 +114,19 @@ If cmux presentation does not appear, verify `command -v cmux`, `CMUX_WORKSPACE_
     { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
     { "name": "sol-medium", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "medium" },
     { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" }
-  ]
+  ],
+  "ansiTheme": {
+    "darkTheme": "ansi-dark",
+    "lightTheme": "ansi-light",
+    "pollIntervalMs": 2000
+  },
+  "notifications": {
+    "reviewFailure": true,
+    "agentCompletion": true
+  },
+  "cmux": {
+    "enabled": true
+  }
 }
 ```
 

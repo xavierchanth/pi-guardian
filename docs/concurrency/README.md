@@ -6,14 +6,14 @@ why it is shaped the way it is.
 
 Two modules do the work, and they know almost nothing about each other:
 
-- **`src/core/isolation/`** manages JJ workspaces. It has no concept of an agent — a
+- **`packages/pi-tai/src/core/isolation/`** manages JJ workspaces. It has no concept of an agent — a
   workspace is a directory plus a range of changes, and its owner is an opaque label.
-- **`src/core/subagents/`** coherently owns subagent tools, backends, catalogs,
+- **`packages/pi-tai/src/core/subagents/`** coherently owns subagent tools, backends, catalogs,
   lifecycle, and dashboard. Its manager has no concept of version control — a
   subagent gets a working directory, and where that directory came from is not its
   problem.
 
-`src/core/subagents/isolated.ts` is the only place they meet. Keeping them apart means a
+`packages/pi-tai/src/core/subagents/isolated.ts` is the only place they meet. Keeping them apart means a
 failure in version control is diagnosable without reasoning about process spawning,
 and vice versa.
 

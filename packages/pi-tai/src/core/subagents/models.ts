@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import modelCatalog from "./models.json" with { type: "json" };
 import { BACKEND_NAMES, type BackendName } from "./domain.ts";
 
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -45,9 +45,7 @@ export const BACKEND_DEFAULTS: Record<BackendName, Omit<ModelChoice, "backend">>
  * at this trust boundary so the rest of the agent subsystem receives only valid
  * provider/model/harness combinations.
  */
-export const MODEL_CATALOG = parseModelCatalog(
-  JSON.parse(readFileSync(new URL("./models.json", import.meta.url), "utf8")),
-);
+export const MODEL_CATALOG = parseModelCatalog(modelCatalog);
 
 export const MODEL_ALIASES: Readonly<Record<string, ModelAlias>> = Object.freeze(
   Object.fromEntries(MODEL_CATALOG.aliases.map((alias) => [alias.name, alias])),

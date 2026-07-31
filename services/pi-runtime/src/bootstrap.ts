@@ -26,7 +26,11 @@ async function bootstrap(): Promise<void> {
       timestamp: new Date().toISOString(),
       level: "error",
       event: "runtime_fatal",
-      data: { error: error instanceof Error ? error.name : "unknown" },
+      data: {
+        error: error instanceof Error ? error.name : "unknown",
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+      },
     });
     process.exitCode = 1;
   }

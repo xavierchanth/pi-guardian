@@ -59,14 +59,7 @@ Validates foreground operations, context continuation, usage, and lifecycle emis
 
 Owns task packets, role graph, child contexts, events, acknowledgement, waits, restart intent, file/workspace coordination, and completion gates. See [Concurrency](../concurrency/README.md).
 
-Provides:
-
-- lightweight session goal/checklist state;
-- durable state-owned task trees for substantial implementation;
-- immutable content-addressed Markdown snapshots referenced by the material handed to a subagent;
-- projections consumable by any client.
-
-Task state is owned by the Host rather than by a model: production does not expose `update_plan`, and Host-backed task records are authoritative. A subagent does not read this state. It is given its objective, acceptance criteria, and constraints in its charter when it is spawned, and reports back in its final message.
+A subagent receives its objective, acceptance criteria, and constraints in its charter when it is spawned, and reports back in its final message.
 
 ### Guardian
 

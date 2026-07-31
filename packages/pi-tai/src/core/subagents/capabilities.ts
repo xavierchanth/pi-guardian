@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import capabilityCatalog from "./capabilities.json" with { type: "json" };
 import { BACKEND_NAMES, type BackendName } from "./domain.ts";
 import { EFFORT_LEVELS, MODEL_ALIASES, resolveModel, type EffortLevel } from "./models.ts";
 
@@ -74,20 +75,30 @@ export function parseCapabilityCatalog(input: unknown): CapabilityCatalog {
   return Object.freeze({ version: 1, capabilities: Object.freeze(capabilities) });
 }
 
-export const CAPABILITY_CATALOG = parseCapabilityCatalog(
-  JSON.parse(readFileSync(new URL("./capabilities.json", import.meta.url), "utf8")),
-);
+export const CAPABILITY_CATALOG = parseCapabilityCatalog(capabilityCatalog);
 export const CAPABILITIES = Object.freeze(
   Object.fromEntries(
     CAPABILITY_CATALOG.capabilities.map((capability) => [capability.name, capability]),
   ),
 ) as Readonly<Record<CapabilityName, Capability>>;
 
+const PACKAGED_CAPABILITY_INSTRUCTIONS: Readonly<Record<CapabilityName, string>> = {
+  researcher:
+    "Research claims carefully. Prefer primary sources, distinguish evidence from inference, and include source URLs in the final report.",
+};
+
 export function capabilityInstructions(capability: Capability): string {
-  return readFileSync(
-    new URL(`./capabilities/${capability.instructions}`, import.meta.url),
-    "utf8",
-  ).trim();
+  try {
+    return readFileSync(
+      new URL(`./capabilities/${capability.instructions}`, import.meta.url),
+      "utf8",
+    ).trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return PACKAGED_CAPABILITY_INSTRUCTIONS[capability.name];
+    }
+    throw error;
+  }
 }
 
 function object(value: unknown, path: string): Record<string, unknown> {
