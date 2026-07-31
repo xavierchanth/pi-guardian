@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import {
-  getAgentDir,
-  getMarkdownTheme,
   type ExtensionAPI,
   type ExtensionContext,
+  getAgentDir,
+  getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -11,31 +11,34 @@ import type { SessionPolicyReader } from "../../core/config/register.ts";
 import {
   FileWorkspaceRegistry,
   JjCli,
-  WorkspaceManager,
   type MergeStrategy,
+  WorkspaceManager,
   type WorkspaceRecord,
 } from "../isolation/index.ts";
 import { JjProcessExecutor } from "../jj/executor.ts";
-import { composePiTaiInstructions } from "./charter-domain.ts";
-import { loadPackagedInstructions, type InstructionLoader } from "./instructions.ts";
+import { connectSubagentActivity } from "./activity.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
-import {
-  CAPABILITIES,
-  CAPABILITY_NAMES,
-  capabilityInstructions,
-  type CapabilityName,
-} from "./capabilities.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
 import { CodexBackend } from "./backends/codex.ts";
 import { PiBackend } from "./backends/pi.ts";
+import {
+  CAPABILITIES,
+  CAPABILITY_NAMES,
+  type CapabilityName,
+  capabilityInstructions,
+} from "./capabilities.ts";
+import { composePiTaiInstructions } from "./charter-domain.ts";
 import { registerSubagentDashboard } from "./dashboard-view.ts";
-import { contextUtilisation, type BackendName, type SubagentSnapshot } from "./domain.ts";
+import { type BackendName, contextUtilisation, type SubagentSnapshot } from "./domain.ts";
+import { type InstructionLoader, loadPackagedInstructions } from "./instructions.ts";
 import { IsolatedSubagents } from "./isolated.ts";
 import { SubagentManager } from "./manager.ts";
-import { MODEL_ALIASES, MODEL_ALIAS_NAMES, resolveModel } from "./models.ts";
+import { MODEL_ALIAS_NAMES, MODEL_ALIASES, resolveModel } from "./models.ts";
 import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
+  composeChildCharter,
+  composeChildPrompt,
   DELEGATION_GUIDELINES,
   DISCARD_DESCRIPTION,
   LIST_DESCRIPTION,
@@ -46,8 +49,6 @@ import {
   WAIT_GUIDELINES,
   WORKSPACE_GUIDELINES,
   WORKSPACE_STATUS_DESCRIPTION,
-  composeChildCharter,
-  composeChildPrompt,
 } from "./prompt.ts";
 
 export interface AgentsDependencies {
@@ -148,6 +149,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       },
     });
     isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: ctx.cwd });
+    connectSubagentActivity(pi, agents);
     built = { workspaces, agents, isolated };
     return built;
   }

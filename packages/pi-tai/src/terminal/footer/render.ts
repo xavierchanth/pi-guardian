@@ -1,5 +1,6 @@
 import { basename, dirname } from "node:path";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { SubagentActivitySummary } from "../../core/subagents/activity.ts";
 
 export interface FooterUsage {
   input: number;
@@ -11,10 +12,6 @@ export interface FooterUsage {
 
 export interface FooterSnapshot {
   cwd: string;
-  goal?: string;
-  currentStep?: string;
-  currentStepNumber?: number;
-  totalSteps: number;
   usage: FooterUsage;
   contextWindow: number;
   contextPercent: number | null;
@@ -22,6 +19,7 @@ export interface FooterSnapshot {
   model: string;
   reasoning: boolean;
   thinkingLevel: string;
+  subagents: SubagentActivitySummary;
 }
 
 export interface FooterRow {
@@ -50,17 +48,19 @@ export function formatWorkspacePath(cwd: string): string {
 export function renderFooterRows(snapshot: FooterSnapshot, width: number): FooterRow[] {
   if (width <= 0) return [];
 
-  const goalText = snapshot.goal?.replace(/^goal:\s*/i, "") || "No active goal";
-  const goal = `Goal: ${goalText}`;
-  const stepPrefix = snapshot.currentStepNumber
-    ? `${snapshot.currentStepNumber}/${snapshot.totalSteps}`
-    : `0/${snapshot.totalSteps}`;
-  const step = `${stepPrefix}: ${snapshot.currentStep || "No active step"}`;
+  const latest = snapshot.subagents.latest;
+  // Activity ultimately originates in model/tool text. Sanitize again at the
+  // presentation boundary so alternate providers cannot inject terminal controls.
+  const activity = latest
+    ? `${sanitizeFooterText(latest.displayId)} · ${sanitizeFooterText(latest.activity)}`
+    : "No subagent activity";
+  const { running, done, error } = snapshot.subagents.totals;
+  const totals = `Subagents: ${running} running · ${done} done · ${error} error`;
   const model = `${snapshot.model} · ${snapshot.thinkingLevel}`;
   const context =
     snapshot.contextPercent === null
-      ? `?/${formatTokens(snapshot.contextWindow)} (auto)`
-      : `${snapshot.contextPercent.toFixed(1)}%/${formatTokens(snapshot.contextWindow)} (auto)`;
+      ? `?/${formatTokens(snapshot.contextWindow)}`
+      : `${snapshot.contextPercent.toFixed(1)}%/${formatTokens(snapshot.contextWindow)}`;
 
   const usage: string[] = [];
   if (snapshot.usage.input) usage.push(`↑${formatTokens(snapshot.usage.input)}`);
@@ -68,18 +68,27 @@ export function renderFooterRows(snapshot: FooterSnapshot, width: number): Foote
   if (snapshot.usage.cacheRead) usage.push(`R${formatTokens(snapshot.usage.cacheRead)}`);
   if (snapshot.usage.cacheWrite) usage.push(`W${formatTokens(snapshot.usage.cacheWrite)}`);
   if (snapshot.usage.cost || snapshot.usingSubscription) {
-    usage.push(`$${snapshot.usage.cost.toFixed(3)}${snapshot.usingSubscription ? " (sub)" : ""}`);
+    usage.push(
+      `$${snapshot.usage.cost.toFixed(3)}${snapshot.usingSubscription ? " (sub)" : " (api)"}`,
+    );
   }
 
   return [
-    layoutRow(goal, model, width, "text"),
-    layoutRow(step, context, width, "text"),
+    layoutRow(activity, model, width, "text"),
+    layoutRow(totals, context, width, "text"),
     layoutRow(formatWorkspacePath(snapshot.cwd), usage.join(" "), width, "text"),
   ];
 }
 
 export function footerRowText(row: FooterRow): string {
   return row.left + row.padding + row.right;
+}
+
+export function sanitizeFooterText(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function layoutRow(

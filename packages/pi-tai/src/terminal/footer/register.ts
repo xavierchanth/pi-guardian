@@ -1,23 +1,42 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { renderFooterRows, type FooterSnapshot, type FooterUsage } from "./render.ts";
+import { subagentActivityProvider } from "../../core/subagents/activity.ts";
+import { type FooterSnapshot, type FooterUsage, renderFooterRows } from "./render.ts";
 
 export function registerFooter(pi: ExtensionAPI): void {
+  let disposeActivitySubscription: (() => void) | undefined;
+  const dispose = () => {
+    disposeActivitySubscription?.();
+    disposeActivitySubscription = undefined;
+  };
+
   pi.on("session_start", (_event, ctx) => {
+    dispose();
     if (ctx.mode !== "tui") return;
 
-    ctx.ui.setFooter((_tui, theme) => ({
-      invalidate() {},
-      render(width: number): string[] {
-        return renderFooterRows(createSnapshot(pi, ctx), width).map(
-          (row) => theme.fg(row.leftColor, row.left) + theme.fg("text", row.padding + row.right),
-        );
-      },
-    }));
+    const activity = subagentActivityProvider(pi);
+    ctx.ui.setFooter((tui, theme) => {
+      dispose();
+      disposeActivitySubscription = activity.subscribe(() => tui.requestRender());
+      return {
+        invalidate() {},
+        render(width: number): string[] {
+          return renderFooterRows(createSnapshot(pi, ctx, activity.read()), width).map(
+            (row) => theme.fg(row.leftColor, row.left) + theme.fg("text", row.padding + row.right),
+          );
+        },
+      };
+    });
   });
+
+  pi.on("session_shutdown", dispose);
 }
 
-function createSnapshot(pi: ExtensionAPI, ctx: ExtensionContext): FooterSnapshot {
+function createSnapshot(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  subagents: FooterSnapshot["subagents"],
+): FooterSnapshot {
   const usage: FooterUsage = {
     input: 0,
     output: 0,
@@ -41,7 +60,6 @@ function createSnapshot(pi: ExtensionAPI, ctx: ExtensionContext): FooterSnapshot
   const model = ctx.model;
   return {
     cwd: ctx.cwd,
-    totalSteps: 0,
     usage,
     contextWindow: context?.contextWindow ?? model?.contextWindow ?? 0,
     contextPercent: context?.percent ?? null,
@@ -49,6 +67,7 @@ function createSnapshot(pi: ExtensionAPI, ctx: ExtensionContext): FooterSnapshot
     model: model?.id ?? "no-model",
     reasoning: model?.reasoning ?? false,
     thinkingLevel: pi.getThinkingLevel(),
+    subagents,
   };
 }
 

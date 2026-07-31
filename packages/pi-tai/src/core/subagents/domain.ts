@@ -91,6 +91,8 @@ export interface SubagentSnapshot {
   readonly workspaceId?: string;
   readonly status: SubagentStatus;
   readonly createdAt: string;
+  /** Backend-neutral timestamp of the newest actual lifecycle, text, tool, or usage event. */
+  readonly lastActivityAt?: string;
   readonly settledAt?: string;
   readonly errorText?: string;
   readonly model?: string;
@@ -147,24 +149,25 @@ export function applyEvent(
   event: SubagentEvent,
   at: string,
 ): SubagentSnapshot {
+  const active = { ...snapshot, lastActivityAt: at };
   switch (event.type) {
     case "run_started":
-      return { ...snapshot, status: "running" };
+      return { ...active, status: "running" };
     case "assistant_delta":
       return {
-        ...snapshot,
+        ...active,
         latestText: `${snapshot.status === "running" ? snapshot.latestText : ""}${event.text}`,
       };
     case "assistant_message":
       return {
-        ...snapshot,
+        ...active,
         turns: snapshot.turns + 1,
         finalText: event.text,
         latestText: event.text,
       };
     case "tool_start":
       return {
-        ...snapshot,
+        ...active,
         liveTools: (
           [
             ...snapshot.liveTools.filter(
@@ -181,7 +184,7 @@ export function applyEvent(
     case "tool_end": {
       const state: LiveTool["state"] = event.ok ? "done" : "error";
       return {
-        ...snapshot,
+        ...active,
         liveTools: snapshot.liveTools.map(
           (tool, index, all): LiveTool =>
             index === all.length - 1 && tool.state === "running"
@@ -192,7 +195,7 @@ export function applyEvent(
     }
     case "usage":
       return {
-        ...snapshot,
+        ...active,
         usage: {
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
@@ -203,7 +206,7 @@ export function applyEvent(
       };
     case "meta":
       return {
-        ...snapshot,
+        ...active,
         ...(event.model ? { model: event.model } : {}),
         ...(event.contextWindow
           ? { usage: { ...snapshot.usage, contextWindow: event.contextWindow } }
@@ -212,7 +215,7 @@ export function applyEvent(
     case "run_settled": {
       const failed = event.outcome !== "completed";
       return {
-        ...snapshot,
+        ...active,
         status: failed ? "error" : "done",
         settledAt: at,
         ...(event.text ? { finalText: event.text, latestText: event.text } : {}),
@@ -229,7 +232,7 @@ export function applyEvent(
     }
     case "backend_error":
       return {
-        ...snapshot,
+        ...active,
         status: "error",
         settledAt: at,
         errorText: bound(event.message),
