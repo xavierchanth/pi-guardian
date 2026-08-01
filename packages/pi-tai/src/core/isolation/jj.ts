@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import type { AbsolutePath } from "../jj/domain.ts";
 import { renderJjExecutionFailure, type JjExecutor } from "../jj/executor.ts";
 import { updateStaleSafely } from "../jj/stale-update.ts";
@@ -86,7 +87,12 @@ export class JjCli {
   }
 
   async repositoryRoot(cwd: string): Promise<string> {
-    return (await this.read(cwd, ["root"])).trim();
+    const reported = (await this.read(cwd, ["root"])).trim();
+    if (!reported) throw new Error("jj returned an empty repository root");
+    const [actual, canonical] = await Promise.all([realpath(cwd), realpath(reported)]);
+    if (actual !== canonical && !actual.startsWith(`${canonical}/`))
+      throw new Error("jj repository root does not contain the requested working directory");
+    return canonical;
   }
 
   async workspaceNames(cwd: string): Promise<string[]> {
@@ -115,21 +121,21 @@ export class JjCli {
   async workspaceHead(repoRoot: string, name: string): Promise<string | undefined> {
     if (!/^pitai-[a-z0-9-]{1,40}$/.test(name))
       throw new Error(`Invalid managed workspace name: ${name}`);
-    try {
-      const out = await this.read(repoRoot, [
-        "--ignore-working-copy",
-        "log",
-        "-r",
-        `"${name}@"`,
-        "--no-graph",
-        "-T",
-        'change_id ++ "\\n"',
-      ]);
-      const ids = splitLines(out);
-      return ids.length === 1 ? ids[0] : undefined;
-    } catch {
-      return undefined;
-    }
+    // Listing first makes absence an explicit observation. A subsequent log
+    // failure is infrastructure/repository failure and must not be downgraded.
+    if (!(await this.workspaceNames(repoRoot)).includes(name)) return undefined;
+    const out = await this.read(repoRoot, [
+      "--ignore-working-copy",
+      "log",
+      "-r",
+      `${name}@`,
+      "--no-graph",
+      "-T",
+      'change_id ++ "\\n"',
+    ]);
+    const ids = splitLines(out);
+    if (ids.length !== 1) throw new Error(`Workspace ${name} did not resolve uniquely`);
+    return ids[0];
   }
 
   /** Distinguishes visible, divergent, hidden, and never-known Change IDs. */
@@ -156,20 +162,18 @@ export class JjCli {
     );
     if (visible.length === 1) return { kind: "unique", commitId: visible[0]! };
     if (visible.length > 1) return { kind: "divergent", commitIds: visible.sort() };
-    try {
+    const hidden = splitLines(
       await this.read(repoRoot, [
         "--ignore-working-copy",
         "log",
         "-r",
-        `${changeId}/0`,
+        `all() & ${changeId}/0`,
         "--no-graph",
         "-T",
         'commit_id ++ "\\n"',
-      ]);
-      return { kind: "hidden" };
-    } catch {
-      return { kind: "unknown" };
-    }
+      ]),
+    );
+    return hidden.length ? { kind: "hidden" } : { kind: "unknown" };
   }
 
   async ownedHeads(
@@ -181,7 +185,7 @@ export class JjCli {
     if (!/^pitai-[a-z0-9-]{1,40}$/.test(workspaceName))
       throw new Error(`Invalid managed workspace name: ${workspaceName}`);
     const recorded = recordedHeads.length ? ` | (${exactAny(recordedHeads)})` : "";
-    const revset = `heads(((${exactAny(baseChangeIds)})..("${workspaceName}@"))${recorded})`;
+    const revset = `heads(((${exactAny(baseChangeIds)})..(${workspaceName}@))${recorded})`;
     return splitLines(
       await this.read(repoRoot, [
         "--ignore-working-copy",

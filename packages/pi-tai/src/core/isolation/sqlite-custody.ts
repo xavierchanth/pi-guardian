@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type {
   BeginOperationInput,
   CustodyMutation,
@@ -6,8 +6,14 @@ import type {
   CustodyRecord,
   WorkspaceCustodyPort,
 } from "./custody-port.ts";
+
+function parseArray(value: unknown, field: string): string[] {
+  const parsed: unknown = JSON.parse(String(value));
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string" || !item))
+    throw new Error(`Invalid ${field} in custody database`);
+  return parsed;
+}
 function decode(r: Record<string, unknown>): CustodyRecord {
-  const json = (v: unknown) => JSON.parse(String(v)) as string[];
   return {
     id: String(r.id),
     name: String(r.name),
@@ -17,30 +23,71 @@ function decode(r: Record<string, unknown>): CustodyRecord {
     disposition: r.disposition as CustodyRecord["disposition"],
     attachmentEvidence: r.attachment_evidence as CustodyRecord["attachmentEvidence"],
     directoryEvidence: r.directory_evidence as CustodyRecord["directoryEvidence"],
-    ...(r.evidence_at ? { evidenceAt: String(r.evidence_at) } : {}),
-    baseChangeIds: json(r.base_change_ids),
-    ...(r.root_change_id ? { rootChangeId: String(r.root_change_id) } : {}),
-    headChangeIds: json(r.head_change_ids),
-    conflictRetained: !!r.conflict_retained,
+    ...(r.evidence_at !== null ? { evidenceAt: String(r.evidence_at) } : {}),
+    baseChangeIds: parseArray(r.base_change_ids, "base_change_ids"),
+    ...(r.root_change_id !== null ? { rootChangeId: String(r.root_change_id) } : {}),
+    headChangeIds: parseArray(r.head_change_ids, "head_change_ids"),
+    ...(r.merged_into_change_id !== null
+      ? { mergedIntoChangeId: String(r.merged_into_change_id) }
+      : {}),
+    ...(r.merged_proof_op !== null ? { mergedProofOp: String(r.merged_proof_op) } : {}),
+    conflictRetained: Boolean(r.conflict_retained),
+    ...(r.owner_id !== null ? { ownerId: String(r.owner_id) } : {}),
+    ...(r.owner_display_id !== null ? { ownerDisplayId: String(r.owner_display_id) } : {}),
+    ...(r.anchor_token !== null ? { anchorToken: String(r.anchor_token) } : {}),
     rootSessionId: String(r.root_session_id),
-    quarantined: !!r.quarantined,
-    attention: !!r.attention,
+    ...(r.parent_workspace_id !== null ? { parent: String(r.parent_workspace_id) } : {}),
+    ...(r.pending_op_id !== null ? { pendingOpId: String(r.pending_op_id) } : {}),
+    quarantined: Boolean(r.quarantined),
+    attention: Boolean(r.attention),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
-    ...(r.incident_stage
+    ...(r.incident_stage !== null
       ? { incident: { stage: String(r.incident_stage), reason: String(r.incident_reason) } }
       : {}),
+    ...(r.merge_json !== null ? { merge: JSON.parse(String(r.merge_json)) } : {}),
   };
 }
+
+const PATCH_COLUMNS: Record<string, string> = {
+  name: "name",
+  path: "path",
+  repoId: "repo_id",
+  repoRoot: "repo_root",
+  attachmentEvidence: "attachment_evidence",
+  directoryEvidence: "directory_evidence",
+  evidenceAt: "evidence_at",
+  baseChangeIds: "base_change_ids",
+  rootChangeId: "root_change_id",
+  headChangeIds: "head_change_ids",
+  mergedIntoChangeId: "merged_into_change_id",
+  mergedProofOp: "merged_proof_op",
+  conflictRetained: "conflict_retained",
+  ownerId: "owner_id",
+  ownerDisplayId: "owner_display_id",
+  anchorToken: "anchor_token",
+  parent: "parent_workspace_id",
+  pendingOpId: "pending_op_id",
+  quarantined: "quarantined",
+  attention: "attention",
+  incident: "incident_stage",
+  merge: "merge_json",
+};
+const jsonFields = new Set(["baseChangeIds", "headChangeIds", "merge"]);
+const boolFields = new Set(["conflictRetained", "quarantined", "attention"]);
+
 export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(
+    private readonly db: DatabaseSync,
+    private readonly clock: () => string = () => new Date().toISOString(),
+  ) {}
   async list(f?: {
     rootSessionId?: string;
     repoId?: string;
     dispositions?: readonly CustodyRecord["disposition"][];
   }): Promise<CustodyRecord[]> {
-    const where: string[] = [];
-    const args: (string | number | null)[] = [];
+    const where: string[] = [],
+      args: string[] = [];
     if (f?.rootSessionId) {
       where.push("root_session_id=?");
       args.push(f.rootSessionId);
@@ -66,6 +113,7 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
     return r ? decode(r) : undefined;
   }
   async begin(i: BeginOperationInput) {
+    if (!i.opId || !i.processIdentity) throw new Error("Operation identity must not be empty");
     this.db
       .prepare(
         "INSERT INTO custody_operation(op_id,workspace_id,repo_id,kind,state,requested_by,pid,process_identity,change_ids,started_at,heartbeat_at) VALUES(?,?,?,?,'intent',?,?,?,?,?,?)",
@@ -85,11 +133,25 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
     return { ...i, state: "intent" } as CustodyOperation;
   }
   async commit(opId: string, m: CustodyMutation) {
-    this.db.exec("BEGIN IMMEDIATE");
+    let begun = false;
     try {
-      const old = await this.get(m.workspaceId);
-      if (!old) throw new Error("Unknown custody row");
-      const to = m.disposition ?? old.disposition;
+      this.db.exec("BEGIN IMMEDIATE");
+      begun = true;
+      const oldRow = this.db.prepare("SELECT * FROM workspace WHERE id=?").get(m.workspaceId) as
+        | Record<string, unknown>
+        | undefined;
+      if (!oldRow) throw new Error("Unknown custody row");
+      const old = decode(oldRow),
+        to = m.disposition ?? old.disposition;
+      const operation = this.db
+        .prepare("SELECT state,workspace_id FROM custody_operation WHERE op_id=?")
+        .get(opId) as { state: string; workspace_id: string | null } | undefined;
+      if (
+        !operation ||
+        operation.state !== "intent" ||
+        (operation.workspace_id && operation.workspace_id !== m.workspaceId)
+      )
+        throw new Error("Custody operation is not an applicable intent");
       const seq = Number(
         (
           this.db
@@ -100,11 +162,42 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
       this.db
         .prepare("INSERT INTO custody_event VALUES(?,?,?,?,?,?,?)")
         .run(opId, seq, m.workspaceId, old.disposition, to, m.cause, m.now);
-      const result = this.db
-        .prepare(
-          "UPDATE workspace SET disposition=?,updated_at=?,pending_op_id=NULL WHERE id=? AND root_session_id=?",
+      const sets = ["disposition=?", "updated_at=?", "pending_op_id=NULL"],
+        values: SQLInputValue[] = [to, m.now];
+      for (const [key, value] of Object.entries(m.patch ?? {})) {
+        if (
+          key === "id" ||
+          key === "rootSessionId" ||
+          key === "createdAt" ||
+          key === "updatedAt" ||
+          key === "disposition"
         )
-        .run(to, m.now, m.workspaceId, m.ownRootSessionId);
+          continue;
+        const column = PATCH_COLUMNS[key];
+        if (!column) continue;
+        if (key === "incident") {
+          sets.push("incident_stage=?", "incident_reason=?");
+          const incident = value as CustodyRecord["incident"];
+          values.push(incident?.stage ?? null, incident?.reason ?? null);
+          continue;
+        }
+        sets.push(`${column}=?`);
+        values.push(
+          value === undefined
+            ? null
+            : jsonFields.has(key)
+              ? JSON.stringify(value)
+              : boolFields.has(key)
+                ? value
+                  ? 1
+                  : 0
+                : (value as SQLInputValue),
+        );
+      }
+      values.push(m.workspaceId, m.ownRootSessionId);
+      const result = this.db
+        .prepare(`UPDATE workspace SET ${sets.join(",")} WHERE id=? AND root_session_id=?`)
+        .run(...values);
       if (result.changes !== 1) throw new Error("Custody mutation refused: foreign root");
       this.db
         .prepare(
@@ -112,23 +205,30 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
         )
         .run(m.now, m.now, opId);
       this.db.exec("COMMIT");
+      begun = false;
     } catch (e) {
-      this.db.exec("ROLLBACK");
+      if (begun)
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {}
       throw e;
     }
     return (await this.get(m.workspaceId))!;
   }
   async fail(opId: string, evidence: string) {
+    const now = this.clock();
     this.db
       .prepare(
-        "UPDATE custody_operation SET state='failed',settled_at=datetime('now'),evidence=? WHERE op_id=?",
+        "UPDATE custody_operation SET state='failed',settled_at=?,heartbeat_at=?,evidence=? WHERE op_id=?",
       )
-      .run(evidence.slice(0, 8192), opId);
+      .run(now, now, evidence.slice(0, 8192), opId);
   }
   async recordAbandonReceipt(
     opId: string,
     r: Parameters<WorkspaceCustodyPort["recordAbandonReceipt"]>[1],
   ) {
+    if (!r.changeIds.length) throw new Error("Abandon receipt requires canonical heads");
+    const ids = [...new Set(r.changeIds)].sort();
     this.db
       .prepare("INSERT INTO abandon_receipt VALUES(?,?,?,?,?,?,?,1,?)")
       .run(
@@ -136,22 +236,26 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
         r.workspaceId,
         opId,
         r.requestedBy,
-        JSON.stringify([...r.changeIds].sort()),
+        JSON.stringify(ids),
         r.jjOpBefore,
         r.jjOpAfter,
         r.at,
       );
   }
   async openOperations(f?: { repoId?: string }) {
-    return this.db
+    const rows = this.db
       .prepare(
-        `SELECT op_id AS opId,workspace_id AS workspaceId,repo_id AS repoId,kind,state,requested_by AS requestedBy,pid,process_identity AS processIdentity,started_at AS now FROM custody_operation WHERE state IN('intent','jj_applied','unknown')${f?.repoId ? " AND repo_id=?" : ""}`,
+        `SELECT op_id AS opId,workspace_id AS workspaceId,repo_id AS repoId,kind,state,requested_by AS requestedBy,pid,process_identity AS processIdentity,change_ids AS changeIds,started_at AS now FROM custody_operation WHERE state IN('intent','jj_applied','unknown')${f?.repoId ? " AND repo_id=?" : ""}`,
       )
-      .all(...(f?.repoId ? [f.repoId] : [])) as unknown as CustodyOperation[];
+      .all(...(f?.repoId ? [f.repoId] : [])) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      ...r,
+      changeIds: r.changeIds === null ? undefined : parseArray(r.changeIds, "change_ids"),
+    })) as unknown as CustodyOperation[];
   }
   async heartbeat(opId: string) {
     this.db
-      .prepare("UPDATE custody_operation SET heartbeat_at=datetime('now') WHERE op_id=?")
-      .run(opId);
+      .prepare("UPDATE custody_operation SET heartbeat_at=? WHERE op_id=?")
+      .run(this.clock(), opId);
   }
 }
