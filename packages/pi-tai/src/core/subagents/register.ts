@@ -8,14 +8,20 @@ import {
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionPolicyReader } from "../../core/config/register.ts";
+import type { DatabaseSync } from "node:sqlite";
 import {
-  FileWorkspaceRegistry,
   JjCli,
   type MergeStrategy,
-  WorkspaceManager,
+  SQLiteWorkspaceManager,
+  type WorkspaceManagerPort,
   type WorkspaceRecord,
 } from "../isolation/index.ts";
+import { SQLiteCustodyCoordinator } from "../isolation/sqlite-custody-coordinator.ts";
+import { SqliteWorkspaceCustody } from "../isolation/sqlite-custody.ts";
 import { JjProcessExecutor } from "../jj/executor.ts";
+import { migrateWorkspaceRegistry } from "../storage/custody-migration.ts";
+import { ensureStoragePaths, resolveStoragePaths } from "../storage/paths.ts";
+import { openDurableDatabase } from "../storage/sqlite.ts";
 import { connectSubagentActivity } from "./activity.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
@@ -69,15 +75,17 @@ export interface AgentsDependencies {
    */
   readonly defaultBackend?: BackendName;
   /** Test seams. */
-  readonly workspaces?: WorkspaceManager;
+  readonly workspaces?: WorkspaceManagerPort;
   readonly extraBackends?: readonly SubagentBackend[];
   readonly loadInstructions?: InstructionLoader;
 }
 
 interface Runtime {
-  readonly workspaces: WorkspaceManager;
+  readonly workspaces: WorkspaceManagerPort;
   readonly agents: SubagentManager;
   readonly isolated: IsolatedSubagents;
+  /** Owned only by production composition; injected test managers have no DB. */
+  readonly database?: DatabaseSync;
 }
 
 /**
@@ -123,15 +131,43 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 
   async function build(ctx: ExtensionContext): Promise<Runtime> {
     const stateRoot = join(agentDir, "pi-tai", "agents");
-    const workspaces =
-      dependencies.workspaces ??
-      new WorkspaceManager({
-        jj: new JjCli(new JjProcessExecutor()),
-        registry: new FileWorkspaceRegistry(stateRoot),
-        sourcePath: ctx.cwd,
-        workspaceRoot: join(stateRoot, "workspaces"),
-        rootSessionId: ctx.sessionManager.getSessionId(),
-      });
+    let database: DatabaseSync | undefined;
+    let workspaces = dependencies.workspaces;
+    if (!workspaces) {
+      const paths = resolveStoragePaths();
+      ensureStoragePaths(paths);
+      database = openDurableDatabase({ paths });
+      try {
+        // This is the sole production reader of the legacy registry. Migration
+        // copies and receipts it, but never mutates or writes workspaces.json.
+        migrateWorkspaceRegistry(database, agentDir, paths);
+        const rootSessionId = ctx.sessionManager.getSessionId();
+        const now = new Date().toISOString();
+        database
+          .prepare(
+            "INSERT INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,'startup',?,?,?) ON CONFLICT(session_id) DO UPDATE SET cwd=excluded.cwd,last_seen_at=excluded.last_seen_at",
+          )
+          .run(rootSessionId, ctx.cwd, now, now);
+        const jj = new JjCli(new JjProcessExecutor());
+        const custody = new SqliteWorkspaceCustody(database);
+        const coordinator = new SQLiteCustodyCoordinator(database, custody, jj);
+        await coordinator.recover();
+        workspaces = new SQLiteWorkspaceManager({
+          jj,
+          custody,
+          coordinator,
+          sourcePath: ctx.cwd,
+          workspaceRoot: paths.workspaces,
+          rootSessionId,
+        });
+      } catch (error) {
+        database.close();
+        database = undefined;
+        // Shared isolation does not require custody. Keep it usable while every
+        // workspace operation fails closed with one bounded remediation hint.
+        workspaces = unavailableWorkspaceManager(error);
+      }
+    }
     const backends: SubagentBackend[] = [
       new PiBackend({
         config: dependencies.config,
@@ -157,7 +193,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     });
     isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: ctx.cwd });
     connectSubagentActivity(pi, agents);
-    built = { workspaces, agents, isolated };
+    built = { workspaces, agents, isolated, ...(database ? { database } : {}) };
     return built;
   }
 
@@ -705,9 +741,34 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
 
   pi.on("session_shutdown", async () => {
     if (!runtime) return;
-    const { agents } = await runtime;
-    await agents.shutdown().catch(() => {});
+    const current = await runtime;
+    // Agent shutdown waits for child operations and settlement hooks. SQLite is
+    // closed only afterwards, and clearing composition permits a safe reopen.
+    await current.agents.shutdown().catch(() => {});
+    current.database?.close();
+    runtime = undefined;
+    built = undefined;
   });
+}
+
+function unavailableWorkspaceManager(cause: unknown): WorkspaceManagerPort {
+  const detail = String(cause).replaceAll(/\s+/g, " ").slice(0, 512);
+  const unavailable = () =>
+    Promise.reject(
+      new Error(
+        `Workspace custody unavailable; isolated operations are disabled. Check the XDG state directory and state.sqlite3. ${detail}`,
+      ),
+    );
+  return {
+    create: unavailable,
+    get: unavailable,
+    list: unavailable,
+    pendingChanges: unavailable,
+    assignOwner: unavailable,
+    merge: unavailable,
+    discard: unavailable,
+    sweep: unavailable,
+  } as WorkspaceManagerPort;
 }
 
 function renderLine(snapshot: SubagentSnapshot): string {
