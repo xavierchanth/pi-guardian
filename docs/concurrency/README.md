@@ -14,9 +14,11 @@ append an intent/running fact. Pi child journals use the durable ID as context a
 their private session-file handle is captured, but children are **not** automatically
 resumed. In-memory pruning no longer consumes pending delivery state.
 
-Later phases remain pending: workspace-registry durable custody/root partitioning,
-report artifacts and delivery ledger/channel separation, explicit continuation and
-recreation, archive UI, and retention. Pi custom entries are an adapter behind the
+K7b workspace custody is now landed: production uses SQLite authority, partitions
+custody by durable root session, recovers coordinator operations before tools, and
+migrates legacy v2 JSON non-destructively and idempotently. Later phases remain
+pending for report artifacts and delivery ledger/channel separation, explicit
+continuation and recreation, archive UI, and retention. Pi custom entries are an adapter behind the
 `SubagentLifecycleStore` port, not a claim that Pi files are final Host authority.
 
 Two modules do the work, and they know almost nothing about each other:
