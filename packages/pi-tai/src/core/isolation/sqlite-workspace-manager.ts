@@ -59,10 +59,20 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
 
   async get(id: string) {
     const r = await this.port.get(id);
-    return r ? publicRecord(r) : undefined;
+    if (!r) return undefined;
+    if (r.rootSessionId === this.rootSessionId) return publicRecord(r);
+    const legacy = await this.legacyIncident(r);
+    return legacy ? publicRecord(legacy) : undefined;
   }
   async list() {
-    return (await this.port.list({ rootSessionId: this.rootSessionId })).map(publicRecord);
+    const owned = await this.port.list({ rootSessionId: this.rootSessionId });
+    const visible = [...owned];
+    for (const row of await this.port.list()) {
+      if (row.rootSessionId === this.rootSessionId || !row.repoId.startsWith("legacy_")) continue;
+      const incident = await this.legacyIncident(row);
+      if (incident) visible.push(incident);
+    }
+    return visible.map(publicRecord);
   }
 
   create(input: CreateWorkspaceInput = {}): Promise<WorkspaceRecord> {
@@ -242,15 +252,20 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     return this.serial(async () => {
       const live = new Set(activeOwners),
         out: SweepEntry[] = [];
-      for (const r of await this.port.list({
-        repoId: (await this.repo()).repoId,
-      })) {
+      const currentRepo = await this.repo();
+      const candidates = await this.port.list({ repoId: currentRepo.repoId });
+      for (const row of await this.port.list()) {
+        if (!row.repoId.startsWith("legacy_") || row.rootSessionId === this.rootSessionId) continue;
+        const incident = await this.legacyIncident(row);
+        if (incident) candidates.push(incident);
+      }
+      for (const r of candidates) {
         if (r.rootSessionId !== this.rootSessionId) {
           out.push({
             id: r.id,
             name: r.name,
-            disposition: "kept",
-            reason: "Owned by a different root session.",
+            disposition: "needs_attention",
+            reason: r.incident?.reason ?? "Custody belongs to another root session.",
           });
           continue;
         }
@@ -316,6 +331,42 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       return publicRecord(r);
     }
   }
+  /** Read-only continuity bridge. It proves repository identity but deliberately
+   * does not rewrite legacy custody: the prior Pi process may still be writing. */
+  private async legacyIncident(r: CustodyRecord): Promise<CustodyRecord | undefined> {
+    if (!r.repoId.startsWith("legacy_")) return undefined;
+    try {
+      const current = await this.repo();
+      const root = await this.jj.repositoryRoot(r.repoRoot);
+      const key = await repositoryStoreKey(root);
+      if (!key || key !== current.storeKey) return undefined;
+      const evidence = await this.collector.collect(r);
+      const heads =
+        evidence.heads.kind === "unique"
+          ? evidence.heads.changeId
+          : evidence.heads.kind === "multi" ||
+              evidence.heads.kind === "divergent" ||
+              evidence.heads.kind === "hidden"
+            ? evidence.heads.changeIds?.join(",") || "none"
+            : evidence.heads.kind;
+      const owner = r.ownerId ?? r.ownerDisplayId ?? "unassigned";
+      return {
+        ...r,
+        disposition: "incident",
+        attention: true,
+        attachmentEvidence: evidence.attachment,
+        directoryEvidence: evidence.directory,
+        incident: {
+          stage: "legacy_custody_continuity",
+          reason: `Legacy custody is visible but cannot be mutated until prior session ${r.rootSessionId} is stopped and explicit adoption exists; owner=${owner}; attachment=${evidence.attachment}; heads=${heads}; adoptable=repository_proven,liveness_unproven.`,
+        },
+      };
+    } catch {
+      // Infrastructure failure is not evidence that this legacy row belongs to
+      // the current repository. Fail closed rather than leaking foreign rows.
+      return undefined;
+    }
+  }
   private request(r: CustodyRecord) {
     return {
       workspaceId: r.id,
@@ -328,7 +379,9 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     const r = await this.port.get(id);
     if (!r) throw new Error(`Unknown workspace ${id}.`);
     if (r.rootSessionId !== this.rootSessionId)
-      throw new Error(`Refusing to mutate workspace ${r.name}: custody belongs to another root.`);
+      throw new Error(
+        `Refusing to mutate workspace ${r.name}: custody belongs to another root session (${r.rootSessionId}); stop that prior session and use an explicit adoption workflow (not yet available).`,
+      );
     return r;
   }
   private patch(

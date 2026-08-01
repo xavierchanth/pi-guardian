@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import {
   type ExtensionAPI,
   type ExtensionContext,
@@ -8,7 +9,6 @@ import {
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionPolicyReader } from "../../core/config/register.ts";
-import type { DatabaseSync } from "node:sqlite";
 import {
   JjCli,
   type MergeStrategy,
@@ -16,8 +16,8 @@ import {
   type WorkspaceManagerPort,
   type WorkspaceRecord,
 } from "../isolation/index.ts";
-import { SQLiteCustodyCoordinator } from "../isolation/sqlite-custody-coordinator.ts";
 import { SqliteWorkspaceCustody } from "../isolation/sqlite-custody.ts";
+import { SQLiteCustodyCoordinator } from "../isolation/sqlite-custody-coordinator.ts";
 import { JjProcessExecutor } from "../jj/executor.ts";
 import { migrateWorkspaceRegistry } from "../storage/custody-migration.ts";
 import { ensureStoragePaths, resolveStoragePaths } from "../storage/paths.ts";
@@ -41,7 +41,6 @@ import { IsolatedSubagents } from "./isolated.ts";
 import { PiBranchLifecycleStore } from "./lifecycle.ts";
 import { SubagentManager } from "./manager.ts";
 import { MODEL_ALIAS_NAMES, MODEL_ALIASES, resolveModel } from "./models.ts";
-import { containsTemporaryClipboardImage, TEMPORARY_IMAGE_ERROR } from "./temporary-images.ts";
 import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
@@ -58,6 +57,7 @@ import {
   WORKSPACE_GUIDELINES,
   WORKSPACE_STATUS_DESCRIPTION,
 } from "./prompt.ts";
+import { containsTemporaryClipboardImage, TEMPORARY_IMAGE_ERROR } from "./temporary-images.ts";
 
 export interface AgentsDependencies {
   readonly config: SessionPolicyReader;
@@ -783,8 +783,15 @@ function renderLine(snapshot: SubagentSnapshot): string {
 function renderWorkspace(record: WorkspaceRecord, pending: number | undefined): string {
   const holding =
     pending === undefined ? "unreadable" : pending === 0 ? "empty" : `${pending} change(s)`;
+  const gloss: Partial<Record<WorkspaceRecord["phase"], string>> = {
+    detached: "attachment gone; work retained",
+    missing: "attachment and owned work not found",
+    abandoned: "work deliberately discarded with receipt",
+    incident: "custody needs attention",
+  };
   const owner = record.ownerDisplayId ?? record.ownerId;
-  return `${record.name}  ${record.phase}  ${holding}${owner ? `  owner ${owner}` : ""}`;
+  const reason = record.incident?.reason;
+  return `${record.name}  ${record.phase}${gloss[record.phase] ? ` (${gloss[record.phase]})` : ""}  ${holding}${owner ? `  owner ${owner}` : ""}${reason ? `  ${reason}` : ""}`;
 }
 
 function renderResult(snapshot: SubagentSnapshot): string {

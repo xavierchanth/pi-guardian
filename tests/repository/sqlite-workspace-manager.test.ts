@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import { JjCli } from "../../packages/pi-tai/src/core/isolation/jj.ts";
-import { SQLiteCustodyCoordinator } from "../../packages/pi-tai/src/core/isolation/sqlite-custody-coordinator.ts";
 import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
+import { SQLiteCustodyCoordinator } from "../../packages/pi-tai/src/core/isolation/sqlite-custody-coordinator.ts";
 import { SQLiteWorkspaceManager } from "../../packages/pi-tai/src/core/isolation/sqlite-workspace-manager.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
 
