@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
-import { registerAgents } from "../../packages/pi-tai/src/core/subagents/register.ts";
 import {
   FileWorkspaceRegistry,
   JjCli,
   WorkspaceManager,
 } from "../../packages/pi-tai/src/core/isolation/index.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
+import { registerAgents } from "../../packages/pi-tai/src/core/subagents/register.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -274,6 +274,30 @@ describe("subagent tool surface", () => {
     assert.match(textOf(merged), /Merged 1 change\(s\)/);
     assert.equal(await readFile(join(source, "feature.txt"), "utf8"), "agent output\n");
     assert.deepEqual(await workspaces.list(), []);
+  });
+
+  it("honestly reports retained conflict custody and requires a retry", async () => {
+    const { call, source, workspaces } = await harness(
+      writingBackend("base.txt", "agent rewrite\n"),
+    );
+    const spawned = await call("subagent_spawn", {
+      objective: "rewrite the base",
+      isolation: "workspace",
+    });
+    const id = spawned.details.id as string;
+    await call("subagent_wait", { ids: [id] });
+    await writeFile(join(source, "base.txt"), "user rewrite\n");
+    await jj(source, "describe", "--message", "user rewrite");
+    await jj(source, "new");
+
+    const retained = await call("workspace_merge", { id });
+
+    assert.equal(retained.details.merged, false);
+    assert.equal(retained.details.finalized, false);
+    assert.equal(retained.details.custodyRetained, true);
+    assert.match(textOf(retained), /Custody .* retained/i);
+    assert.match(textOf(retained), /resolve the conflicts, then retry workspace_merge/i);
+    assert.equal((await workspaces.list()).length, 1);
   });
 
   it("refuses to merge a subagent that is still running", async () => {

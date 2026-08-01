@@ -520,13 +520,24 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         });
       }
       const { summary } = result;
-      const conflicts = summary.conflictPaths.length
-        ? `\nConflicts to resolve in the working copy: ${summary.conflictPaths.join(", ")}`
-        : "";
+      if (result.kind === "retained_conflicts") {
+        return success(
+          `Conflicts are retained in the working copy: ${summary.conflictPaths.join(", ")}. Custody of ${params.id}'s workspace is retained; resolve the conflicts, then retry workspace_merge to finalize.`,
+          {
+            merged: false,
+            finalized: false,
+            custodyRetained: true,
+            strategy: summary.strategy,
+            changeIds: summary.changeIds,
+            conflictPaths: summary.conflictPaths,
+          },
+        );
+      }
       return success(
-        `Merged ${summary.changeIds.length} change(s) from ${params.id} using the ${summary.strategy} strategy.${conflicts}`,
+        `Merged ${summary.changeIds.length} change(s) from ${params.id} using the ${summary.strategy} strategy.`,
         {
           merged: true,
+          finalized: true,
           strategy: summary.strategy,
           changeIds: summary.changeIds,
           conflictPaths: summary.conflictPaths,
