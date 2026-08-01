@@ -7,7 +7,10 @@ import {
   contextUtilisation,
   emptySnapshot,
 } from "../../packages/pi-tai/src/core/subagents/domain.ts";
-import type { LifecycleEvent, SubagentLifecycleStore } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
+import type {
+  LifecycleEvent,
+  SubagentLifecycleStore,
+} from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
 import { foldLifecycle } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
 import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
 
