@@ -7,6 +7,8 @@ import {
   contextUtilisation,
   emptySnapshot,
 } from "../../packages/pi-tai/src/core/subagents/domain.ts";
+import type { LifecycleEvent, SubagentLifecycleStore } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
+import { foldLifecycle } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
 import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
 
 function managerWith(
@@ -33,6 +35,53 @@ function request(overrides: Partial<Parameters<SubagentManager["spawn"]>[0]> = {
 }
 
 describe("subagent manager", () => {
+  it("keeps a run's lifecycle generation stable across branch navigation", async () => {
+    const events: LifecycleEvent[] = [];
+    const store: SubagentLifecycleStore = {
+      load: async () => events,
+      append: async (event) => void events.push(event),
+    };
+    const manager = new SubagentManager({
+      registry: new BackendRegistry([new StubBackend()]),
+      lifecycleStore: store,
+    });
+    const spawned = await manager.spawn(request({ prompt: "HANG: navigate" }));
+
+    await manager.attachLifecycleStore(store);
+    await manager.cancel([spawned.id]);
+
+    const folded = foldLifecycle(events);
+    assert.equal(folded.rejected.length, 0);
+    assert.equal(folded.records.get(spawned.durableId)?.disposition, "interrupted");
+  });
+
+  it("does not replace a live entry when a sibling branch reuses its display ID", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const live = await manager.spawn(request({ prompt: "HANG: live" }));
+    const siblingIntent: LifecycleEvent = {
+      version: 1,
+      type: "spawn_intent",
+      durableId: "550e8400-e29b-41d4-a716-446655440099",
+      displayId: live.id,
+      sequence: 1,
+      generation: 4,
+      backend: "pi",
+      title: "sibling",
+      cwd: "/tmp/sibling",
+      at: "2026-01-01T00:00:00Z",
+    };
+    await manager.attachLifecycleStore({
+      load: async () => [siblingIntent],
+      append: async () => {},
+    });
+
+    assert.equal(manager.runningCount, 1);
+    assert.equal(manager.get(live.id)?.durableId, live.durableId);
+    const waiting = manager.wait([live.id]);
+    await manager.cancel([live.id]);
+    assert.equal((await waiting).settled[0]?.durableId, live.durableId);
+  });
+
   it("returns on user interruption without cancelling pending agents", async () => {
     const manager = managerWith([new StubBackend()]);
     const first = await manager.spawn(request({ prompt: "HANG: first" }));

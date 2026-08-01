@@ -58,6 +58,8 @@ interface Entry {
   settled: Promise<SubagentSnapshot>;
   resolveSettled: (snapshot: SubagentSnapshot) => void;
   readonly abort: AbortController;
+  /** Branch generation captured for this run; navigation must not change it. */
+  readonly generation: number;
 }
 
 /**
@@ -83,6 +85,7 @@ export class SubagentManager {
   private sequence = 0;
   private lifecycleStore?: SubagentLifecycleStore;
   private generation = 1;
+  private readonly persistenceErrors: string[] = [];
   private readonly requireLifecycleStore: boolean;
 
   constructor(options: SubagentManagerOptions) {
@@ -103,6 +106,9 @@ export class SubagentManager {
     for (const record of folded.records.values()) {
       if ([...this.entries.values()].some((entry) => entry.snapshot.durableId === record.durableId))
         continue;
+      // Display IDs are branch-local. Never let a historical sibling replace a
+      // live slot (and its wait promise/session) merely because their labels match.
+      if (this.entries.has(record.displayId)) continue;
       // Historical records are observational only. An unproved prior run is never called running.
       const disposition = record.disposition === "done" ? "done" : "error";
       const backend = this.registry.get(record.backend);
@@ -123,7 +129,11 @@ export class SubagentManager {
               errorText:
                 record.disposition === "running"
                   ? "Interrupted by session reload."
-                  : "Spawn did not reach a durable running state.",
+                  : record.disposition === "interrupted"
+                    ? "Run was interrupted."
+                    : record.disposition === "failed"
+                      ? "Run failed."
+                      : "Spawn did not reach a durable running state.",
             }
           : {}),
         settledAt: record.updatedAt,
@@ -136,6 +146,7 @@ export class SubagentManager {
         settled,
         resolveSettled,
         abort: new AbortController(),
+        generation: record.generation,
       });
     }
     this.generation += 1;
@@ -158,6 +169,11 @@ export class SubagentManager {
     return [...this.entries.values()].filter((entry) => entry.snapshot.status === "running").length;
   }
 
+  /** Bounded diagnostics for optional lifecycle writes that failed after spawn. */
+  get lifecyclePersistenceErrors(): readonly string[] {
+    return this.persistenceErrors;
+  }
+
   async spawn(request: SpawnRequest): Promise<SubagentSnapshot> {
     if (this.reserved >= this.maxRunning) {
       throw new Error(
@@ -167,6 +183,7 @@ export class SubagentManager {
     this.reserved += 1;
     const id = `sa-${++this.sequence}`;
     const durableId = randomUUID();
+    const generation = this.generation;
     try {
       if (!this.lifecycleStore && this.requireLifecycleStore)
         throw new Error(
@@ -178,7 +195,7 @@ export class SubagentManager {
         durableId,
         displayId: id,
         sequence: this.sequence,
-        generation: this.generation,
+        generation,
         backend: request.backend,
         title: request.title,
         cwd: request.cwd,
@@ -206,6 +223,7 @@ export class SubagentManager {
         abort,
         backend,
         task: undefined as unknown as SpawnTask,
+        generation,
       };
       this.entries.set(id, entry);
       this.prune();
@@ -231,7 +249,7 @@ export class SubagentManager {
           version: 1,
           type: "running",
           durableId,
-          generation: this.generation,
+          generation: entry.generation,
           at: this.clock(),
         });
         entry.session = await backend.spawn(task);
@@ -241,11 +259,11 @@ export class SubagentManager {
               version: 1,
               type: "running",
               durableId,
-              generation: this.generation,
+              generation: entry.generation,
               at: this.clock(),
               resumeHandle: { kind: "pi_session_file", value: entry.session.sessionFile },
             })
-            .catch(() => {});
+            .catch((error) => this.recordPersistenceError(error));
         }
       } catch (error) {
         this.finish(entry, { type: "backend_error", message: describe(error) });
@@ -439,11 +457,11 @@ export class SubagentManager {
         version: 1,
         type: "terminal",
         durableId: entry.snapshot.durableId,
-        generation: this.generation,
+        generation: entry.generation,
         disposition,
         at: this.clock(),
       })
-      .catch(() => {});
+      .catch((error) => this.recordPersistenceError(error));
     this.reserved = Math.max(0, this.reserved - 1);
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
@@ -453,6 +471,11 @@ export class SubagentManager {
     // The hook runs after settlement so a slow or broken workspace reclaim
     // cannot stall the parent's `wait`.
     void Promise.resolve(this.onSettled?.(snapshot)).catch(() => {});
+  }
+
+  private recordPersistenceError(error: unknown): void {
+    this.persistenceErrors.push(describe(error));
+    if (this.persistenceErrors.length > 16) this.persistenceErrors.shift();
   }
 
   private update(entry: Entry, snapshot: SubagentSnapshot): void {
