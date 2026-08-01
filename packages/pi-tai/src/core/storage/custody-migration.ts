@@ -3,16 +3,61 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  readdirSync,
+  mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-/** Non-destructive M1 import. This prepares SQLite authority but is deliberately not on startup yet. */
+const CHANGE_ID = /^[k-z]{4,64}$/;
+const sleep = (milliseconds: number) =>
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+
+function quarantine(db: DatabaseSync, now: Date, reason: string, evidence: unknown): void {
+  db.prepare(
+    "INSERT INTO quarantine(at,source,reason,evidence) VALUES(?,'workspaces_json',?,?)",
+  ).run(now.toISOString(), reason, JSON.stringify(evidence).slice(0, 8192));
+}
+
+function validate(
+  bytes: Buffer,
+): { records: Record<string, unknown>[] } | { reason: string; detail: string } {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    return { reason: "malformed_json", detail: String(error) };
+  }
+  if (!Array.isArray(value)) return { reason: "invalid_top_level", detail: "expected an array" };
+  const records: Record<string, unknown>[] = [];
+  for (const [index, raw] of value.entries()) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return { reason: "invalid_record", detail: `record ${index} is not an object` };
+    const r = raw as Record<string, unknown>;
+    for (const key of ["id", "name", "path", "repoRoot", "rootSessionId", "rootChangeId"])
+      if (typeof r[key] !== "string" || !(r[key] as string).trim())
+        return { reason: `missing_${key}`, detail: `record ${index}` };
+    if (r.version !== 2) return { reason: "unsupported_version", detail: `record ${index}` };
+    if (!Array.isArray(r.baseChangeIds) || r.baseChangeIds.length === 0)
+      return { reason: "empty_bases", detail: `record ${index}` };
+    const ids = [...r.baseChangeIds, r.rootChangeId];
+    if (ids.some((id) => typeof id !== "string" || !CHANGE_ID.test(id)))
+      return { reason: "invalid_change_id", detail: `record ${index}` };
+    if (
+      !resolve(r.repoRoot as string).startsWith("/") ||
+      resolve(r.repoRoot as string) !== r.repoRoot
+    )
+      return { reason: "invalid_repo_root", detail: `record ${index}` };
+    records.push(r);
+  }
+  return { records };
+}
+
+/** Explicit, non-startup migration. Invalid input is quarantined but is never renamed or retired. */
 export function migrateWorkspaceRegistry(
   db: DatabaseSync,
   agentDir: string,
@@ -22,124 +67,99 @@ export function migrateWorkspaceRegistry(
   const source = join(agentDir, "pi-tai", "agents", "workspaces.json");
   if (!existsSync(source)) return undefined;
   ensurePrivateDirectory(paths.migration);
-  const siblings = readdirSync(dirname(source));
-  const stamp = now.toISOString().replaceAll(":", "-");
-  const bytes = readFileSync(source);
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (siblings.some((n) => n.startsWith("workspaces.json.migrated-"))) {
-    const foreign = join(paths.migration, `foreign-${stamp}.json`);
-    copyFileSync(source, foreign);
-    chmodSync(foreign, 0o600);
-    db.prepare(
-      "INSERT INTO quarantine(at,source,reason,evidence) VALUES(?, 'workspaces_json','foreign_reappearance',?)",
-    ).run(now.toISOString(), JSON.stringify({ source, foreign, digest }).slice(0, 8192));
-    return foreign;
+  const lock = join(paths.migration, ".custody-migration.lock");
+  const deadline = Date.now() + 15_000;
+  while (true) {
+    try {
+      mkdirSync(lock, { mode: 0o700 });
+      break;
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline)
+        throw new Error("Timed out acquiring custody migration operation lock");
+      sleep(20);
+    }
   }
-  if (readdirSync(paths.migration).some((n) => n.endsWith("-custody.json"))) return undefined;
-  const copy = join(paths.migration, `workspaces-${stamp}.json`);
-  const temporary = `${copy}.tmp`;
-  copyFileSync(source, temporary);
-  chmodSync(temporary, 0o600);
-  if (createHash("sha256").update(readFileSync(temporary)).digest("hex") !== digest)
-    throw new Error("workspaces.json verified-copy digest mismatch");
-  renameSync(temporary, copy);
-  let records: unknown;
   try {
-    records = JSON.parse(bytes.toString("utf8"));
-  } catch {
-    records = [];
-  }
-  const adopted: { id: string; name: string; disposition: string }[] = [];
-  const quarantined: { id: string; reason: string }[] = [];
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    for (const [index, raw] of (Array.isArray(records) ? records : [records]).entries()) {
-      const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-      const valid = r.version === 2 && typeof r.rootSessionId === "string";
-      const id = typeof r.id === "string" ? r.id : `legacy_${digest.slice(0, 16)}_${index}`;
-      const phase = String(r.phase ?? "");
-      const disposition = valid && phase === "active" ? "attached" : "incident";
-      const reason = !valid
-        ? "legacy_v1_unadoptable"
-        : phase === "merged"
-          ? "legacy_merged_without_proof"
-          : phase === "discarded"
-            ? "legacy_discarded_without_receipt"
-            : phase === "incident"
-              ? String(
-                  (r.incident as Record<string, unknown> | undefined)?.reason ?? "legacy_incident",
-                )
-              : undefined;
-      const root = valid ? String(r.rootSessionId) : `quarantine_${digest.slice(0, 16)}`;
-      db.prepare(
-        "INSERT OR IGNORE INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,'unknown','',?,?)",
-      ).run(root, now.toISOString(), now.toISOString());
-      const result = db
-        .prepare(
-          "INSERT OR IGNORE INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,base_change_ids,root_change_id,head_change_ids,owner_id,root_session_id,quarantined,attention,imported_from,created_at,updated_at,incident_stage,incident_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        )
-        .run(
-          id,
-          String(r.name ?? `quarantine-${index}`),
-          String(r.path ?? ""),
-          "repo_unresolved",
-          String(r.repoRoot ?? ""),
-          disposition,
-          "unknown",
-          JSON.stringify(r.baseChangeIds ?? []),
-          String(r.rootChangeId ?? id),
-          JSON.stringify([String(r.rootChangeId ?? id)]),
-          valid && typeof r.ownerId === "string" ? r.ownerId : null,
-          root,
-          valid ? 0 : 1,
-          1,
-          valid ? "workspaces_json_v2" : "workspaces_json_v1",
-          String(r.createdAt ?? now.toISOString()),
-          String(r.updatedAt ?? now.toISOString()),
-          disposition === "incident" ? "custody_migration" : null,
-          disposition === "incident" ? (reason ?? "legacy_ambiguous") : null,
-        );
-      if (result.changes) adopted.push({ id, name: String(r.name ?? ""), disposition });
-      else {
-        quarantined.push({ id, reason: "duplicate_repo_name" });
-        db.prepare(
-          "INSERT INTO quarantine(at,source,reason,evidence) VALUES(?,'workspaces_json','duplicate_repo_name',?)",
-        ).run(now.toISOString(), JSON.stringify(raw).slice(0, 8192));
-      }
-      if (!valid) {
-        quarantined.push({ id, reason: "legacy_v1_unadoptable" });
-        db.prepare(
-          "INSERT INTO quarantine(at,source,reason,evidence) VALUES(?,'workspaces_json','legacy_v1_unadoptable',?)",
-        ).run(now.toISOString(), JSON.stringify(raw).slice(0, 8192));
+    if (!existsSync(source)) return undefined; // another process completed while we waited
+    const bytes = readFileSync(source);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const prior = db
+      .prepare(
+        "SELECT evidence FROM quarantine WHERE source='workspaces_json' AND reason='migration_completed' AND evidence LIKE ?",
+      )
+      .get(`%${digest}%`);
+    if (prior) return undefined;
+    const parsed = validate(bytes);
+    if ("reason" in parsed) {
+      quarantine(db, now, parsed.reason, { source, sha256: digest, detail: parsed.detail });
+      return undefined;
+    }
+    const copy = join(paths.migration, `workspaces-${digest}.json`);
+    if (!existsSync(copy)) {
+      const temporary = `${copy}.${process.pid}.tmp`;
+      copyFileSync(source, temporary);
+      chmodSync(temporary, 0o600);
+      if (createHash("sha256").update(readFileSync(temporary)).digest("hex") !== digest)
+        throw new Error("workspaces.json verified-copy digest mismatch");
+      try {
+        renameSync(temporary, copy);
+      } catch (error: any) {
+        rmSync(temporary, { force: true });
+        if (error?.code !== "EEXIST") throw error;
       }
     }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
+    const adopted: string[] = [];
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of parsed.records) {
+        db.prepare(
+          "INSERT OR IGNORE INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,'unknown','',?,?)",
+        ).run(String(r.rootSessionId), now.toISOString(), now.toISOString());
+        const result = db
+          .prepare(
+            "INSERT OR IGNORE INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,base_change_ids,root_change_id,head_change_ids,root_session_id,quarantined,attention,imported_from,created_at,updated_at,incident_stage,incident_reason) VALUES(?,?,?,?,?,'incident','unknown',?,?,?,?,0,1,'workspaces_json_v2',?,?, 'custody_migration','legacy_requires_repository_proof')",
+          )
+          .run(
+            String(r.id),
+            String(r.name),
+            String(r.path),
+            "repo_unresolved",
+            String(r.repoRoot),
+            JSON.stringify(r.baseChangeIds),
+            String(r.rootChangeId),
+            JSON.stringify([r.rootChangeId]),
+            String(r.rootSessionId),
+            String(r.createdAt ?? now.toISOString()),
+            String(r.updatedAt ?? now.toISOString()),
+          );
+        if (result.changes) adopted.push(String(r.id));
+      }
+      quarantine(db, now, "migration_completed", { source, sha256: digest, adopted });
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    const receipt = join(paths.migration, `${digest}-custody.json`);
+    if (!existsSync(receipt))
+      writeFileSync(
+        receipt,
+        JSON.stringify({
+          version: 1,
+          legacyFile: source,
+          copyPath: copy,
+          sha256: digest,
+          adopted,
+          completedAt: now.toISOString(),
+        }),
+        { mode: 0o600, flag: "wx" },
+      );
+    // Retirement is last: source remains intact for every parse/constraint/commit failure.
+    const retired = join(dirname(source), `workspaces.json.migrated-${digest}`);
+    if (existsSync(source) && !existsSync(retired)) renameSync(source, retired);
+    return receipt;
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
   }
-  const receipt = join(paths.migration, `${stamp}-custody.json`);
-  writeFileSync(
-    receipt,
-    JSON.stringify({
-      version: 1,
-      legacyFile: source,
-      copyPath: copy,
-      sha256: digest,
-      recordCount: Array.isArray(records) ? records.length : 1,
-      adopted,
-      quarantined,
-      repoRootsUnreachable: [],
-      completedAt: now.toISOString(),
-    }),
-    { mode: 0o600, flag: "wx" },
-  );
-  try {
-    renameSync(source, join(dirname(source), `${basename(source)}.migrated-${stamp}`));
-  } catch (error) {
-    db.prepare(
-      "INSERT INTO quarantine(at,source,reason,evidence) VALUES(?,'workspaces_json','source_rename_failed',?)",
-    ).run(now.toISOString(), String(error).slice(0, 8192));
-  }
-  return receipt;
 }

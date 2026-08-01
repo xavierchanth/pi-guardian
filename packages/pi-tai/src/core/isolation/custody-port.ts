@@ -71,7 +71,26 @@ export interface CustodyMutation {
   patch?: Partial<CustodyRecord>;
   now: string;
 }
+export interface RepositoryIdentity {
+  readonly repoId: string;
+  readonly fingerprint: string;
+  readonly rootsTruncated: boolean;
+  readonly storeKey?: string;
+  readonly lastKnownRoot: string;
+  readonly identityProven: boolean;
+  readonly firstSeenAt: string;
+  readonly lastVerifiedAt: string;
+}
+export interface RepositoryEvidence {
+  readonly roots: readonly string[];
+  readonly rootsTruncated: boolean;
+  readonly storeKey?: string;
+  readonly canonicalRoot: string;
+  readonly now: string;
+}
 export interface WorkspaceCustodyPort {
+  establishRepository(evidence: RepositoryEvidence): Promise<RepositoryIdentity>;
+  insert(input: CustodyRecord, operation: BeginOperationInput): Promise<CustodyRecord>;
   list(filter?: {
     rootSessionId?: string;
     repoId?: string;
@@ -90,6 +109,8 @@ export interface WorkspaceCustodyPort {
       changeIds: readonly string[];
       jjOpBefore: string;
       jjOpAfter: string;
+      /** True only after JJ proved every canonical head absent. */
+      verifiedAbsent: boolean;
       at: string;
     },
   ): Promise<void>;

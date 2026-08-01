@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type {
   BeginOperationInput,
   CustodyMutation,
   CustodyOperation,
   CustodyRecord,
+  RepositoryEvidence,
+  RepositoryIdentity,
   WorkspaceCustodyPort,
 } from "./custody-port.ts";
 
@@ -77,10 +80,106 @@ const jsonFields = new Set(["baseChangeIds", "headChangeIds", "merge"]);
 const boolFields = new Set(["conflictRetained", "quarantined", "attention"]);
 
 export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
-  constructor(
-    private readonly db: DatabaseSync,
-    private readonly clock: () => string = () => new Date().toISOString(),
-  ) {}
+  private readonly db: DatabaseSync;
+  private readonly clock: () => string;
+  constructor(db: DatabaseSync, clock: () => string = () => new Date().toISOString()) {
+    this.db = db;
+    this.clock = clock;
+  }
+  async establishRepository(e: RepositoryEvidence): Promise<RepositoryIdentity> {
+    if (!e.canonicalRoot.startsWith("/") || (!e.storeKey && !e.roots.length))
+      throw new Error("Repository identity requires a canonical root and durable JJ evidence");
+    const roots = [...new Set(e.roots)];
+    if (roots.some((id) => !/^[k-z]{4,64}$/.test(id)))
+      throw new Error("Invalid repository root Change ID");
+    roots.sort();
+    const fingerprint = JSON.stringify({
+      v: 1,
+      roots,
+      ...(e.storeKey ? { storeKey: e.storeKey } : {}),
+    });
+    const repoId = `repo_${createHash("sha256").update(fingerprint).digest("hex").slice(0, 32)}`;
+    this.db
+      .prepare(
+        "INSERT INTO repository(repo_id,fingerprint,roots_truncated,store_key,last_known_root,identity_proven,first_seen_at,last_verified_at) VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(fingerprint) DO UPDATE SET last_known_root=excluded.last_known_root,last_verified_at=excluded.last_verified_at,roots_truncated=excluded.roots_truncated",
+      )
+      .run(
+        repoId,
+        fingerprint,
+        e.rootsTruncated ? 1 : 0,
+        e.storeKey ?? null,
+        e.canonicalRoot,
+        e.now,
+        e.now,
+      );
+    const row = this.db
+      .prepare("SELECT * FROM repository WHERE fingerprint=?")
+      .get(fingerprint) as Record<string, unknown>;
+    return {
+      repoId: String(row.repo_id),
+      fingerprint: String(row.fingerprint),
+      rootsTruncated: Boolean(row.roots_truncated),
+      ...(row.store_key !== null ? { storeKey: String(row.store_key) } : {}),
+      lastKnownRoot: String(row.last_known_root),
+      identityProven: Boolean(row.identity_proven),
+      firstSeenAt: String(row.first_seen_at),
+      lastVerifiedAt: String(row.last_verified_at),
+    };
+  }
+  async insert(r: CustodyRecord, operation: BeginOperationInput): Promise<CustodyRecord> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      await this.begin(operation);
+      this.db
+        .prepare(
+          "INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,directory_evidence,evidence_at,base_change_ids,root_change_id,head_change_ids,conflict_retained,owner_id,owner_display_id,anchor_token,root_session_id,parent_workspace_id,pending_op_id,quarantined,attention,created_at,updated_at,incident_stage,incident_reason,merge_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          r.id,
+          r.name,
+          r.path,
+          r.repoId,
+          r.repoRoot,
+          r.disposition,
+          r.attachmentEvidence,
+          r.directoryEvidence,
+          r.evidenceAt ?? null,
+          JSON.stringify(r.baseChangeIds),
+          r.rootChangeId ?? null,
+          JSON.stringify(r.headChangeIds),
+          r.conflictRetained ? 1 : 0,
+          r.ownerId ?? null,
+          r.ownerDisplayId ?? null,
+          r.anchorToken ?? null,
+          r.rootSessionId,
+          r.parent ?? null,
+          operation.opId,
+          r.quarantined ? 1 : 0,
+          r.attention ? 1 : 0,
+          r.createdAt,
+          r.updatedAt,
+          r.incident?.stage ?? null,
+          r.incident?.reason ?? null,
+          r.merge ? JSON.stringify(r.merge) : null,
+        );
+      this.db
+        .prepare("INSERT INTO custody_event VALUES(?,1,?,NULL,?,'create',?)")
+        .run(operation.opId, r.id, r.disposition, operation.now);
+      this.db
+        .prepare(
+          "UPDATE custody_operation SET state='committed',settled_at=?,heartbeat_at=? WHERE op_id=?",
+        )
+        .run(operation.now, operation.now, operation.opId);
+      this.db.prepare("UPDATE workspace SET pending_op_id=NULL WHERE id=?").run(r.id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {}
+      throw error;
+    }
+    return (await this.get(r.id))!;
+  }
   async list(f?: {
     rootSessionId?: string;
     repoId?: string;
@@ -228,6 +327,7 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
     r: Parameters<WorkspaceCustodyPort["recordAbandonReceipt"]>[1],
   ) {
     if (!r.changeIds.length) throw new Error("Abandon receipt requires canonical heads");
+    if (!r.verifiedAbsent) throw new Error("Abandon receipt requires verified_absent evidence");
     const ids = [...new Set(r.changeIds)].sort();
     this.db
       .prepare("INSERT INTO abandon_receipt VALUES(?,?,?,?,?,?,?,1,?)")
