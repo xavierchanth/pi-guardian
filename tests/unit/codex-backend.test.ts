@@ -243,7 +243,7 @@ describe("codex backend", () => {
     await collect(session.events);
 
     assert.equal(session.resumeToken, "thread-1");
-    assert.equal(backend.capabilities.resumable, true);
+    assert.equal(backend.capabilities.settledContinuation, "respawn");
   });
 
   it("continues an existing thread instead of starting a new one", async () => {
@@ -292,7 +292,10 @@ describe("codex backend", () => {
     const session = await backend.spawn(task());
     const stderr = captureStderr(session);
     await waitFor(() => true);
-    await assert.rejects(session.send("also update the docs"), /does not support steering/);
+    await assert.rejects(
+      session.send("also update the docs", "steer"),
+      /does not support steering/,
+    );
     await session.interrupt();
     await collect(session.events);
 

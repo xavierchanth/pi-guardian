@@ -23,12 +23,13 @@ export interface StubBackendOptions {
 export class StubBackend implements SubagentBackend {
   readonly name: BackendName;
   readonly capabilities = {
-    steering: true,
+    liveInput: ["steer", "followUp"] as const,
+    settledContinuation: "respawn" as const,
     modelSelection: true,
     reasoningEffort: true,
-    resumable: true,
   };
   readonly spawned: SpawnTask[] = [];
+  readonly sends: { text: string; mode: "steer" | "followUp" | "continue" }[] = [];
   private readonly availability: AvailabilityResult;
   private readonly script?: (task: SpawnTask) => readonly SubagentEvent[];
 
@@ -45,11 +46,13 @@ export class StubBackend implements SubagentBackend {
   async spawn(task: SpawnTask): Promise<SubagentSession> {
     this.spawned.push(task);
     const channel = new EventChannel();
+    const sends = this.sends;
     const session: SubagentSession = {
       events: channel.events,
       resumeToken: `stub-session-${task.id}`,
-      async send(text: string) {
-        channel.push({ type: "assistant_message", text: `steered: ${text}` });
+      async send(text, mode) {
+        sends.push({ text, mode });
+        channel.push({ type: "assistant_message", text: `${mode}: ${text}` });
       },
       async interrupt() {
         channel.push({ type: "run_settled", outcome: "interrupted" });

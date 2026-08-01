@@ -432,19 +432,37 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     name: "subagent_send",
     label: "Send To Subagent",
     description: SEND_DESCRIPTION,
-    promptSnippet: "Steer a running subagent",
+    promptSnippet: "Steer, queue input for, or continue a subagent conversation",
     parameters: Type.Object({
       id: Type.String(),
       message: Type.String({ description: "Guidance for the subagent, stated so it stands alone" }),
+      mode: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("auto"),
+            Type.Literal("steer"),
+            Type.Literal("followUp"),
+            Type.Literal("continue"),
+          ],
+          { description: "Defaults to auto; explicit modes never fall back to another operation." },
+        ),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { agents } = await requireRuntime(ctx);
       try {
-        await agents.send(params.id, params.message);
+        const receipt = await agents.send(params.id, params.message, params.mode ?? "auto");
+        const message = receipt.settlementRace
+          ? `${params.id} finished before your message arrived; delivered as a conversation continuation instead.`
+          : receipt.operation === "steer"
+            ? `Steered ${params.id} mid-run.`
+            : receipt.operation === "followUp"
+              ? `Queued follow-up for ${params.id}; delivered after its current work.`
+              : `Continued ${params.id}'s conversation; it is running again.`;
+        return success(message, { id: params.id, operation: receipt.operation });
       } catch (error) {
         return failure(describe(error));
       }
-      return success(`Sent guidance to ${params.id}.`, { id: params.id });
     },
   });
 

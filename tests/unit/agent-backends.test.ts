@@ -45,6 +45,7 @@ describe("pi backend", () => {
   it("passes explicit steer behavior for a running send", async () => {
     const prompts: unknown[][] = [];
     const session = {
+      isStreaming: true,
       prompt: async (...args: unknown[]) => void prompts.push(args),
       waitForIdle: async () => new Promise<void>(() => {}),
       subscribe: () => () => {},
@@ -71,7 +72,7 @@ describe("pi backend", () => {
     });
 
     const child = await backend.spawn(task());
-    await child.send("new direction");
+    await child.send("new direction", "steer");
 
     assert.deepEqual(prompts[1], ["new direction", { streamingBehavior: "steer" }]);
     child.dispose();
@@ -215,7 +216,7 @@ describe("claude backend", () => {
     await collect(session.events);
 
     assert.equal(session.resumeToken, "sess-abc");
-    assert.equal(backend.capabilities.resumable, true);
+    assert.equal(backend.capabilities.settledContinuation, "respawn");
   });
 
   it("passes the resume token back to the SDK on a follow-up turn", async () => {

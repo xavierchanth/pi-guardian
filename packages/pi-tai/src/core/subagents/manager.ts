@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { BackendRegistry, SubagentBackend, SubagentSession } from "./backend.ts";
+import {
+  type BackendRegistry,
+  SendNotDeliveredError,
+  type SendMode,
+  type SubagentBackend,
+  type SubagentSession,
+} from "./backend.ts";
 import {
   applyEvent,
   emptySnapshot,
@@ -60,6 +66,18 @@ interface Entry {
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
   readonly generation: number;
+  /** Serializes messages without blocking messages to other children. */
+  sendChain: Promise<void>;
+  /** Permanent tombstone: queued work must never reopen this entry. */
+  closed: boolean;
+  /** Historical records have no spawn task or live continuation handle. */
+  restored: boolean;
+}
+
+export type RequestedSendMode = SendMode | "auto";
+export interface SendReceipt {
+  readonly operation: SendMode;
+  readonly settlementRace: boolean;
 }
 
 /**
@@ -147,6 +165,9 @@ export class SubagentManager {
         resolveSettled,
         abort: new AbortController(),
         generation: record.generation,
+        sendChain: Promise.resolve(),
+        closed: false,
+        restored: true,
       });
     }
     this.generation += 1;
@@ -224,6 +245,9 @@ export class SubagentManager {
         backend,
         task: undefined as unknown as SpawnTask,
         generation,
+        sendChain: Promise.resolve(),
+        closed: false,
+        restored: false,
       };
       this.entries.set(id, entry);
       this.prune();
@@ -342,29 +366,87 @@ export class SubagentManager {
    * one-shot subagent becomes a thinking partner without holding a process open
    * between turns.
    */
-  async send(id: string, text: string): Promise<void> {
+  async send(id: string, text: string, mode: RequestedSendMode = "auto"): Promise<SendReceipt> {
     const entry = this.requireEntry(id);
-    if (entry.snapshot.status === "running") {
-      if (!entry.backend.capabilities.steering) {
-        throw new Error(
-          `Subagent ${id} is running, but the ${entry.snapshot.backend} backend does not support steering.`,
-        );
-      }
-      if (!entry.session) throw new Error(`Subagent ${id} has no live session.`);
-      await entry.session.send(text);
-      return;
-    }
-    const resumeToken = entry.session?.resumeToken;
-    if (!entry.backend.capabilities.resumable || !resumeToken) {
+    let resolve!: (value: SendReceipt) => void;
+    let reject!: (reason: unknown) => void;
+    const result = new Promise<SendReceipt>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    entry.sendChain = entry.sendChain
+      .catch(() => {})
+      .then(async () => {
+        try {
+          resolve(await this.dispatchSend(entry, text, mode));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    return result;
+  }
+
+  private async dispatchSend(
+    entry: Entry,
+    text: string,
+    requested: RequestedSendMode,
+  ): Promise<SendReceipt> {
+    const id = entry.snapshot.id;
+    if (entry.closed) throw new Error(`Subagent ${id} is closed and cannot accept input.`);
+    if (entry.restored)
       throw new Error(
-        `Subagent ${id} has finished and the ${entry.snapshot.backend} harness cannot continue it; spawn a new subagent instead.`,
+        `Subagent ${id} was restored as a historical record without a live task or continuation handle.`,
       );
+    if (entry.snapshot.status === "running") {
+      const operation =
+        requested === "auto"
+          ? entry.backend.capabilities.liveInput.includes("steer")
+            ? "steer"
+            : entry.backend.capabilities.liveInput.includes("followUp")
+              ? "followUp"
+              : undefined
+          : requested;
+      if (operation === "continue")
+        throw new Error(
+          `Subagent ${id} is still running; continue is only valid after it settles.`,
+        );
+      if (!operation || !entry.backend.capabilities.liveInput.includes(operation))
+        throw new Error(
+          `Subagent ${id} is running, but the ${entry.snapshot.backend} backend does not support ${operation ?? "live input"}.`,
+        );
+      if (!entry.session) throw new Error(`Subagent ${id} has no live session.`);
+      try {
+        await entry.session.send(text, operation);
+        return { operation, settlementRace: false };
+      } catch (error) {
+        if (entry.snapshot.status === "running") throw error;
+        if (!(error instanceof SendNotDeliveredError)) throw error;
+        if (requested !== "auto")
+          throw new Error(
+            `Subagent ${id} settled before ${operation} could be delivered; it was not continued.`,
+          );
+        const resumeToken = entry.session?.resumeToken;
+        if (entry.backend.capabilities.settledContinuation === "none" || !resumeToken) throw error;
+        await this.resume(entry, text, resumeToken);
+        return { operation: "continue", settlementRace: true };
+      }
     }
+    if (requested === "steer" || requested === "followUp")
+      throw new Error(
+        `Subagent ${id} settled before ${requested} could be delivered; it was not continued.`,
+      );
+    const resumeToken = entry.session?.resumeToken;
+    if (entry.backend.capabilities.settledContinuation === "none" || !resumeToken)
+      throw new Error(
+        `Subagent ${id} has finished and the ${entry.snapshot.backend} harness cannot continue its conversation; spawn a new subagent instead.`,
+      );
     await this.resume(entry, text, resumeToken);
+    return { operation: "continue", settlementRace: false };
   }
 
   /** Starts a follow-up run in place, reusing the entry so the id stays stable. */
   private async resume(entry: Entry, text: string, resumeToken: string): Promise<void> {
+    if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} is closed and cannot resume.`);
     if (this.reserved >= this.maxRunning) {
       throw new Error(
         `At most ${this.maxRunning} subagents may run at once; wait for one to finish.`,
@@ -372,10 +454,24 @@ export class SubagentManager {
     }
     this.reserved += 1;
     const task: SpawnTask = { ...entry.task, prompt: text, resumeToken };
-    let session: SubagentSession;
+    let session: SubagentSession | undefined;
     try {
       session = await entry.backend.spawn(task);
+      // A continuation is not exposed as running until its current-generation
+      // lifecycle fact is durable. Failure leaves the old terminal state intact.
+      await this.lifecycleStore?.append({
+        version: 1,
+        type: "running",
+        durableId: entry.snapshot.durableId,
+        generation: entry.generation,
+        at: this.clock(),
+        ...(session.sessionFile
+          ? { resumeHandle: { kind: "pi_session_file" as const, value: session.sessionFile } }
+          : {}),
+      });
+      if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
+      session?.dispose();
       this.reserved = Math.max(0, this.reserved - 1);
       throw error;
     }
@@ -398,6 +494,7 @@ export class SubagentManager {
     for (const id of new Set(ids)) {
       const entry = this.entries.get(id);
       if (!entry) throw new Error(`Unknown subagent ${id}.`);
+      entry.closed = true;
       if (entry.snapshot.status !== "running") {
         cancelled.push(entry.snapshot);
         continue;
@@ -420,7 +517,10 @@ export class SubagentManager {
       .filter((snapshot) => snapshot.status === "running")
       .map((snapshot) => snapshot.id);
     if (running.length) await this.cancel(running);
-    for (const entry of this.entries.values()) entry.session?.dispose();
+    for (const entry of this.entries.values()) {
+      entry.closed = true;
+      entry.session?.dispose();
+    }
     this.entries.clear();
     this.delivery.clear();
     this.reserved = 0;
@@ -429,6 +529,7 @@ export class SubagentManager {
   private async pump(entry: Entry, session: SubagentSession): Promise<void> {
     try {
       for await (const event of session.events) {
+        if (entry.closed || entry.session !== session) return;
         if (event.type === "run_settled" || event.type === "backend_error") {
           this.finish(entry, event);
           return;
@@ -437,7 +538,7 @@ export class SubagentManager {
       }
       // The stream ended without a terminal event; treat that as a backend fault
       // rather than leaving the entry running forever.
-      if (entry.snapshot.status === "running") {
+      if (!entry.closed && entry.session === session && entry.snapshot.status === "running") {
         this.finish(entry, {
           type: "backend_error",
           message: "Backend closed the event stream without settling.",
@@ -500,6 +601,7 @@ export class SubagentManager {
     for (const [id, entry] of this.entries) {
       if (this.entries.size <= this.maxTracked) break;
       if (entry.snapshot.status === "running") continue;
+      entry.closed = true;
       entry.session?.dispose();
       this.entries.delete(id);
       // Durable pending delivery is not consumed by an in-memory eviction.

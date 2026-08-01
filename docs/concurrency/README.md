@@ -148,17 +148,17 @@ schemas:
 | `subagent_spawn` | Start a subagent. `continue` reuses a settled subagent's workspace. |
 | `subagent_wait` | Block until any named subagent finishes and repeatedly collect ready results. Foreground user input releases the wait without cancelling or steering pending agents. |
 | `subagent_check` | Peek at one without blocking or consuming its result. |
-| `subagent_send` | Steer a running subagent. |
+| `subagent_send` | Steer a genuinely streaming run, or explicitly continue a normally settled conversation when its harness has a durable handle. Sends are FIFO per child. |
 | `subagent_cancel` | Stop subagents, keeping their workspaces. |
 | `subagent_list` | List subagents and their status. |
 | `workspace_merge` | Fold a subagent's changes into the working copy. |
 | `workspace_discard` | Throw a subagent's workspace away. |
 | `workspace_status` | List workspaces and what they hold. |
 
-`continue` covers the case where a subagent fails or is cancelled partway: its
-workspace is kept, and a fresh subagent — possibly on a different harness or a
-stronger model — picks up in the same checkout, with a charter telling it to read the
-existing commits first.
+An interrupted, cancelled, pruned, or shut-down entry is closed and is never
+automatically continued. Workspace reuse is a separate explicit spawn concern. A
+settled conversation continuation is exposed as running only after its lifecycle fact
+is durable; failed persistence leaves it terminal.
 
 ## Models
 

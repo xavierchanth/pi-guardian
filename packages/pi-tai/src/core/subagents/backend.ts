@@ -16,16 +16,21 @@ export interface SubagentBackend {
   spawn(task: SpawnTask): Promise<SubagentSession>;
 }
 
+export type LiveInputMode = "steer" | "followUp";
+export type SendMode = LiveInputMode | "continue";
+
+/** A send rejection that proves the backend accepted no input. */
+export class SendNotDeliveredError extends Error {
+  readonly name = "SendNotDeliveredError";
+}
+
 export interface BackendCapabilities {
-  /** Can accept new input mid-run rather than only between runs. */
-  readonly steering: boolean;
+  /** Operations accepted while a run is live. */
+  readonly liveInput: readonly LiveInputMode[];
+  /** How a settled conversation can be continued. */
+  readonly settledContinuation: "in-place" | "respawn" | "none";
   readonly modelSelection: boolean;
   readonly reasoningEffort: boolean;
-  /**
-   * Whether a settled run can be continued with its context intact. Distinct
-   * from steering: steering interrupts a live run, resuming starts a new one.
-   */
-  readonly resumable?: boolean;
 }
 
 export type AvailabilityResult =
@@ -42,8 +47,8 @@ export interface SubagentSession {
   readonly resumeToken?: string;
   /** Private durable handle captured for later explicit reopen; never exposed by tools/UI. */
   readonly sessionFile?: string;
-  /** Steers an in-flight run, or starts a new one when idle. */
-  send(text: string): Promise<void>;
+  /** Performs one explicitly selected operation; the manager checks capability/state. */
+  send(text: string, mode: SendMode): Promise<void>;
   interrupt(): Promise<void>;
   dispose(): void;
 }

@@ -26,9 +26,9 @@ export const CHECK_DESCRIPTION =
   "Look at a subagent's status and recent output without blocking and without consuming its result.";
 
 export const SEND_DESCRIPTION =
-  "Send a message to a subagent. A running one is redirected; a finished one is continued, " +
-  "picking up the same conversation with its context intact. Use this to correct a subagent that is " +
-  "drifting, or to keep talking to one you spawned as a thinking partner.";
+  "Send input using an honest operation: steer the current turn, queue a follow-up for the same live run, " +
+  "or continue a settled conversation when its backend supports that operation. Auto selects only an advertised operation; " +
+  "explicit modes never downgrade. This is distinct from subagent_spawn continue, which only reuses a workspace for a new conversation.";
 
 export const CANCEL_DESCRIPTION =
   "Stop running subagents. Their workspaces are kept, so partial work can still be inspected, merged, or discarded.";

@@ -44,10 +44,10 @@ export class CodexBackend implements SubagentBackend {
   // A settled thread is continued with `thread/resume`, which is what a
   // follow-up turn needs. Live steering mid-turn is not wired up.
   readonly capabilities = {
-    steering: false,
+    liveInput: [] as const,
+    settledContinuation: "respawn" as const,
     modelSelection: true,
     reasoningEffort: true,
-    resumable: true,
   };
   private readonly options: CodexBackendOptions;
 

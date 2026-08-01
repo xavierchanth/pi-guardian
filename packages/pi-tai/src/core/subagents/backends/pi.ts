@@ -8,6 +8,7 @@ import type { SessionPolicyReader } from "../../../core/config/register.ts";
 import {
   EventChannel,
   type AvailabilityResult,
+  SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
 } from "../backend.ts";
@@ -42,7 +43,12 @@ export interface PiBackendOptions {
 
 export class PiBackend implements SubagentBackend {
   readonly name: BackendName = "pi";
-  readonly capabilities = { steering: true, modelSelection: true, reasoningEffort: true };
+  readonly capabilities = {
+    liveInput: ["steer"] as const,
+    settledContinuation: "none" as const,
+    modelSelection: true,
+    reasoningEffort: true,
+  };
   private readonly options: PiBackendOptions;
   private readonly factory: PrivateChildSessionFactoryPort;
 
@@ -181,10 +187,14 @@ class PiSubagentSession implements SubagentSession {
     }
   }
 
-  async send(text: string): Promise<void> {
-    // Never rely on AgentSession's default while a turn is active: this input
-    // must steer the current turn rather than being ambiguously queued.
-    await this.handle.session.prompt(text, { streamingBehavior: "steer" });
+  async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
+    if (mode === "continue") throw new Error("Pi does not support continuing a settled subagent.");
+    // AgentSession starts a new, invisible turn when prompt() is called idle.
+    // Refuse before handing it the text, so callers may safely decide whether
+    // an explicit continuation is appropriate.
+    if (!this.handle.session.isStreaming)
+      throw new SendNotDeliveredError("Pi child is no longer streaming; steer was not delivered.");
+    await this.handle.session.prompt(text, { streamingBehavior: mode });
   }
 
   async interrupt(): Promise<void> {

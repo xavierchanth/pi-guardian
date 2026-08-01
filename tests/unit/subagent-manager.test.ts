@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BackendRegistry } from "../../packages/pi-tai/src/core/subagents/backend.ts";
+import {
+  BackendRegistry,
+  type SubagentBackend,
+} from "../../packages/pi-tai/src/core/subagents/backend.ts";
 import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
 import {
   applyEvent,
@@ -16,13 +19,18 @@ import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manage
 
 function managerWith(
   backends: StubBackend[],
-  options: { maxRunning?: number; onSettled?: (snapshot: any) => void } = {},
+  options: {
+    maxRunning?: number;
+    onSettled?: (snapshot: any) => void;
+    lifecycleStore?: SubagentLifecycleStore;
+  } = {},
 ) {
   const registry = new BackendRegistry(backends);
   return new SubagentManager({
     registry,
     ...(options.maxRunning !== undefined ? { maxRunning: options.maxRunning } : {}),
     ...(options.onSettled ? { onSettled: options.onSettled } : {}),
+    ...(options.lifecycleStore ? { lifecycleStore: options.lifecycleStore } : {}),
   });
 }
 
@@ -321,6 +329,60 @@ describe("subagent manager", () => {
     );
   });
 
+  it("reports an ordinary settled auto continuation without inventing a race", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const spawned = await manager.spawn(request());
+    await manager.wait([spawned.id]);
+
+    assert.deepEqual(await manager.send(spawned.id, "next"), {
+      operation: "continue",
+      settlementRace: false,
+    });
+  });
+
+  it("does not let a queued send resurrect an entry cancelled while waiting", async () => {
+    const backend = new StubBackend();
+    const manager = managerWith([backend]);
+    let release!: () => void;
+    const spawn = backend.spawn.bind(backend);
+    backend.spawn = async (task) => {
+      const session = await spawn(task);
+      session.send = () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return session;
+    };
+    const spawned = await manager.spawn(request({ prompt: "HANG: forever" }));
+
+    const first = manager.send(spawned.id, "one");
+    const queued = manager.send(spawned.id, "two");
+    const queuedRejected = assert.rejects(queued, /closed and cannot accept input/);
+    while (!release) await new Promise((resolve) => setImmediate(resolve));
+    await manager.cancel([spawned.id]);
+    release();
+    await first;
+    await queuedRejected;
+    assert.equal(backend.spawned.length, 1);
+  });
+
+  it("fails a continuation closed when its running lifecycle write fails", async () => {
+    let appends = 0;
+    const store: SubagentLifecycleStore = {
+      load: async () => [],
+      append: async () => {
+        appends += 1;
+        if (appends === 4) throw new Error("disk full");
+      },
+    };
+    const backend = new StubBackend();
+    const manager = managerWith([backend], { lifecycleStore: store });
+    const spawned = await manager.spawn(request());
+    await manager.wait([spawned.id]);
+    await assert.rejects(manager.send(spawned.id, "next"), /disk full/);
+    assert.notEqual(manager.get(spawned.id)?.status, "running");
+  });
+
   it("frees the concurrency slot again after a resumed run settles", async () => {
     const manager = managerWith([new StubBackend()], { maxRunning: 1 });
 
@@ -335,11 +397,11 @@ describe("subagent manager", () => {
 
   it("refuses a non-steering backend before calling its running session", async () => {
     const backend = new StubBackend({ name: "codex" });
-    (backend as { capabilities: Record<string, boolean> }).capabilities = {
-      steering: false,
+    (backend as { capabilities: SubagentBackend["capabilities"] }).capabilities = {
+      liveInput: [],
+      settledContinuation: "respawn",
       modelSelection: true,
       reasoningEffort: true,
-      resumable: true,
     };
     let sends = 0;
     const spawn = backend.spawn.bind(backend);
@@ -356,7 +418,7 @@ describe("subagent manager", () => {
     await assert.rejects(
       manager.send(spawned.id, "new direction"),
       new Error(
-        `Subagent ${spawned.id} is running, but the codex backend does not support steering.`,
+        `Subagent ${spawned.id} is running, but the codex backend does not support live input.`,
       ),
     );
     assert.equal(sends, 0);
@@ -364,11 +426,11 @@ describe("subagent manager", () => {
 
   it("refuses to continue a settled subagent on a harness that cannot resume", async () => {
     const backend = new StubBackend();
-    (backend as { capabilities: Record<string, boolean> }).capabilities = {
-      steering: false,
+    (backend as { capabilities: SubagentBackend["capabilities"] }).capabilities = {
+      liveInput: [],
+      settledContinuation: "none",
       modelSelection: true,
       reasoningEffort: false,
-      resumable: false,
     };
     const manager = managerWith([backend]);
 
@@ -377,7 +439,7 @@ describe("subagent manager", () => {
 
     await assert.rejects(
       manager.send(spawned.id, "follow up"),
-      /cannot continue it; spawn a new subagent/,
+      /cannot continue its conversation; spawn a new subagent instead/,
     );
   });
 

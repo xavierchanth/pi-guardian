@@ -53,10 +53,10 @@ export class ClaudeBackend implements SubagentBackend {
   // Steering needs streaming-input mode; resuming does not, and a fresh run per
   // turn keeps no process alive between them.
   readonly capabilities = {
-    steering: false,
+    liveInput: [] as const,
+    settledContinuation: "respawn" as const,
     modelSelection: true,
     reasoningEffort: false,
-    resumable: true,
   };
   private readonly options: ClaudeBackendOptions;
   private readonly load: () => Promise<ClaudeSdk>;
