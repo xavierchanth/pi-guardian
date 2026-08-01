@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdirSync, openSync, closeSync } from "node:fs";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 

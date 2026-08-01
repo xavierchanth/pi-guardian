@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -11,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { mkdtempSync } from "node:fs";
 import {
   executeLegacyMigration,
   LEGACY_CONFIRM_BYTES,
@@ -78,19 +78,31 @@ test("SQLite schema enforces constraints and narrow adapter survives concurrent 
   const two = new SqliteDurableRecordStore(db2, "root");
   one.note({
     durableId: "d1",
-    displayId: "sa-1",
+    displayId: "opaque-label",
+    sequence: 41,
     rootSessionId: "root",
     disposition: "running",
     updatedAt: "2026-01-01",
   });
   two.note({
     durableId: "d2",
-    displayId: "sa-2",
+    displayId: "also-opaque",
+    sequence: 42,
     rootSessionId: "root",
     disposition: "done",
     updatedAt: "2026-01-02",
   });
   assert.equal(one.counts().total, 2);
+  assert.equal(one.get("d1")?.sequence, 41);
+  one.note({
+    durableId: "intent",
+    displayId: "no-digits",
+    sequence: 43,
+    rootSessionId: "root",
+    disposition: "intent",
+    updatedAt: "2026-01-03",
+  });
+  assert.equal(one.get("intent")?.disposition, "intent");
   assert.throws(() => db1.prepare("UPDATE subagent SET backend='bad' WHERE durable_id='d1'").run());
   db2.close();
   db1.close();
@@ -111,7 +123,9 @@ test("corrupt database is quarantined and replaced", () => {
   writeFileSync(paths.database, "not sqlite", { mode: 0o600 });
   const db = openDurableDatabase({ paths, now: () => new Date("2026-01-01T00:00:00Z") });
   db.close();
-  assert.ok(existsSync(join(paths.quarantine, "state-2026-01-01T00-00-00.000Z.corrupt")));
+  assert.ok(
+    existsSync(join(paths.quarantine, "state-2026-01-01T00-00-00.000Z.corrupt", "state.sqlite")),
+  );
 });
 test("legacy migration is copy-verify, idempotent, and never relocates workspaces", () => {
   const { home, paths } = fixture();
@@ -120,9 +134,11 @@ test("legacy migration is copy-verify, idempotent, and never relocates workspace
   mkdirSync(join(legacy, "agents/workspaces/w1"), { recursive: true });
   mkdirSync(join(legacy, "agents/sessions/d1"), { recursive: true });
   writeFileSync(journal, "hello");
+  symlinkSync(journal, join(legacy, "agents/sessions/d1/link"));
   writeFileSync(join(legacy, "agents/workspaces/w1/uncommitted"), "precious");
   const plan = planLegacyMigration(legacy, paths);
   assert.equal(plan.copies.length, 1);
+  assert.ok(plan.skipped.some((entry) => entry.includes("symlink quarantined")));
   const receipt = executeLegacyMigration(plan, paths)!;
   assert.equal(receipt.files.length, 1);
   assert.equal(readFileSync(plan.copies[0]!.destination, "utf8"), "hello");

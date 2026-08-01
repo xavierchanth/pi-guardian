@@ -8,8 +8,8 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -43,14 +43,22 @@ export interface LegacyReceipt {
   completedAt: string;
 }
 
-function walk(source: string, destination: string, prefix: string, output: LegacyCopy[]): void {
+function walk(
+  source: string,
+  destination: string,
+  prefix: string,
+  output: LegacyCopy[],
+  skipped: string[],
+): void {
   if (!existsSync(source)) return;
   for (const entry of readdirSync(source)) {
     const from = join(source, entry);
     const stat = lstatSync(from);
-    if (stat.isSymbolicLink())
-      throw new Error(`Legacy migration refuses symlink: ${relative(prefix, from)}`);
-    if (stat.isDirectory()) walk(from, join(destination, entry), prefix, output);
+    if (stat.isSymbolicLink()) {
+      skipped.push(`${relative(prefix, from)} (symlink quarantined)`);
+      continue;
+    }
+    if (stat.isDirectory()) walk(from, join(destination, entry), prefix, output, skipped);
     else if (stat.isFile())
       output.push({
         source: from,
@@ -64,17 +72,26 @@ function walk(source: string, destination: string, prefix: string, output: Legac
 /** Plans only journals/artifacts. Registry, locks, context exports, and managed jj workspaces stay put. */
 export function planLegacyMigration(sourceRoot: string, paths: StoragePaths): LegacyMigrationPlan {
   const copies: LegacyCopy[] = [];
-  walk(join(sourceRoot, "agents", "sessions"), paths.sessions, sourceRoot, copies);
+  const skipped = [
+    join(sourceRoot, "agents", "workspaces"),
+    join(sourceRoot, "agents", "workspaces.json"),
+    join(sourceRoot, "context-exports"),
+  ];
+  walk(join(sourceRoot, "agents", "sessions"), paths.sessions, sourceRoot, copies, skipped);
   return {
     sourceRoot,
     copies,
-    skipped: [
-      join(sourceRoot, "agents", "workspaces"),
-      join(sourceRoot, "agents", "workspaces.json"),
-      join(sourceRoot, "context-exports"),
-    ],
+    skipped,
     totalBytes: copies.reduce((n, file) => n + file.bytes, 0),
   };
+}
+function fsyncDirectory(path: string): void {
+  const fd = openSync(path, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 function digest(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -117,6 +134,7 @@ export function executeLegacyMigration(
         continue;
       }
       renameSync(temporary, file.destination);
+      fsyncDirectory(dirname(file.destination));
     }
     files.push({
       source: file.source,
@@ -140,6 +158,7 @@ export function executeLegacyMigration(
   };
   const receiptPath = join(paths.migration, `${stamp}.json`);
   writeFileSync(receiptPath, JSON.stringify(receipt, null, 2), { mode: 0o600, flag: "wx" });
+  fsyncDirectory(paths.migration);
   const breadcrumb = join(plan.sourceRoot, "MIGRATED-TO-XDG.txt");
   if (!existsSync(breadcrumb))
     writeFileSync(
@@ -147,5 +166,6 @@ export function executeLegacyMigration(
       `Pi-Tai data was copied (not moved) to:\nstate: ${paths.state}\ndata: ${paths.data}\nreceipt: ${receiptPath}\nLegacy data was retained.\n`,
       { mode: 0o600, flag: "wx" },
     );
+  fsyncDirectory(plan.sourceRoot);
   return receipt;
 }

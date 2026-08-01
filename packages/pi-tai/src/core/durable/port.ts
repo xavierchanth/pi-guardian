@@ -3,6 +3,8 @@ import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 export interface DurableRecordSummary {
   readonly durableId: string;
   readonly displayId: string;
+  /** Authoritative allocation sequence; displayId is an opaque user-facing label. */
+  readonly sequence: number;
   readonly rootSessionId?: string;
   readonly disposition: LifecycleRecord["disposition"];
   readonly archivedAt?: string;

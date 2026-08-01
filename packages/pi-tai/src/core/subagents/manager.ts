@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { DurableRecordStore } from "../durable/port.ts";
 import {
   type BackendRegistry,
   type SendMode,
@@ -14,7 +15,6 @@ import {
   type SpawnTask,
   type SubagentSnapshot,
 } from "./domain.ts";
-import type { DurableRecordStore } from "../durable/port.ts";
 import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
 import { InMemoryRecordStore } from "./records.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
@@ -104,6 +104,7 @@ interface Entry {
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
   readonly generation: number;
+  readonly sequence: number;
   /** Serializes messages without blocking messages to other children. */
   sendChain: Promise<void>;
   /** Permanent tombstone: queued work must never reopen this entry. */
@@ -216,6 +217,7 @@ export class SubagentManager {
         resolveSettled,
         abort: new AbortController(),
         generation: record.generation,
+        sequence: record.sequence,
         sendChain: Promise.resolve(),
         closed: false,
         restored: true,
@@ -310,6 +312,7 @@ export class SubagentManager {
         {
           durableId,
           displayId: id,
+          sequence: this.sequence,
           ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
           disposition: "intent",
           updatedAt: createdAt,
@@ -341,6 +344,7 @@ export class SubagentManager {
         backend,
         task: undefined as unknown as SpawnTask,
         generation,
+        sequence: this.sequence,
         sendChain: Promise.resolve(),
         closed: false,
         restored: false,
@@ -706,6 +710,7 @@ export class SubagentManager {
         ...(this.records.get(snapshot.durableId) ?? {
           durableId: snapshot.durableId,
           displayId: snapshot.id,
+          sequence: entry.sequence,
           updatedAt: snapshot.createdAt,
         }),
         disposition,
