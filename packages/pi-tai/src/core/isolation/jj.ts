@@ -94,6 +94,107 @@ export class JjCli {
     return splitLines(out);
   }
 
+  /** Root-adjacent Change IDs used as path-independent repository evidence. */
+  async repositoryRoots(repoRoot: string): Promise<{ roots: string[]; truncated: boolean }> {
+    const out = await this.read(repoRoot, [
+      "--ignore-working-copy",
+      "log",
+      "-r",
+      "roots(all() ~ root())",
+      "--limit",
+      "17",
+      "--no-graph",
+      "-T",
+      'change_id ++ "\\n"',
+    ]);
+    const lines = splitLines(out);
+    return { roots: lines.slice(0, 16).sort(), truncated: lines.length > 16 };
+  }
+
+  /** A named attachment's head, queried without relying on its directory. */
+  async workspaceHead(repoRoot: string, name: string): Promise<string | undefined> {
+    if (!/^pitai-[a-z0-9-]{1,40}$/.test(name))
+      throw new Error(`Invalid managed workspace name: ${name}`);
+    try {
+      const out = await this.read(repoRoot, [
+        "--ignore-working-copy",
+        "log",
+        "-r",
+        `"${name}@"`,
+        "--no-graph",
+        "-T",
+        'change_id ++ "\\n"',
+      ]);
+      const ids = splitLines(out);
+      return ids.length === 1 ? ids[0] : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Distinguishes visible, divergent, hidden, and never-known Change IDs. */
+  async resolveChange(
+    repoRoot: string,
+    changeId: string,
+  ): Promise<
+    | { kind: "unique"; commitId: string }
+    | { kind: "divergent"; commitIds: string[] }
+    | { kind: "hidden" }
+    | { kind: "unknown" }
+  > {
+    if (!/^[k-z]{4,64}$/.test(changeId)) throw new Error(`Not a jj change id: ${changeId}`);
+    const visible = splitLines(
+      await this.read(repoRoot, [
+        "--ignore-working-copy",
+        "log",
+        "-r",
+        `change_id(${changeId})`,
+        "--no-graph",
+        "-T",
+        'commit_id ++ "\\n"',
+      ]),
+    );
+    if (visible.length === 1) return { kind: "unique", commitId: visible[0]! };
+    if (visible.length > 1) return { kind: "divergent", commitIds: visible.sort() };
+    try {
+      await this.read(repoRoot, [
+        "--ignore-working-copy",
+        "log",
+        "-r",
+        `${changeId}/0`,
+        "--no-graph",
+        "-T",
+        'commit_id ++ "\\n"',
+      ]);
+      return { kind: "hidden" };
+    } catch {
+      return { kind: "unknown" };
+    }
+  }
+
+  async ownedHeads(
+    repoRoot: string,
+    baseChangeIds: readonly string[],
+    workspaceName: string,
+    recordedHeads: readonly string[],
+  ): Promise<string[]> {
+    if (!/^pitai-[a-z0-9-]{1,40}$/.test(workspaceName))
+      throw new Error(`Invalid managed workspace name: ${workspaceName}`);
+    const recorded = recordedHeads.length ? ` | (${exactAny(recordedHeads)})` : "";
+    const revset = `heads(((${exactAny(baseChangeIds)})..("${workspaceName}@"))${recorded})`;
+    return splitLines(
+      await this.read(repoRoot, [
+        "--ignore-working-copy",
+        "log",
+        "-r",
+        revset,
+        "--no-graph",
+        "-T",
+        'change_id ++ "\\n"',
+      ]),
+    ).sort();
+  }
+
   /** Creates a workspace whose working copy sits on top of every id in `parentChangeIds`. */
   async workspaceAdd(
     cwd: string,
