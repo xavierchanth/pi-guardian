@@ -1,4 +1,11 @@
-import type { ChangeEntry, MergeResult, MergeStrategy, SweepEntry, WorkspaceId, WorkspaceRecord } from "./domain.ts";
+import type {
+  ChangeEntry,
+  MergeResult,
+  MergeStrategy,
+  SweepEntry,
+  WorkspaceId,
+  WorkspaceRecord,
+} from "./domain.ts";
 import type { CreateWorkspaceInput } from "./manager.ts";
 
 /** API consumed by subagent isolation; implementations may use file or SQLite custody. */

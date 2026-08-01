@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
-import {
-  type ProcessState,
-  processState,
-  withOperationLease,
-} from "../storage/operation-lease.ts";
+import { type ProcessState, processState, withOperationLease } from "../storage/operation-lease.ts";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
 import { exact, JjCli } from "./jj.ts";
 
