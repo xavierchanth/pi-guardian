@@ -169,7 +169,17 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
   async insert(r: CustodyRecord, operation: BeginOperationInput): Promise<CustodyRecord> {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      await this.begin(operation);
+      // Create sagas persist intent before touching JJ. Legacy callers still get
+      // the same atomic begin+insert behavior.
+      const existing = this.db
+        .prepare("SELECT state,workspace_id FROM custody_operation WHERE op_id=?")
+        .get(operation.opId) as { state: string; workspace_id: string | null } | undefined;
+      if (!existing) await this.begin(operation);
+      else if (
+        existing.state !== "jj_applied" ||
+        (existing.workspace_id && existing.workspace_id !== r.id)
+      )
+        throw new Error("Create operation is not an applicable JJ-applied intent");
       this.db
         .prepare(
           "INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,directory_evidence,evidence_at,base_change_ids,root_change_id,head_change_ids,merged_into_change_id,merged_proof_op,conflict_retained,owner_id,owner_display_id,anchor_token,root_session_id,parent_workspace_id,pending_op_id,quarantined,attention,created_at,updated_at,incident_stage,incident_reason,merge_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
