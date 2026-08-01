@@ -182,8 +182,9 @@ class PiSubagentSession implements SubagentSession {
   }
 
   async send(text: string): Promise<void> {
-    // pi queues input against the live run, which is what steering means here.
-    await this.handle.session.prompt(text);
+    // Never rely on AgentSession's default while a turn is active: this input
+    // must steer the current turn rather than being ambiguously queued.
+    await this.handle.session.prompt(text, { streamingBehavior: "steer" });
   }
 
   async interrupt(): Promise<void> {

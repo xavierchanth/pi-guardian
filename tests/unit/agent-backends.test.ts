@@ -4,6 +4,7 @@ import {
   ClaudeBackend,
   type ClaudeSdk,
 } from "../../packages/pi-tai/src/core/subagents/backends/claude.ts";
+import { PiBackend } from "../../packages/pi-tai/src/core/subagents/backends/pi.ts";
 import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 
 function task(overrides: Partial<SpawnTask> = {}): SpawnTask {
@@ -39,6 +40,43 @@ async function collect(events: AsyncIterable<SubagentEvent>): Promise<SubagentEv
   for await (const event of events) seen.push(event);
   return seen;
 }
+
+describe("pi backend", () => {
+  it("passes explicit steer behavior for a running send", async () => {
+    const prompts: unknown[][] = [];
+    const session = {
+      prompt: async (...args: unknown[]) => void prompts.push(args),
+      waitForIdle: async () => new Promise<void>(() => {}),
+      subscribe: () => () => {},
+    };
+    const backend = new PiBackend({
+      config: {} as never,
+      modelRegistry: {} as never,
+      stateRoot: "/tmp/state",
+      factory: {
+        create: async () =>
+          ({
+            contextId: "sa-1",
+            session,
+            sessionId: "session-1",
+            sessionFile: "/tmp/session.jsonl",
+            sessionDir: "/tmp",
+            bridge: {},
+            send() {},
+            async abort() {},
+            async waitForIdle() {},
+            dispose() {},
+          }) as never,
+      },
+    });
+
+    const child = await backend.spawn(task());
+    await child.send("new direction");
+
+    assert.deepEqual(prompts[1], ["new direction", { streamingBehavior: "steer" }]);
+    child.dispose();
+  });
+});
 
 describe("claude backend", () => {
   it("reports itself unavailable rather than throwing when the SDK is absent", async () => {

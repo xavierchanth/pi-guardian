@@ -333,6 +333,35 @@ describe("subagent manager", () => {
     await manager.spawn(request());
   });
 
+  it("refuses a non-steering backend before calling its running session", async () => {
+    const backend = new StubBackend({ name: "codex" });
+    (backend as { capabilities: Record<string, boolean> }).capabilities = {
+      steering: false,
+      modelSelection: true,
+      reasoningEffort: true,
+      resumable: true,
+    };
+    let sends = 0;
+    const spawn = backend.spawn.bind(backend);
+    backend.spawn = async (task) => {
+      const session = await spawn(task);
+      session.send = async () => {
+        sends += 1;
+      };
+      return session;
+    };
+    const manager = managerWith([backend]);
+    const spawned = await manager.spawn(request({ backend: "codex", prompt: "HANG: running" }));
+
+    await assert.rejects(
+      manager.send(spawned.id, "new direction"),
+      new Error(
+        `Subagent ${spawned.id} is running, but the codex backend does not support steering.`,
+      ),
+    );
+    assert.equal(sends, 0);
+  });
+
   it("refuses to continue a settled subagent on a harness that cannot resume", async () => {
     const backend = new StubBackend();
     (backend as { capabilities: Record<string, boolean> }).capabilities = {

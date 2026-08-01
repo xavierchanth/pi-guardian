@@ -329,16 +329,9 @@ class CodexSubagentSession implements SubagentSession {
     }
   }
 
-  /**
-   * Queues another turn on this thread. The manager resumes settled subagents by
-   * respawning with the thread id, so this covers the mid-run case only.
-   */
-  async send(text: string): Promise<void> {
-    if (!this.threadId) throw new Error("codex session has no thread to continue.");
-    await this.request("turn/start", {
-      threadId: this.threadId,
-      input: [{ type: "text", text }],
-    });
+  /** Live Codex steering is not implemented yet; never start a concurrent turn. */
+  async send(_text: string): Promise<void> {
+    throw new Error("Codex does not support steering a running subagent.");
   }
 
   async interrupt(): Promise<void> {

@@ -285,19 +285,19 @@ describe("codex backend", () => {
     assert.equal(last?.type === "run_settled" && last.outcome, "interrupted");
   });
 
-  it("queues a follow-up turn on the same thread", async () => {
+  it("rejects a running send without starting a concurrent turn", async () => {
     process.env.FAKE_CODEX_SCENARIO = "hang";
     const backend = new CodexBackend({ binary });
 
     const session = await backend.spawn(task());
     const stderr = captureStderr(session);
     await waitFor(() => true);
-    await session.send("also update the docs");
+    await assert.rejects(session.send("also update the docs"), /does not support steering/);
     await session.interrupt();
     await collect(session.events);
 
     const text = await stderr;
-    assert.match(text, /turn on thread-1: also update the docs/);
+    assert.doesNotMatch(text, /turn on thread-1:/);
   });
 });
 

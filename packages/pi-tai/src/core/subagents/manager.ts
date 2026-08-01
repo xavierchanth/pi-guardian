@@ -345,6 +345,11 @@ export class SubagentManager {
   async send(id: string, text: string): Promise<void> {
     const entry = this.requireEntry(id);
     if (entry.snapshot.status === "running") {
+      if (!entry.backend.capabilities.steering) {
+        throw new Error(
+          `Subagent ${id} is running, but the ${entry.snapshot.backend} backend does not support steering.`,
+        );
+      }
       if (!entry.session) throw new Error(`Subagent ${id} has no live session.`);
       await entry.session.send(text);
       return;
