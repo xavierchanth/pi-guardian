@@ -72,6 +72,7 @@ export class WorkspaceManager {
     if (!parent) return this.sourcePath;
     const record = await this.registry.get(parent);
     if (!record) throw new Error(`Unknown parent workspace ${parent}.`);
+    this.assertCustody(record);
     if (record.phase !== "active")
       throw new Error(`Parent workspace ${record.name} is ${record.phase}, not active.`);
     return record.path;
@@ -142,6 +143,12 @@ export class WorkspaceManager {
     return this.serialise(async () => {
       const record = await this.registry.get(id);
       if (!record) return { kind: "blocked", reason: `Unknown workspace ${id}.` } as const;
+      if (!this.hasCustody(record)) {
+        return {
+          kind: "blocked",
+          reason: `Workspace ${record.name} is owned by another or legacy root.`,
+        } as const;
+      }
       if (record.phase !== "active") {
         return {
           kind: "blocked",
@@ -198,6 +205,7 @@ export class WorkspaceManager {
     return this.serialise(async () => {
       const record = await this.registry.get(id);
       if (!record) throw new Error(`Unknown workspace ${id}.`);
+      this.assertCustody(record);
       await this.registry.put({
         ...record,
         ownerId,
@@ -230,6 +238,7 @@ export class WorkspaceManager {
     return this.serialise(async () => {
       const record = await this.registry.get(id);
       if (!record) throw new Error(`Unknown workspace ${id}.`);
+      this.assertCustody(record);
       const entries = (await pathExists(record.path))
         ? await this.jj.range(
             record.path,
@@ -259,11 +268,21 @@ export class WorkspaceManager {
       for (const record of records) {
         // Version 1 has no durable/root authority and can never be adopted.
         if (record.version !== 2 || !("rootSessionId" in record)) {
-          results.push({ id: record.id, name: record.name, disposition: "needs_attention", reason: "Legacy custody record is quarantined." });
+          results.push({
+            id: record.id,
+            name: record.name,
+            disposition: "needs_attention",
+            reason: "Legacy custody record is quarantined.",
+          });
           continue;
         }
         if (record.rootSessionId !== this.rootSessionId) {
-          results.push({ id: record.id, name: record.name, disposition: "kept", reason: "Owned by a different root session." });
+          results.push({
+            id: record.id,
+            name: record.name,
+            disposition: "kept",
+            reason: "Owned by a different root session.",
+          });
           continue;
         }
         if (record.phase === "incident") {
@@ -322,7 +341,6 @@ export class WorkspaceManager {
       // `workspace add` and the registry write.
       for (const name of await this.jj.workspaceNames(this.sourcePath)) {
         if (!name.startsWith(MANAGED_WORKSPACE_PREFIX) || known.has(name)) continue;
-        const path = join(this.workspaceRoot, name);
         results.push({
           id: name,
           name,
@@ -379,6 +397,24 @@ export class WorkspaceManager {
     // from concurrent subagents holds independent chains, and one merge parent
     // per chain is what keeps them all reachable.
     const heads = await this.jj.headsOf(record.path, changeIds);
+
+    // A retry after conflict resolution must not invoke rebase again. Prove that
+    // every retained source head is already in the target, then either retain
+    // custody while conflicts remain or finalize by detaching the recovery copy.
+    const targetBefore = await this.jj.changeIdAt(target, "@");
+    if (await this.jj.areAncestorsOf(target, heads, targetBefore)) {
+      const conflictPaths = await this.jj.conflictedPaths(target);
+      const summary: MergeSummary = {
+        strategy: "merge-under",
+        changeIds,
+        conflictPaths,
+        parentSimplification: "skipped",
+        parentSimplificationReason: "no-redundancy",
+      };
+      if (!conflictPaths.length) await this.reclaim(record, entries, target);
+      return summary;
+    }
+
     const parents = await this.jj.parentsOfWorkingCopy(target);
     // User-authored redundant edges are intentional graph shape. A failed probe
     // is also a reason to leave topology alone, never a reason to fail merging.
@@ -494,8 +530,23 @@ export class WorkspaceManager {
     await rm(path, { recursive: true, force: true });
   }
 
+  private hasCustody(record: WorkspaceRecord): boolean {
+    return record.version === 2 && record.rootSessionId === this.rootSessionId;
+  }
+
+  private assertCustody(record: WorkspaceRecord): void {
+    if (!this.hasCustody(record)) {
+      throw new Error(
+        `Refusing to mutate workspace ${record.name}: custody belongs to another or legacy root.`,
+      );
+    }
+  }
+
   private serialise<T>(operation: () => Promise<T>): Promise<T> {
-    const next = this.mutations.then(operation, operation);
+    // Lock ordering is always process-local queue -> operation lock -> registry
+    // RMW lock. Registry methods never acquire the operation lock themselves.
+    const guarded = () => this.registry.withOperationLock(operation);
+    const next = this.mutations.then(guarded, guarded);
     this.mutations = next.catch(() => {});
     return next;
   }

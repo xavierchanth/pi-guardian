@@ -88,7 +88,11 @@ export interface MergeSummary {
 export type MergeResult =
   | { readonly kind: "merged"; readonly record: WorkspaceRecord; readonly summary: MergeSummary }
   /** Target now contains conflicts; source custody is deliberately retained. */
-  | { readonly kind: "retained_conflicts"; readonly record: WorkspaceRecord; readonly summary: MergeSummary }
+  | {
+      readonly kind: "retained_conflicts";
+      readonly record: WorkspaceRecord;
+      readonly summary: MergeSummary;
+    }
   /** The agent produced nothing; the workspace was removed rather than merged. */
   | { readonly kind: "no_changes"; readonly record: WorkspaceRecord }
   /** Refused before mutating anything; `reason` explains what the caller must fix. */

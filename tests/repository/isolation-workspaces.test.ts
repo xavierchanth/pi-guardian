@@ -347,17 +347,15 @@ describe("managed jj workspaces", () => {
 
     const result = await manager.merge(record.id);
 
-    assert.equal(result.kind, "merged");
-    const summary = result.kind === "merged" ? result.summary : undefined;
-    assert.equal(
-      summary?.strategy,
-      "merge-under",
-      "a conflicting linear insert is undone and retried as a merge",
-    );
-    assert.ok(
-      summary!.conflictPaths.includes("base.txt"),
-      "the conflict surfaces in the user's working copy",
-    );
+    assert.equal(result.kind, "retained_conflicts");
+    const summary = result.kind === "retained_conflicts" ? result.summary : undefined;
+    assert.equal(summary?.strategy, "merge-under");
+    assert.ok(summary!.conflictPaths.includes("base.txt"));
+    assert.equal((await manager.list()).length, 1, "conflicted source custody is retained");
+
+    await writeFile(join(source, "base.txt"), "resolved user and agent work\n");
+    const retry = await manager.merge(record.id);
+    assert.equal(retry.kind, "merged", "resolved target is explicitly finalized");
     assert.equal((await parentsOf(source, "@")).length, 2);
     assert.deepEqual(await manager.list(), []);
   });
@@ -404,7 +402,11 @@ describe("managed jj workspaces", () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
     const empty = await manager.create({ label: "empty" });
-    const busy = await manager.create({ label: "busy", owner: "sa-1" });
+    const busy = await manager.create({
+      label: "busy",
+      ownerId: "owner-durable-1",
+      ownerDisplayId: "sa-1",
+    });
     await commitInWorkspace(busy.path, "feature.txt", "agent output\n", "add feature");
 
     const swept = await manager.sweep();
@@ -421,9 +423,13 @@ describe("managed jj workspaces", () => {
   it("leaves workspaces belonging to a running owner alone", async () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
-    const record = await manager.create({ label: "live", owner: "sa-7" });
+    const record = await manager.create({
+      label: "live",
+      ownerId: "owner-durable-7",
+      ownerDisplayId: "sa-7",
+    });
 
-    const swept = await manager.sweep(["sa-7"]);
+    const swept = await manager.sweep(["owner-durable-7"]);
 
     assert.deepEqual(
       swept.map(({ id, disposition }) => ({ id, disposition })),

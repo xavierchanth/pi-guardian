@@ -14,16 +14,35 @@ export interface WorkspaceRegistryPort {
   get(id: WorkspaceId): Promise<WorkspaceRecord | undefined>;
   put(record: WorkspaceRecord): Promise<void>;
   remove(id: WorkspaceId): Promise<void>;
+  /** Serializes a complete custody/graph operation across processes. */
+  withOperationLock<T>(operation: () => Promise<T>): Promise<T>;
 }
 
 export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
   private readonly file: string;
   private readonly lockFile: string;
+  private readonly operationLockFile: string;
   private queue: Promise<unknown> = Promise.resolve();
+  private operationQueue: Promise<unknown> = Promise.resolve();
 
   constructor(stateRoot: string) {
     this.file = join(stateRoot, "workspaces.json");
     this.lockFile = `${this.file}.lock`;
+    this.operationLockFile = `${this.file}.operation.lock`;
+  }
+
+  withOperationLock<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.operationQueue.then(async () => {
+      await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
+      await this.acquireLock(this.operationLockFile, 10_000);
+      try {
+        return await operation();
+      } finally {
+        await rm(this.operationLockFile, { force: true });
+      }
+    });
+    this.operationQueue = next.catch(() => {});
+    return next;
   }
 
   async list(): Promise<WorkspaceRecord[]> {
@@ -56,7 +75,7 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
   private mutate(update: (records: WorkspaceRecord[]) => WorkspaceRecord[]): Promise<void> {
     const next = this.queue.then(async () => {
       await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-      await this.acquireLock();
+      await this.acquireLock(this.lockFile, 2_000);
       try {
         // Read only after obtaining the cross-process lock: otherwise a writer
         // can replace the document between our read and rename.
@@ -72,12 +91,14 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
     return next;
   }
 
-  private async acquireLock(): Promise<void> {
-    const deadline = Date.now() + 2_000;
+  private async acquireLock(lockFile: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
     while (true) {
       try {
-        const handle = await open(this.lockFile, "wx", 0o600);
-        await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+        const handle = await open(lockFile, "wx", 0o600);
+        await handle.writeFile(
+          JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
+        );
         await handle.close();
         return;
       } catch (error) {
@@ -85,15 +106,26 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
         // Take over only when metadata is valid, old, and its process is
         // definitely gone. Ambiguity fails closed.
         try {
-          const owner = JSON.parse(await readFile(this.lockFile, "utf8")) as { pid: number; createdAt: string };
+          const owner = JSON.parse(await readFile(lockFile, "utf8")) as {
+            pid: number;
+            createdAt: string;
+          };
           const old = Date.now() - Date.parse(owner.createdAt) > 30_000;
           let alive = true;
-          try { process.kill(owner.pid, 0); } catch (probe) {
+          try {
+            process.kill(owner.pid, 0);
+          } catch (probe) {
             if ((probe as NodeJS.ErrnoException).code === "ESRCH") alive = false;
           }
-          if (old && !alive) { await rm(this.lockFile); continue; }
-        } catch { /* malformed/racing lock: do not steal it */ }
-        if (Date.now() >= deadline) throw new Error(`Timed out waiting for workspace registry lock ${this.lockFile}`);
+          if (old && !alive) {
+            await rm(lockFile);
+            continue;
+          }
+        } catch {
+          /* malformed/racing lock: do not steal it */
+        }
+        if (Date.now() >= deadline)
+          throw new Error(`Timed out waiting for workspace registry lock ${lockFile}`);
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }
@@ -102,6 +134,13 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
 
 export class InMemoryWorkspaceRegistry implements WorkspaceRegistryPort {
   private readonly records = new Map<WorkspaceId, WorkspaceRecord>();
+  private operationQueue: Promise<unknown> = Promise.resolve();
+
+  withOperationLock<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.operationQueue.then(operation, operation);
+    this.operationQueue = next.catch(() => {});
+    return next;
+  }
 
   async list(): Promise<WorkspaceRecord[]> {
     return [...this.records.values()];

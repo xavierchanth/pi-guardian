@@ -690,7 +690,8 @@ function renderLine(snapshot: SubagentSnapshot): string {
 function renderWorkspace(record: WorkspaceRecord, pending: number | undefined): string {
   const holding =
     pending === undefined ? "unreadable" : pending === 0 ? "empty" : `${pending} change(s)`;
-  return `${record.name}  ${record.phase}  ${holding}${record.owner ? `  owner ${record.owner}` : ""}`;
+  const owner = record.ownerDisplayId ?? record.ownerId;
+  return `${record.name}  ${record.phase}  ${holding}${owner ? `  owner ${owner}` : ""}`;
 }
 
 function renderResult(snapshot: SubagentSnapshot): string {

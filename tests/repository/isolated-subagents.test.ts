@@ -232,7 +232,8 @@ describe("isolated subagents", () => {
     const snapshot = await isolated.spawn(request({ prompt: "HANG: still working" }));
     const swept = await workspaces.sweep(isolated.activeOwners());
 
-    assert.deepEqual(isolated.activeOwners(), [snapshot.id]);
+    assert.equal(isolated.activeOwners().length, 1);
+    assert.notEqual(isolated.activeOwners()[0], snapshot.id, "display id is not custody authority");
     assert.equal(swept[0]?.disposition, "kept");
     assert.equal((await workspaces.list()).length, 1);
   });
