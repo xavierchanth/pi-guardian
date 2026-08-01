@@ -145,12 +145,28 @@ test("migration keeps same-name records from distinct repositories and retains s
   assert.equal(rows[0].name, "same");
   assert.equal(rows[1].name, "same");
   assert.notEqual(rows[0].repo_id, rows[1].repo_id);
-  const collision = f.db.prepare("SELECT evidence FROM quarantine WHERE reason='migration_insert_collision'").get() as { evidence: string };
+  const collision = f.db
+    .prepare("SELECT evidence FROM quarantine WHERE reason='migration_insert_collision'")
+    .get() as { evidence: string };
   const evidence = JSON.parse(collision.evidence);
   assert.equal(evidence.incoming.id, "w1");
   assert.equal(evidence.conflicts.byId.id, "w1");
-  assert.equal((f.db.prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_completed'").get() as any).n, 0);
-  assert.equal((f.db.prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_unresolved'").get() as any).n, 1);
+  assert.equal(
+    (
+      f.db
+        .prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_completed'")
+        .get() as any
+    ).n,
+    0,
+  );
+  assert.equal(
+    (
+      f.db
+        .prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_unresolved'")
+        .get() as any
+    ).n,
+    1,
+  );
   f.db.close();
 });
 
@@ -158,14 +174,36 @@ test("abandoned head refresh requires a verified receipt for the new canonical h
   const f = fixture();
   const at = "2025-01-01T00:00:00.000Z";
   f.db.prepare("INSERT INTO pi_session VALUES(?,NULL,NULL,'unknown','',?,?)").run("s", at, at);
-  f.db.prepare("INSERT INTO custody_operation(op_id,workspace_id,kind,state,requested_by,pid,process_identity,started_at,heartbeat_at,settled_at) VALUES('op','wa','abandon','committed','user',1,'p',?,?,?)").run(at, at, at);
-  f.db.prepare("INSERT INTO abandon_receipt VALUES('r1','wa','op','user','[\"kkkk\"]','a','b',1,?)").run(at);
-  f.db.prepare("INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,base_change_ids,root_change_id,head_change_ids,root_session_id,created_at,updated_at) VALUES('wa','a','/a','repo_unresolved','/r','abandoned','[\"llll\"]','kkkk','[\"kkkk\"]','s',?,?)").run(at, at);
-  assert.throws(() => f.db.prepare("UPDATE workspace SET head_change_ids='[\"mmmm\"]' WHERE id='wa'").run(), /verified abandon receipt/);
-  f.db.prepare("INSERT INTO custody_operation(op_id,workspace_id,kind,state,requested_by,pid,process_identity,started_at,heartbeat_at,settled_at) VALUES('op2','wa','abandon','committed','user',1,'p',?,?,?)").run(at, at, at);
-  f.db.prepare("INSERT INTO abandon_receipt VALUES('r2','wa','op2','user','[\"mmmm\"]','b','c',1,?)").run(at);
+  f.db
+    .prepare(
+      "INSERT INTO custody_operation(op_id,workspace_id,kind,state,requested_by,pid,process_identity,started_at,heartbeat_at,settled_at) VALUES('op','wa','abandon','committed','user',1,'p',?,?,?)",
+    )
+    .run(at, at, at);
+  f.db
+    .prepare("INSERT INTO abandon_receipt VALUES('r1','wa','op','user','[\"kkkk\"]','a','b',1,?)")
+    .run(at);
+  f.db
+    .prepare(
+      "INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,base_change_ids,root_change_id,head_change_ids,root_session_id,created_at,updated_at) VALUES('wa','a','/a','repo_unresolved','/r','abandoned','[\"llll\"]','kkkk','[\"kkkk\"]','s',?,?)",
+    )
+    .run(at, at);
+  assert.throws(
+    () => f.db.prepare("UPDATE workspace SET head_change_ids='[\"mmmm\"]' WHERE id='wa'").run(),
+    /verified abandon receipt/,
+  );
+  f.db
+    .prepare(
+      "INSERT INTO custody_operation(op_id,workspace_id,kind,state,requested_by,pid,process_identity,started_at,heartbeat_at,settled_at) VALUES('op2','wa','abandon','committed','user',1,'p',?,?,?)",
+    )
+    .run(at, at, at);
+  f.db
+    .prepare("INSERT INTO abandon_receipt VALUES('r2','wa','op2','user','[\"mmmm\"]','b','c',1,?)")
+    .run(at);
   f.db.prepare("UPDATE workspace SET head_change_ids='[\"mmmm\"]' WHERE id='wa'").run();
-  assert.equal((f.db.prepare("SELECT head_change_ids h FROM workspace WHERE id='wa'").get() as any).h, '["mmmm"]');
+  assert.equal(
+    (f.db.prepare("SELECT head_change_ids h FROM workspace WHERE id='wa'").get() as any).h,
+    '["mmmm"]',
+  );
   f.db.close();
 });
 

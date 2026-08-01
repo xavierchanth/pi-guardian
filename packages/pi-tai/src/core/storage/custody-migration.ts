@@ -128,22 +128,46 @@ export function migrateWorkspaceRegistry(
             "INSERT OR IGNORE INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,base_change_ids,root_change_id,head_change_ids,root_session_id,quarantined,attention,imported_from,created_at,updated_at,incident_stage,incident_reason) VALUES(?,?,?,?,?,'incident','unknown',?,?,?,?,0,1,'workspaces_json_v2',?,?, 'custody_migration','legacy_requires_repository_proof')",
           )
           .run(
-            String(r.id), String(r.name), String(r.path), repoId, repoRoot,
-            JSON.stringify(r.baseChangeIds), String(r.rootChangeId),
-            JSON.stringify([r.rootChangeId]), String(r.rootSessionId),
-            String(r.createdAt ?? now.toISOString()), String(r.updatedAt ?? now.toISOString()),
+            String(r.id),
+            String(r.name),
+            String(r.path),
+            repoId,
+            repoRoot,
+            JSON.stringify(r.baseChangeIds),
+            String(r.rootChangeId),
+            JSON.stringify([r.rootChangeId]),
+            String(r.rootSessionId),
+            String(r.createdAt ?? now.toISOString()),
+            String(r.updatedAt ?? now.toISOString()),
           );
         if (result.changes) adopted.push(String(r.id));
         else {
-          const byId = db.prepare("SELECT id,name,path,repo_id,repo_root FROM workspace WHERE id=?").get(String(r.id));
-          const byRepoName = db.prepare("SELECT id,name,path,repo_id,repo_root FROM workspace WHERE repo_id=? AND name=?").get(repoId, String(r.name));
-          const evidence = { index, incoming: { id: r.id, name: r.name, path: r.path, repoId, repoRoot }, conflicts: { byId: byId ?? null, byRepoName: byRepoName ?? null } };
+          const byId = db
+            .prepare("SELECT id,name,path,repo_id,repo_root FROM workspace WHERE id=?")
+            .get(String(r.id));
+          const byRepoName = db
+            .prepare(
+              "SELECT id,name,path,repo_id,repo_root FROM workspace WHERE repo_id=? AND name=?",
+            )
+            .get(repoId, String(r.name));
+          const evidence = {
+            index,
+            incoming: { id: r.id, name: r.name, path: r.path, repoId, repoRoot },
+            conflicts: { byId: byId ?? null, byRepoName: byRepoName ?? null },
+          };
           collisions.push(evidence);
-          quarantine(db, now, "migration_insert_collision", { source, sha256: digest, ...evidence });
+          quarantine(db, now, "migration_insert_collision", {
+            source,
+            sha256: digest,
+            ...evidence,
+          });
         }
       }
       quarantine(db, now, collisions.length ? "migration_unresolved" : "migration_completed", {
-        source, sha256: digest, adopted, collisions,
+        source,
+        sha256: digest,
+        adopted,
+        collisions,
       });
       db.exec("COMMIT");
     } catch (error) {
