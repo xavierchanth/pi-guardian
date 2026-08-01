@@ -51,6 +51,7 @@ export const WORKSPACE_STATUS_DESCRIPTION =
 export const DELEGATION_GUIDELINES: readonly string[] = [
   'Delegate external or source-backed research with `subagent_spawn`, `capability: "researcher"`, and `isolation: "shared"`. Delegate other work that is self-contained and worth its own context window: a focused implementation task, an independent investigation, a review of work that already exists. Do trivial or tightly coupled work yourself.',
   "Write the subagent's prompt so it stands alone. It cannot see this conversation, so state the goal, the relevant background, the acceptance criteria, and the constraints in the prompt itself.",
+  "Subagent delegation is text-only: images and attachment objects from this conversation are not inherited or forwarded. Delegate image-dependent work only with a sufficient textual description or a confirmed user-authorized stable project path; never pass a temporary clipboard image path.",
   "Foreground user input releases subagent_wait without cancelling subagents.",
   "A user message always addresses you, the parent. Do not relay it with subagent_send unless the user explicitly asks you to send that message to a subagent.",
   "Give a subagent its own workspace only when its work is independent of every other subagent's: different files, no shared index or manifest, and nothing that must happen in order. Use the shared working copy when you want its work to appear directly in yours.",

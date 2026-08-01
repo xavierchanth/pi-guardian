@@ -35,6 +35,7 @@ import { IsolatedSubagents } from "./isolated.ts";
 import { PiBranchLifecycleStore } from "./lifecycle.ts";
 import { SubagentManager } from "./manager.ts";
 import { MODEL_ALIAS_NAMES, MODEL_ALIASES, resolveModel } from "./models.ts";
+import { containsTemporaryClipboardImage, TEMPORARY_IMAGE_ERROR } from "./temporary-images.ts";
 import {
   CANCEL_DESCRIPTION,
   CHECK_DESCRIPTION,
@@ -171,7 +172,8 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     promptGuidelines: [...DELEGATION_GUIDELINES],
     parameters: Type.Object({
       objective: Type.String({
-        description: "What the subagent must accomplish, stated so it stands alone",
+        description:
+          "What the subagent must accomplish, stated so it stands alone. Text only: images and attachment objects are not inherited or forwarded.",
       }),
       isolation: Type.Union([Type.Literal("workspace"), Type.Literal("shared")], {
         description:
@@ -186,16 +188,21 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         ),
       ),
       background: Type.Optional(
-        Type.String({ description: "Context the subagent needs but cannot discover on its own" }),
+        Type.String({
+          description:
+            "Text-only context the subagent needs but cannot discover on its own; do not pass image/attachment objects or temporary clipboard paths",
+        }),
       ),
       acceptanceCriteria: Type.Optional(
-        Type.Array(Type.String(), {
-          description: "Conditions that must hold for the task to be complete",
+        Type.Array(Type.String({ description: "A text-only completion condition" }), {
+          description: "Text-only conditions that must hold for the task to be complete",
           minItems: 1,
           maxItems: 32,
         }),
       ),
-      constraints: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
+      constraints: Type.Optional(
+        Type.Array(Type.String({ description: "A text-only constraint" }), { maxItems: 32 }),
+      ),
       backend: Type.Optional(
         Type.Union(
           enabled.map((name) => Type.Literal(name)),
@@ -229,6 +236,19 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Reject transient clipboard references before runtime construction can
+      // create a workspace, lifecycle entry, child session, or provider call.
+      const promptValues = [
+        params.objective,
+        params.background,
+        params.title,
+        ...(params.acceptanceCriteria ?? []),
+        ...(params.constraints ?? []),
+      ].filter((value): value is string => typeof value === "string");
+      if (containsTemporaryClipboardImage(promptValues, undefined, [ctx.cwd])) {
+        return failure(TEMPORARY_IMAGE_ERROR);
+      }
+
       const { isolated, agents } = await requireRuntime(ctx);
       const previous = params.continue ? agents.get(params.continue) : undefined;
       if (previous && params.capability && previous.capability !== params.capability) {

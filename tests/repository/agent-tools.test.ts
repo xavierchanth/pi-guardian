@@ -137,6 +137,12 @@ describe("subagent tool surface", () => {
     assert.match(guidance, /sequential, not parallel/);
     assert.match(guidance, /`continue` naming the finished subagent/);
     assert.match(guidance, /shared index, manifest, README table, or numbered list/);
+    assert.match(guidance, /images and attachment objects.*not inherited or forwarded/);
+    assert.match(guidance, /user-authorized stable project path/);
+    const spawnSchema = host.tools.get("subagent_spawn").parameters;
+    assert.match(spawnSchema.properties.objective.description, /Text only/);
+    assert.equal(spawnSchema.properties.objective.type, "string");
+    assert.equal(spawnSchema.properties.acceptanceCriteria.items.type, "string");
 
     const wait = host.tools.get("subagent_wait");
     assert.equal(typeof wait.renderCall, "function");
@@ -150,6 +156,41 @@ describe("subagent tool surface", () => {
 
     const backendChoices = schema.properties.backend.anyOf.map((entry: any) => entry.const);
     assert.deepEqual(backendChoices, ["pi", "claude", "codex"]);
+  });
+
+  it("rejects temporary clipboard images in every prompt field before side effects", async () => {
+    const backend = new StubBackend({ name: "pi" });
+    const { call, workspaces } = await harness(backend);
+    const image = "/tmp/pi-clipboard-123e4567-e89b-42d3-a456-426614174000.webp";
+    const cases = [
+      { objective: image },
+      { objective: "review", background: `look at ${image}` },
+      { objective: "review", acceptanceCriteria: [image] },
+      { objective: "review", constraints: [image] },
+      { objective: "review", title: image },
+    ];
+
+    for (const fields of cases) {
+      const result = await call("subagent_spawn", { isolation: "workspace", ...fields });
+      assert.equal(result.isError, true);
+      assert.match(textOf(result), /Describe the image in text/);
+      assert.match(textOf(result), /stable user-authorized project path/);
+      assert.doesNotMatch(textOf(result), /\/tmp|pi-clipboard/);
+    }
+    assert.equal(backend.spawned.length, 0);
+    assert.equal((await workspaces.list()).length, 0);
+  });
+
+  it("allows stable image paths and similar ordinary prose", async () => {
+    const backend = new StubBackend({ name: "pi" });
+    const { call, source } = await harness(backend);
+    const stable = join(source, "pi-clipboard-123e4567-e89b-42d3-a456-426614174000.png");
+    const result = await call("subagent_spawn", {
+      isolation: "shared",
+      objective: `Review ${stable}; discuss pi-clipboard-example.png as prose`,
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal(backend.spawned.length, 1);
   });
 
   it("rejects a model that is neither an alias nor a provider/model id", async () => {

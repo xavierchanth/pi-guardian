@@ -155,6 +155,12 @@ schemas:
 | `workspace_discard` | Throw a subagent's workspace away. |
 | `workspace_status` | List workspaces and what they hold. |
 
+Delegation is currently text-only. Conversation images and attachment objects are not
+inherited or forwarded. A spawn containing a Pi clipboard image path under a trusted OS
+temporary root is rejected before workspace or backend launch; callers must provide a
+textual description or save the image at a stable, user-authorized project path. This is
+a transient-path guard, not a durable attachment store or path authorization mechanism.
+
 An interrupted, cancelled, pruned, or shut-down entry is closed and is never
 automatically continued. Workspace reuse is a separate explicit spawn concern. A
 settled conversation continuation is exposed as running only after its lifecycle fact
