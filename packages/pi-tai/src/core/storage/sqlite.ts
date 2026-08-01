@@ -5,7 +5,7 @@ import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../
 import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const SCHEMA_SQL_V1 = `
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
@@ -43,13 +43,25 @@ CREATE TRIGGER trg_no_workspace_delete BEFORE DELETE ON workspace BEGIN SELECT R
 export const SCHEMA_SQL_V3 = `
 CREATE TRIGGER trg_abandoned_heads_require_receipt BEFORE UPDATE OF head_change_ids ON workspace WHEN OLD.disposition='abandoned' AND NEW.head_change_ids<>OLD.head_change_ids AND NOT EXISTS(SELECT 1 FROM abandon_receipt r WHERE r.workspace_id=NEW.id AND r.verified_absent=1 AND r.change_ids=NEW.head_change_ids) BEGIN SELECT RAISE(ABORT,'abandoned head refresh requires a verified abandon receipt'); END;
 `;
+export const SCHEMA_SQL_V4 = `
+INSERT OR IGNORE INTO allowed_custody_transition VALUES
+('merged','attached','attach_proved'),('abandoned','attached','attach_proved'),
+('merged','detached','evidence_missing'),('abandoned','detached','evidence_missing'),('missing','detached','evidence_missing'),
+('merged','detached','forget'),('abandoned','detached','forget'),('missing','detached','forget'),
+('merged','missing','evidence_missing'),('abandoned','missing','evidence_missing'),
+('missing','merged','merge_proved'),('abandoned','merged','merge_proved'),
+('merged','abandoned','abandon_receipted'),
+('detached','attached','merge_conflicts_retained'),('missing','attached','merge_conflicts_retained'),('merged','attached','merge_conflicts_retained'),('abandoned','attached','merge_conflicts_retained'),
+('attached','attached','repo_rebound'),('detached','attached','repo_rebound'),('missing','attached','repo_rebound'),('merged','attached','repo_rebound'),('abandoned','attached','repo_rebound'),('incident','attached','repo_rebound');
+`;
 export const MIGRATIONS = [
   { version: 1, sql: SCHEMA_SQL_V1 },
   { version: 2, sql: SCHEMA_SQL_V2 },
   { version: 3, sql: SCHEMA_SQL_V3 },
+  { version: 4, sql: SCHEMA_SQL_V4 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
-export const SCHEMA_SQL = SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3;
+export const SCHEMA_SQL = SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4;
 
 export interface OpenSqliteOptions {
   paths: StoragePaths;

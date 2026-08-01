@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   CustodyCause,
   CustodyDisposition,
@@ -10,6 +11,7 @@ export type HeadEvidence =
   | { kind: "unique"; changeId: string }
   | { kind: "divergent"; changeIds: readonly string[] }
   | { kind: "hidden"; changeIds?: readonly string[] }
+  | { kind: "absent" }
   | { kind: "unknown" };
 export interface CustodyEvidence {
   repository: RepositoryGrade;
@@ -25,15 +27,31 @@ export interface CustodyDecision {
   cause: CustodyCause;
   reason: string;
   heads: readonly string[];
+  /** False means that unavailable evidence must not be written as authority. */
+  mutate: boolean;
 }
-const incident = (reason: string, heads: readonly string[] = []): CustodyDecision => ({
-  disposition: "incident",
-  cause: "ambiguity",
-  reason,
-  heads,
-});
 
-/** K5's closed-world decision table. The ordered branches are the seventeen exhaustive rows. */
+function result(
+  disposition: CustodyDisposition,
+  cause: CustodyCause,
+  reason: string,
+  heads: readonly string[],
+  mutate = true,
+): CustodyDecision {
+  return { disposition, cause, reason, heads, mutate };
+}
+
+function transitionCause(
+  from: CustodyDisposition,
+  to: CustodyDisposition,
+  ordinary: CustodyCause,
+): CustodyCause {
+  if (from === "incident" && to !== "incident") return "incident_resolved";
+  if (from === to && ordinary !== "merge_conflicts_retained") return "heads_refreshed";
+  return ordinary;
+}
+
+/** K5a's closed-world decision over repository, attachment, directory, heads, and target evidence. */
 export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDecision {
   const heads =
     e.heads.kind === "unique"
@@ -42,90 +60,128 @@ export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDeci
         ? [...new Set(e.heads.changeIds)].sort()
         : e.heads.kind === "hidden"
           ? [...new Set(e.heads.changeIds ?? r.headChangeIds)].sort()
-          : [];
-  if (e.repository === "unknown") return incident("repository evidence unavailable", heads); // 1
+          : e.heads.kind === "absent"
+            ? []
+            : r.headChangeIds;
+
+  // A verified receipt is terminal proof and therefore precedes weaker hidden/unavailable observations.
+  if (e.abandonReceipt)
+    return result(
+      "abandoned",
+      transitionCause(r.disposition, "abandoned", "abandon_receipted"),
+      "verified abandon receipt",
+      r.disposition === "abandoned" ? r.headChangeIds : heads,
+    );
+
+  // Unavailable is not contradictory evidence. In particular, never persist unknown over known authority.
+  if (
+    e.repository === "unknown" ||
+    e.attachment === "unknown" ||
+    e.directory === "unknown" ||
+    e.heads.kind === "unknown" ||
+    e.target === "unknown"
+  )
+    return result(r.disposition, "heads_refreshed", "evidence unavailable", r.headChangeIds, false);
+
   if (e.repository === "foreign")
-    return incident("workspace belongs to a foreign repository", heads); // 2
-  if (e.attachment === "unknown" || e.directory === "unknown" || e.heads.kind === "unknown")
-    return incident("custody evidence unavailable", heads); // 3
-  if (e.heads.kind === "divergent") return incident("divergent workspace heads", heads); // 4
-  if (e.heads.kind === "hidden") return incident("workspace head is hidden", heads); // 5
-  if (r.disposition === "abandoned" && !e.abandonReceipt)
-    return incident("abandoned state lacks an exact receipt", heads); // 6
-  if (r.disposition === "merged" && (!e.mergeReceipt || e.target === "unknown"))
-    return incident("merged state lacks exact proof", heads); // 7
-  if (e.target === "conflicted")
-    return {
-      disposition: "attached",
-      cause: "merge_conflicts_retained",
-      reason: "conflicts retained",
+    return result(
+      "incident",
+      transitionCause(r.disposition, "incident", "ambiguity"),
+      "foreign repository",
       heads,
-    }; // 8
-  if (e.abandonReceipt && e.attachment === "absent" && !heads.length)
-    return {
-      disposition: "abandoned",
-      cause: "abandon_receipted",
-      reason: "verified abandon receipt",
+    );
+  if (e.heads.kind === "divergent" || e.heads.kind === "hidden")
+    return result(
+      "incident",
+      transitionCause(r.disposition, "incident", "ambiguity"),
+      "ambiguous heads",
       heads,
-    }; // 9
+    );
+
   if (e.mergeReceipt && e.target === "ancestor")
-    return {
-      disposition: "merged",
-      cause: "merge_proved",
-      reason: "target ancestry proved",
+    return result(
+      "merged",
+      transitionCause(r.disposition, "merged", "merge_proved"),
+      "merge proved",
       heads,
-    }; // 10
+    );
+
+  // Conflict evidence cannot manufacture an attachment which attachment evidence denies.
+  if (e.target === "conflicted" && e.attachment === "present")
+    return result(
+      "attached",
+      transitionCause(r.disposition, "attached", "merge_conflicts_retained"),
+      "conflicts retained",
+      heads,
+    );
+
+  // Relocation must precede the ordinary attached row or repo_rebound is unreachable.
+  if (e.repository === "relocated" && e.attachment === "present" && e.directory === "present")
+    return result("attached", "repo_rebound", "repository relocated", heads);
+
   if (e.attachment === "present" && e.directory === "present")
-    return {
-      disposition: "attached",
-      cause: "attach_proved",
-      reason: "workspace attachment proved",
+    return result(
+      "attached",
+      transitionCause(r.disposition, "attached", "attach_proved"),
+      "attachment proved",
       heads,
-    }; // 11
+    );
   if (e.attachment === "absent" && heads.length)
-    return {
-      disposition: "detached",
-      cause: "evidence_missing",
-      reason: "heads survive without attachment",
+    return result(
+      "detached",
+      transitionCause(r.disposition, "detached", "evidence_missing"),
+      "heads survive detached",
       heads,
-    }; // 12
+    );
   if (e.directory === "absent" && heads.length)
-    return {
-      disposition: "detached",
-      cause: "evidence_missing",
-      reason: "directory deleted but heads survive",
+    return result(
+      "detached",
+      transitionCause(r.disposition, "detached", "evidence_missing"),
+      "directory absent; heads survive",
       heads,
-    }; // 13
+    );
   if (e.attachment === "absent" && e.directory === "present")
-    return { disposition: "detached", cause: "forget", reason: "directory is detached", heads }; // 14
-  if (e.attachment === "absent" && e.directory === "absent" && !heads.length)
-    return {
-      disposition: "missing",
-      cause: "evidence_missing",
-      reason: "workspace and heads are absent",
+    return result(
+      "detached",
+      transitionCause(r.disposition, "detached", "forget"),
+      "attachment absent",
       heads,
-    }; // 15
-  if (e.repository === "relocated" && e.attachment === "present")
-    return {
-      disposition: "attached",
-      cause: "repo_rebound",
-      reason: "repository relocated",
+    );
+  if (e.attachment === "absent" && e.directory === "absent" && heads.length === 0)
+    return result(
+      "missing",
+      transitionCause(r.disposition, "missing", "evidence_missing"),
+      "all evidence absent",
       heads,
-    }; // 16
-  return incident("unclassified or contradictory evidence", heads); // 17
+    );
+
+  return result(
+    "incident",
+    transitionCause(r.disposition, "incident", "ambiguity"),
+    "contradictory evidence",
+    heads,
+  );
 }
 
 export class CustodyReconciler {
+  private readonly port: WorkspaceCustodyPort;
+  private readonly identity: { rootSessionId: string; pid: number; processIdentity: string };
+
   constructor(
-    private readonly port: WorkspaceCustodyPort,
-    private readonly identity: { rootSessionId: string; pid: number; processIdentity: string },
-  ) {}
+    port: WorkspaceCustodyPort,
+    identity: { rootSessionId: string; pid: number; processIdentity: string },
+  ) {
+    this.port = port;
+    this.identity = identity;
+  }
+
   async reconcile(
     record: CustodyRecord,
     evidence: CustodyEvidence,
     now = new Date().toISOString(),
   ): Promise<CustodyRecord> {
     const d = decideCustody(record, evidence);
+    if (!d.mutate) return record;
     const canonical = [...new Set(d.heads)].sort();
     if (
       record.disposition === d.disposition &&
@@ -134,23 +190,21 @@ export class CustodyReconciler {
       record.directoryEvidence === evidence.directory
     )
       return record;
-    const opId = `reconcile:${record.id}:${Buffer.from(JSON.stringify([d, evidence.repository, canonical])).toString("base64url")}`;
-    try {
-      await this.port.begin({
-        opId,
-        workspaceId: record.id,
-        repoId: record.repoId,
-        kind: "reconcile",
-        requestedBy: "system_reconcile",
-        pid: this.identity.pid,
-        processIdentity: this.identity.processIdentity,
-        now,
-      });
-    } catch {
-      const current = await this.port.get(record.id);
-      if (current) return current;
-      throw new Error("custody reconciliation intent collision");
-    }
+
+    const digest = createHash("sha256")
+      .update(JSON.stringify([record.id, d, evidence.repository, canonical]))
+      .digest("hex");
+    const opId = `reconcile:${digest}`;
+    await this.port.begin({
+      opId,
+      workspaceId: record.id,
+      repoId: record.repoId,
+      kind: "reconcile",
+      requestedBy: "system_reconcile",
+      pid: this.identity.pid,
+      processIdentity: this.identity.processIdentity,
+      now,
+    });
     return this.port.commit(opId, {
       workspaceId: record.id,
       ownRootSessionId: this.identity.rootSessionId,
@@ -162,7 +216,7 @@ export class CustodyReconciler {
         attachmentEvidence: evidence.attachment,
         directoryEvidence: evidence.directory,
         evidenceAt: now,
-        attention: d.disposition === "incident",
+        attention: record.attention || d.disposition === "incident",
         ...(d.disposition === "incident"
           ? { incident: { stage: "reconcile", reason: d.reason } }
           : { incident: undefined }),
