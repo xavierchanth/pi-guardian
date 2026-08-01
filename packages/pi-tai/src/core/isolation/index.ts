@@ -1,6 +1,14 @@
 export {
-  isSettled,
+  type CustodyDecision,
+  type CustodyEvidence,
+  CustodyReconciler,
+  decideCustody,
+  type HeadEvidence,
+  type RepositoryGrade,
+} from "./custody-reconciler.ts";
+export {
   type ChangeEntry,
+  isSettled,
   type MergeResult,
   type MergeStrategy,
   type MergeSummary,
@@ -11,9 +19,9 @@ export {
 } from "./domain.ts";
 export { exact, exactAny, JjCli } from "./jj.ts";
 export {
+  type CreateWorkspaceInput,
   MANAGED_WORKSPACE_PREFIX,
   WorkspaceManager,
-  type CreateWorkspaceInput,
   type WorkspaceManagerOptions,
 } from "./manager.ts";
 export {
