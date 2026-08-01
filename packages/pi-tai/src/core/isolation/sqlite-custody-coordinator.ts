@@ -95,12 +95,14 @@ export class SQLiteCustodyCoordinator {
         this.db
           .prepare("UPDATE custody_operation SET target_change_id=?,evidence=? WHERE op_id=?")
           .run(request.targetChangeId ?? null, JSON.stringify(request), opId);
-        this.fault?.("after_intent", opId);
       } catch (error) {
         // A semantic duplicate may win the primary-key race. Any other failure
         // remains visible rather than being mistaken for successful leasing.
         if (!this.operation(opId)) throw error;
       }
+      // Keep the injected crash outside duplicate-intent handling: a fault is
+      // not a primary-key race and must stop this process at the boundary.
+      this.fault?.("after_intent", opId);
     }
     return this.leased(request.repoId, () => this.resume(opId));
   }
@@ -220,13 +222,17 @@ export class SQLiteCustodyCoordinator {
         attachmentEvidence: "present",
         directoryEvidence: "present",
       };
-      return this.insertCreated(row, opId);
+      this.fault?.("after_receipt", opId);
+      const result = await this.insertCreated(row, opId);
+      this.fault?.("after_commit", opId);
+      return result;
     }
     if (request.kind === "forget") {
       if (await this.jj.workspaceHead(request.repoRoot, row.name))
         throw new Error("Forget absence not proved");
       await rm(row.path, { recursive: true, force: true });
-      return this.port.commit(opId, {
+      this.fault?.("after_receipt", opId);
+      const result = await this.port.commit(opId, {
         workspaceId: row.id,
         ownRootSessionId: request.rootSessionId,
         cause: "forget",
@@ -234,14 +240,17 @@ export class SQLiteCustodyCoordinator {
         patch: { attachmentEvidence: "absent", directoryEvidence: "absent" },
         now: this.now(),
       });
+      this.fault?.("after_commit", opId);
+      return result;
     }
     if (request.kind === "merge" || request.kind === "finalize_merge") {
       const target = request.targetChangeId!;
       const ancestor = await this.jj.areAncestorsOf(request.repoRoot, heads, target);
       if (!ancestor) throw new Error("Merge ancestry not proved");
       const targetPath = request.targetPath ?? request.repoRoot;
-      if (await this.jj.hasConflicts(targetPath, exact(target)))
-        return this.port.commit(opId, {
+      if (await this.jj.hasConflicts(targetPath, exact(target))) {
+        this.fault?.("after_receipt", opId);
+        const result = await this.port.commit(opId, {
           workspaceId: row.id,
           ownRootSessionId: request.rootSessionId,
           cause: "merge_conflicts_retained",
@@ -249,11 +258,15 @@ export class SQLiteCustodyCoordinator {
           patch: { conflictRetained: true, mergedIntoChangeId: target },
           now: this.now(),
         });
+        this.fault?.("after_commit", opId);
+        return result;
+      }
       await this.jj.workspaceForget(request.repoRoot, row.name);
       if (await this.jj.workspaceHead(request.repoRoot, row.name))
         throw new Error("Merge detach not proved");
       await rm(row.path, { recursive: true, force: true });
-      return this.port.commit(opId, {
+      this.fault?.("after_receipt", opId);
+      const result = await this.port.commit(opId, {
         workspaceId: row.id,
         ownRootSessionId: request.rootSessionId,
         cause: "merge_proved",
@@ -267,6 +280,8 @@ export class SQLiteCustodyCoordinator {
         },
         now: this.now(),
       });
+      this.fault?.("after_commit", opId);
+      return result;
     }
     // Receipt is written only after every exact owned head is proven hidden.
     for (const head of heads)

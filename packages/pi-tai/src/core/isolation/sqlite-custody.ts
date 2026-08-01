@@ -104,7 +104,9 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
       .all() as Record<string, unknown>[];
     const input = new Set(roots);
     const matches = candidates.filter((row) => {
-      if (e.storeKey && row.store_key !== null) return String(row.store_key) === e.storeKey;
+      if (e.storeKey && row.store_key !== null && String(row.store_key) === e.storeKey) return true;
+      // A colocated store's canonical path changes when the whole repository is
+      // moved. Root ancestry remains path-independent relocation evidence.
       const prior = new Set<string>((JSON.parse(String(row.fingerprint))?.roots ?? []) as string[]);
       const overlap = [...input].some((id) => prior.has(id));
       const contained =
