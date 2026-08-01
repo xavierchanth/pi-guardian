@@ -1,24 +1,10 @@
+import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../durable/port.ts";
 import type { LifecycleRecord } from "./lifecycle.ts";
 
-export interface DurableRecordSummary {
-  readonly durableId: string;
-  readonly displayId: string;
-  readonly rootSessionId?: string;
-  readonly disposition: LifecycleRecord["disposition"];
-  readonly archivedAt?: string;
-  readonly archivedBy?: "user" | "auto_done";
-  readonly updatedAt: string;
-}
+export type { DurableRecordSummary, RecordCounts } from "../durable/port.ts";
 
-export interface RecordCounts {
-  readonly unarchived: number;
-  readonly archived: number;
-  readonly inherited: number;
-  readonly total: number;
-}
-
-/** Durable capacity authority. Residency pruning must never remove records from this index. */
-export class SubagentRecordIndex {
+/** In-memory C1 implementation. Residency pruning never removes records from this store. */
+export class InMemoryRecordStore implements DurableRecordStore {
   private readonly records = new Map<string, DurableRecordSummary>();
   private readonly rootSessionId?: string;
   constructor(rootSessionId?: string) {
@@ -31,8 +17,8 @@ export class SubagentRecordIndex {
 
   note(summary: DurableRecordSummary, authoritative = false): void {
     const prior = this.records.get(summary.durableId);
-    // Replayed journal facts are timestamp-ordered, but live facts are already
-    // causally ordered and may share a millisecond under a fixed/fast clock.
+    // Replayed facts keep their incumbent on a timestamp tie. Live authoritative
+    // transitions are causally ordered and must win even within one millisecond.
     if (
       prior &&
       (authoritative ? prior.updatedAt > summary.updatedAt : prior.updatedAt >= summary.updatedAt)
@@ -64,8 +50,13 @@ export class SubagentRecordIndex {
     return { unarchived, archived, inherited, total: this.records.size };
   }
 
-  /** Reserved for explicit retention cleanup; never residency pruning. */
+  /** Compatibility utility; future explicit cleanup may use a separate port revision. */
   forget(durableId: string): void {
     this.records.delete(durableId);
   }
 }
+
+/** @deprecated Use InMemoryRecordStore. */
+export const SubagentRecordIndex = InMemoryRecordStore;
+/** @deprecated Use InMemoryRecordStore. */
+export type SubagentRecordIndex = InMemoryRecordStore;

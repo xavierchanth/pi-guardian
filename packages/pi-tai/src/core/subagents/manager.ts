@@ -14,8 +14,9 @@ import {
   type SpawnTask,
   type SubagentSnapshot,
 } from "./domain.ts";
+import type { DurableRecordStore } from "../durable/port.ts";
 import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
-import { SubagentRecordIndex } from "./records.ts";
+import { InMemoryRecordStore } from "./records.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
 
 export const MAX_RUNNING_SUBAGENTS = 32;
@@ -80,6 +81,8 @@ export interface SubagentManagerOptions {
   readonly maxTracked?: number;
   readonly rootSessionId?: string;
   readonly now?: () => string;
+  /** Durable authority injection seam; C1 defaults to the in-memory adapter. */
+  readonly records?: DurableRecordStore;
   /**
    * Called once per subagent when it reaches a terminal state, before the result
    * is deferred. The workspace layer hooks in here to reclaim or flag isolation
@@ -107,6 +110,8 @@ interface Entry {
   closed: boolean;
   /** Historical records have no spawn task or live continuation handle. */
   restored: boolean;
+  /** Workspace custody is independent of the historical workspace identifier. */
+  custodyResolved: boolean;
 }
 
 export type RequestedSendMode = SendMode | "auto";
@@ -127,7 +132,7 @@ export class SubagentManager {
   private readonly maxDurable: number;
   private readonly maxResident: number;
   private readonly rootSessionId?: string;
-  private readonly records: SubagentRecordIndex;
+  private readonly records: DurableRecordStore;
   /** Spawn intents reserved before their first await but not yet indexed. */
   private pendingDurable = 0;
   private readonly clock: () => string;
@@ -154,7 +159,7 @@ export class SubagentManager {
     this.maxDurable = options.maxDurable ?? MAX_DURABLE_RECORDS;
     this.maxResident = options.maxResident ?? options.maxTracked ?? MAX_RESIDENT_SUBAGENTS;
     this.rootSessionId = options.rootSessionId;
-    this.records = new SubagentRecordIndex(options.rootSessionId);
+    this.records = options.records ?? new InMemoryRecordStore(options.rootSessionId);
     this.clock = options.now ?? (() => new Date().toISOString());
     if (options.onSettled) this.onSettled = options.onSettled;
     if (options.lifecycleStore) this.lifecycleStore = options.lifecycleStore;
@@ -214,6 +219,7 @@ export class SubagentManager {
         sendChain: Promise.resolve(),
         closed: false,
         restored: true,
+        custodyResolved: true,
       });
     }
     this.generation += 1;
@@ -264,7 +270,7 @@ export class SubagentManager {
     if (this.records.counts().total + this.pendingDurable >= this.maxDurable)
       throw new SubagentCapacityError(
         "durable",
-        `This session has reached its durable subagent record ceiling (${this.maxDurable}). Start a new session to continue delegating; existing records, reports, and workspaces are untouched.`,
+        `This session has reached its durable subagent record ceiling (${this.maxDurable}). Start a new session to continue delegating. A future /cleanup may release separately retained records, but cannot remove immutable subagent slots already written into the Pi transcript. Existing records, reports, and workspaces are untouched.`,
       );
   }
 
@@ -338,6 +344,7 @@ export class SubagentManager {
         sendChain: Promise.resolve(),
         closed: false,
         restored: false,
+        custodyResolved: request.workspaceId === undefined,
       };
       this.entries.set(id, entry);
       this.prune();
@@ -728,6 +735,14 @@ export class SubagentManager {
     return entry;
   }
 
+  /** Marks managed workspace custody as merged, discarded, or safely reclaimed. */
+  resolveCustody(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.custodyResolved = true;
+    this.prune();
+  }
+
   /** Drains deferred results and clears their presentation projection. */
   drainDelivery() {
     const results = this.delivery.drain();
@@ -748,7 +763,7 @@ export class SubagentManager {
           entry.snapshot.status !== "running" &&
           !this.delivery.isPending(entry.snapshot.id) &&
           !entry.snapshot.attention &&
-          entry.snapshot.workspaceId === undefined,
+          entry.custodyResolved,
       )
       .sort(([, a], [, b]) => {
         const rank = (entry: Entry): number => {

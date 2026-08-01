@@ -10,6 +10,7 @@ import {
   MAX_DURABLE_RECORDS,
   MAX_RESIDENT_SUBAGENTS,
   MAX_RUNNING_SUBAGENTS,
+  MAX_UNARCHIVED_RECORDS,
   MAX_TRACKED_SUBAGENTS,
   SubagentCapacityError,
   SubagentManager,
@@ -29,8 +30,27 @@ const manager = (
 it("ships the 32/4096/256 bounds and compatibility alias", () => {
   assert.equal(MAX_RUNNING_SUBAGENTS, 32);
   assert.equal(MAX_DURABLE_RECORDS, 4096);
+  assert.equal(MAX_UNARCHIVED_RECORDS, 128);
   assert.equal(MAX_RESIDENT_SUBAGENTS, 256);
   assert.equal(MAX_TRACKED_SUBAGENTS, MAX_RESIDENT_SUBAGENTS);
+});
+
+it("uses an injected durable record store for admission and reporting", () => {
+  let countCalls = 0;
+  const records = {
+    ingest: () => {},
+    note: () => {},
+    get: () => undefined,
+    isInherited: () => false,
+    counts: () => {
+      countCalls += 1;
+      return { unarchived: 2, archived: 3, inherited: 4, total: 9 };
+    },
+  };
+  const agents = manager({ records });
+  assert.equal(agents.capacity().durable, 9);
+  agents.assertAdmission();
+  assert.ok(countCalls >= 2);
 });
 
 it("reserves synchronously and returns typed running diagnostics", async () => {
@@ -76,6 +96,20 @@ it("residency pruning protects an undrained deferred result", async () => {
   await agents.spawn(request(3));
   assert.ok(agents.get(second.id), "undrained result remains resident above the soft bound");
   assert.ok(agents.capacity().resident > agents.capacity().maxResident);
+  await agents.shutdown();
+});
+
+it("resolved workspace custody becomes evictable while unresolved custody stays protected", async () => {
+  const agents = manager({ maxResident: 1 });
+  const first = await agents.spawn({ ...request(1), prompt: "complete", workspaceId: "ws-1" });
+  await agents.wait([first.id]);
+  const second = await agents.spawn({ ...request(2), prompt: "complete", workspaceId: "ws-2" });
+  await agents.wait([second.id]);
+  await agents.spawn(request(3));
+  assert.ok(agents.get(first.id), "unresolved historical workspace custody remains resident");
+  agents.resolveCustody(first.id);
+  assert.equal(agents.get(first.id), undefined);
+  assert.ok(agents.get(second.id), "other unresolved custody remains protected");
   await agents.shutdown();
 });
 

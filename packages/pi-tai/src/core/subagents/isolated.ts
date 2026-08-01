@@ -96,7 +96,10 @@ export class IsolatedSubagents {
         systemPrompt: render(workspace.path),
       });
       // Ownership moves to the new subagent so the old id cannot also merge it.
-      if (continueFrom) this.owned.delete(continueFrom);
+      if (continueFrom) {
+        this.owned.delete(continueFrom);
+        this.agents.resolveCustody(continueFrom);
+      }
       this.owned.set(snapshot.id, workspace.id);
       // Only now does an owner exist to record, which is what lets a sweep tell
       // this workspace apart from one abandoned by a dead session.
@@ -121,7 +124,10 @@ export class IsolatedSubagents {
       };
     }
     const result = await this.workspaces.merge(workspaceId, strategy);
-    if (result.kind === "merged" || result.kind === "no_changes") this.owned.delete(subagentId);
+    if (result.kind === "merged" || result.kind === "no_changes") {
+      this.owned.delete(subagentId);
+      this.agents.resolveCustody(subagentId);
+    }
     return result;
   }
 
@@ -129,6 +135,7 @@ export class IsolatedSubagents {
     const workspaceId = this.requireWorkspace(subagentId);
     const result = await this.workspaces.discard(workspaceId);
     this.owned.delete(subagentId);
+    this.agents.resolveCustody(subagentId);
     return result;
   }
 
@@ -156,11 +163,18 @@ export class IsolatedSubagents {
       // The checkout is already gone; drop the association so nothing later
       // tries to merge a workspace that does not exist.
       this.owned.delete(snapshot.id);
+      this.agents.resolveCustody(snapshot.id);
       return;
     }
     if (pending.length) return; // Real work — leave it for merge or discard.
-    await this.workspaces.discard(workspaceId).catch(() => {});
-    this.owned.delete(snapshot.id);
+    const discarded = await this.workspaces.discard(workspaceId).then(
+      () => true,
+      () => false,
+    );
+    if (discarded) {
+      this.owned.delete(snapshot.id);
+      this.agents.resolveCustody(snapshot.id);
+    }
   }
 
   workspaceFor(subagentId: string): string | undefined {

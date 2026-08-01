@@ -38,7 +38,9 @@ export {
   type SubagentManagerOptions,
 } from "./manager.ts";
 export { DeferredResultDelivery, type DeferredResult } from "./result-delivery.ts";
+export type { DurableRecordStore } from "../durable/port.ts";
 export {
+  InMemoryRecordStore,
   SubagentRecordIndex,
   type DurableRecordSummary,
   type RecordCounts,

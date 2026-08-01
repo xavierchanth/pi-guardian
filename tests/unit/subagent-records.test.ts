@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { it } from "node:test";
 import type { LifecycleRecord } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
-import { SubagentRecordIndex } from "../../packages/pi-tai/src/core/subagents/records.ts";
+import type { DurableRecordStore } from "../../packages/pi-tai/src/core/durable/port.ts";
+import {
+  InMemoryRecordStore,
+  SubagentRecordIndex,
+} from "../../packages/pi-tai/src/core/subagents/records.ts";
 
 function record(durableId: string, overrides: Partial<LifecycleRecord> = {}): LifecycleRecord {
   return {
@@ -27,6 +31,13 @@ it("indexes records idempotently and keeps the incumbent on equal timestamps", (
   assert.deepEqual(index.counts(), { unarchived: 1, archived: 0, inherited: 0, total: 1 });
   index.note(record("1", { rootSessionId: "other", updatedAt: "2026-01-02T00:00:00Z" }));
   assert.deepEqual(index.counts(), { unarchived: 0, archived: 0, inherited: 1, total: 1 });
+});
+
+it("authoritative terminal facts replace intent on a timestamp tie", () => {
+  const store: DurableRecordStore = new InMemoryRecordStore();
+  store.note(record("1", { disposition: "intent" }));
+  store.note(record("1", { disposition: "failed" }), true);
+  assert.equal(store.get("1")?.disposition, "failed");
 });
 
 it("counts archived, inherited, and legacy records honestly", () => {
