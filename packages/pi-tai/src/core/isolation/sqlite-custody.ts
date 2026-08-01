@@ -10,6 +10,9 @@ import type {
   WorkspaceCustodyPort,
 } from "./custody-port.ts";
 
+function canonicalIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)].sort();
+}
 function parseArray(value: unknown, field: string): string[] {
   const parsed: unknown = JSON.parse(String(value));
   if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string" || !item))
@@ -132,7 +135,7 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
       await this.begin(operation);
       this.db
         .prepare(
-          "INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,directory_evidence,evidence_at,base_change_ids,root_change_id,head_change_ids,conflict_retained,owner_id,owner_display_id,anchor_token,root_session_id,parent_workspace_id,pending_op_id,quarantined,attention,created_at,updated_at,incident_stage,incident_reason,merge_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO workspace(id,name,path,repo_id,repo_root,disposition,attachment_evidence,directory_evidence,evidence_at,base_change_ids,root_change_id,head_change_ids,merged_into_change_id,merged_proof_op,conflict_retained,owner_id,owner_display_id,anchor_token,root_session_id,parent_workspace_id,pending_op_id,quarantined,attention,created_at,updated_at,incident_stage,incident_reason,merge_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
         .run(
           r.id,
@@ -146,7 +149,9 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
           r.evidenceAt ?? null,
           JSON.stringify(r.baseChangeIds),
           r.rootChangeId ?? null,
-          JSON.stringify(r.headChangeIds),
+          JSON.stringify(canonicalIds(r.headChangeIds)),
+          r.mergedIntoChangeId ?? null,
+          r.mergedProofOp ?? null,
           r.conflictRetained ? 1 : 0,
           r.ownerId ?? null,
           r.ownerDisplayId ?? null,
@@ -261,8 +266,13 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
       this.db
         .prepare("INSERT INTO custody_event VALUES(?,?,?,?,?,?,?)")
         .run(opId, seq, m.workspaceId, old.disposition, to, m.cause, m.now);
-      const sets = ["disposition=?", "updated_at=?", "pending_op_id=NULL"],
-        values: SQLInputValue[] = [to, m.now];
+      const sets = ["updated_at=?", "pending_op_id=NULL"],
+        values: SQLInputValue[] = [m.now];
+      // Evidence-only refreshes must not fire disposition transition/abandon triggers.
+      if (to !== old.disposition) {
+        sets.unshift("disposition=?");
+        values.unshift(to);
+      }
       for (const [key, value] of Object.entries(m.patch ?? {})) {
         if (
           key === "id" ||
@@ -281,11 +291,13 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
           continue;
         }
         sets.push(`${column}=?`);
+        const storageValue =
+          key === "headChangeIds" && Array.isArray(value) ? canonicalIds(value) : value;
         values.push(
-          value === undefined
+          storageValue === undefined
             ? null
             : jsonFields.has(key)
-              ? JSON.stringify(value)
+              ? JSON.stringify(storageValue)
               : boolFields.has(key)
                 ? value
                   ? 1
