@@ -5,7 +5,7 @@ import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../
 import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const SCHEMA_SQL_V1 = `
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
@@ -40,12 +40,16 @@ CREATE TRIGGER trg_abandon_requires_receipt_insert BEFORE INSERT ON workspace WH
 CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (SELECT requested_by FROM custody_operation WHERE op_id=NEW.op_id) IN('system_reconcile','system_migration','system_spawn','system_settle') BEGIN SELECT RAISE(ABORT,'reconciliation may never abandon'); END;
 CREATE TRIGGER trg_no_workspace_delete BEFORE DELETE ON workspace BEGIN SELECT RAISE(ABORT,'custody rows are never deleted in S1'); END;
 `;
+export const SCHEMA_SQL_V3 = `
+CREATE TRIGGER trg_abandoned_heads_require_receipt BEFORE UPDATE OF head_change_ids ON workspace WHEN OLD.disposition='abandoned' AND NEW.head_change_ids<>OLD.head_change_ids AND NOT EXISTS(SELECT 1 FROM abandon_receipt r WHERE r.workspace_id=NEW.id AND r.verified_absent=1 AND r.change_ids=NEW.head_change_ids) BEGIN SELECT RAISE(ABORT,'abandoned head refresh requires a verified abandon receipt'); END;
+`;
 export const MIGRATIONS = [
   { version: 1, sql: SCHEMA_SQL_V1 },
   { version: 2, sql: SCHEMA_SQL_V2 },
+  { version: 3, sql: SCHEMA_SQL_V3 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
-export const SCHEMA_SQL = SCHEMA_SQL_V1 + SCHEMA_SQL_V2;
+export const SCHEMA_SQL = SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3;
 
 export interface OpenSqliteOptions {
   paths: StoragePaths;
