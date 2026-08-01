@@ -114,7 +114,11 @@ test("B6-B8 simultaneous processes serialize one atomic retirement/receipt with 
   );
   assert.equal(
     (
-      db.prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_completed'").get() as {
+      db
+        .prepare(
+          "SELECT count(*) n FROM migration_ledger WHERE source='workspaces_json' AND state='completed'",
+        )
+        .get() as {
         n: number;
       }
     ).n,

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { currentProcessStart, processState } from "./operation-lease.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
 const CHANGE_ID = /^[k-z]{4,64}$/;
@@ -66,16 +67,28 @@ export function migrateWorkspaceRegistry(
   const source = join(agentDir, "pi-tai", "agents", "workspaces.json");
   if (!existsSync(source)) return undefined;
   ensurePrivateDirectory(paths.migration);
-  const leaseToken = `${process.pid}:${process.uptime()}:${Date.now()}`;
+  const leaseToken = `${process.pid}:${Date.now()}`;
+  const pidStart = currentProcessStart();
   const deadline = Date.now() + 15_000;
   while (true) {
     const nowMs = Date.now();
-    const result = db
-      .prepare(
-        "INSERT INTO operation_lease(scope,owner,token,pid,pid_start,heartbeat_at,expires_at) VALUES('migration','system_migration',?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET owner=excluded.owner,token=excluded.token,pid=excluded.pid,pid_start=excluded.pid_start,heartbeat_at=excluded.heartbeat_at,expires_at=excluded.expires_at WHERE operation_lease.expires_at<=excluded.heartbeat_at",
-      )
-      .run(leaseToken, process.pid, String(process.uptime()), nowMs, nowMs + 30_000);
-    if (result.changes) break;
+    const prior = db.prepare("SELECT * FROM operation_lease WHERE scope='migration'").get() as any;
+    let available = !prior;
+    if (prior && Number(prior.expires_at) <= nowMs) {
+      const state = processState(Number(prior.pid));
+      available =
+        state.state === "dead" ||
+        (state.state === "live" && state.start !== String(prior.pid_start));
+    }
+    if (available) {
+      const expected = prior ? String(prior.token) : "";
+      const result = db
+        .prepare(
+          "INSERT INTO operation_lease(scope,owner,token,pid,pid_start,heartbeat_at,expires_at) VALUES('migration','system_migration',?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET owner=excluded.owner,token=excluded.token,pid=excluded.pid,pid_start=excluded.pid_start,heartbeat_at=excluded.heartbeat_at,expires_at=excluded.expires_at WHERE operation_lease.token=?",
+        )
+        .run(leaseToken, process.pid, pidStart, nowMs, nowMs + 30_000, expected);
+      if (result.changes) break;
+    }
     if (nowMs >= deadline) throw new Error("Timed out acquiring custody migration operation lease");
     sleep(20);
   }

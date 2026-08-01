@@ -51,7 +51,7 @@ export class CustodyEvidenceCollector {
     else if (resolutions.some((r) => r.kind === "unknown")) heads = { kind: "unknown" };
     else if (visible.length === record.headChangeIds.length && visible.length === 1)
       heads = { kind: "unique", changeId: visible[0]! };
-    else if (visible.length > 1) heads = { kind: "divergent", changeIds: visible };
+    else if (visible.length > 1) heads = { kind: "multi", changeIds: visible };
     else if (resolutions.some((r) => r.kind === "hidden"))
       heads = { kind: "hidden", changeIds: record.headChangeIds };
     else heads = { kind: "absent" };
@@ -98,6 +98,7 @@ export interface ReconcileReport {
   examined: number;
   changed: number;
   diagnostics: string[];
+  droppedDiagnostics: number;
 }
 
 /** Explicit hook facade; deliberately not wired into WorkspaceManager authority. */
@@ -106,22 +107,31 @@ export class CustodyReconciliationService {
   private readonly collector: CustodyEvidenceCollector;
   private readonly reconciler: CustodyReconciler;
   private readonly diagnosticsLimit: number;
+  private readonly throttleMs: number;
+  private lastReconcile = 0;
   constructor(
     port: WorkspaceCustodyPort,
     collector: CustodyEvidenceCollector,
     reconciler: CustodyReconciler,
     diagnosticsLimit = 20,
+    throttleMs = 1_000,
   ) {
     this.port = port;
     this.collector = collector;
     this.reconciler = reconciler;
     this.diagnosticsLimit = diagnosticsLimit;
+    this.throttleMs = throttleMs;
   }
-  async reconcile(scope: ReconcileScope = {}): Promise<ReconcileReport> {
+  async reconcile(scope: ReconcileScope = {}, force = false): Promise<ReconcileReport> {
+    const tick = Date.now();
+    if (!force && tick - this.lastReconcile < this.throttleMs)
+      return { examined: 0, changed: 0, diagnostics: [], droppedDiagnostics: 0 };
+    this.lastReconcile = tick;
     const rows = scope.workspaceId
       ? ([await this.port.get(scope.workspaceId)].filter(Boolean) as CustodyRecord[])
       : await this.port.list({ repoId: scope.repoId, rootSessionId: scope.rootSessionId });
     let changed = 0;
+    let droppedDiagnostics = 0;
     const diagnostics: string[] = [];
     for (const row of rows)
       try {
@@ -130,16 +140,23 @@ export class CustodyReconciliationService {
       } catch (error) {
         if (diagnostics.length < this.diagnosticsLimit)
           diagnostics.push(`${row.id}: ${String(error)}`.slice(0, 1024));
+        else droppedDiagnostics++;
       }
-    return { examined: rows.length, changed, diagnostics };
+    return { examined: rows.length, changed, diagnostics, droppedDiagnostics };
   }
-  startup = (scope?: ReconcileScope) => this.reconcile(scope);
+  startup = (scope?: ReconcileScope) => this.reconcile(scope, true);
   reload = (scope?: ReconcileScope) => this.reconcile(scope);
-  preOperation = (scope?: ReconcileScope) => this.reconcile(scope);
-  postOperation = (scope?: ReconcileScope) => this.reconcile(scope);
+  preOperation = (scope?: ReconcileScope) => this.reconcile(scope, true);
+  postOperation = (scope?: ReconcileScope) => this.reconcile(scope, true);
   status = (scope?: ReconcileScope) => this.reconcile(scope);
   settlement = (scope?: ReconcileScope) => this.reconcile(scope);
   tree = (scope?: ReconcileScope) => this.reconcile(scope);
   fork = (scope?: ReconcileScope) => this.reconcile(scope);
-  dashboard = (scope?: ReconcileScope) => this.reconcile(scope);
+  /** Dashboard is a SQLite-only snapshot and must never invoke JJ. */
+  dashboard = async (scope: ReconcileScope = {}): Promise<ReconcileReport> => {
+    const rows = scope.workspaceId
+      ? ([await this.port.get(scope.workspaceId)].filter(Boolean) as CustodyRecord[])
+      : await this.port.list({ repoId: scope.repoId, rootSessionId: scope.rootSessionId });
+    return { examined: rows.length, changed: 0, diagnostics: [], droppedDiagnostics: 0 };
+  };
 }

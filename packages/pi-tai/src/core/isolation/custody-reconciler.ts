@@ -9,6 +9,8 @@ import type {
 export type RepositoryGrade = "same" | "relocated" | "foreign" | "unknown";
 export type HeadEvidence =
   | { kind: "unique"; changeId: string }
+  /** Several independent Change IDs, each uniquely resolved. */
+  | { kind: "multi"; changeIds: readonly string[] }
   | { kind: "divergent"; changeIds: readonly string[] }
   | { kind: "hidden"; changeIds?: readonly string[] }
   | { kind: "absent" }
@@ -56,13 +58,15 @@ export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDeci
   const heads =
     e.heads.kind === "unique"
       ? [e.heads.changeId]
-      : e.heads.kind === "divergent"
+      : e.heads.kind === "multi"
         ? [...new Set(e.heads.changeIds)].sort()
-        : e.heads.kind === "hidden"
-          ? [...new Set(e.heads.changeIds ?? r.headChangeIds)].sort()
-          : e.heads.kind === "absent"
-            ? []
-            : r.headChangeIds;
+        : e.heads.kind === "divergent"
+          ? [...new Set(e.heads.changeIds)].sort()
+          : e.heads.kind === "hidden"
+            ? [...new Set(e.heads.changeIds ?? r.headChangeIds)].sort()
+            : e.heads.kind === "absent"
+              ? []
+              : r.headChangeIds;
 
   // Unavailable is not contradictory evidence. In particular, never persist unknown over known authority.
   if (

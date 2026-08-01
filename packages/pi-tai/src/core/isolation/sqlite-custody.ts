@@ -96,28 +96,65 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
     if (roots.some((id) => !/^[k-z]{4,64}$/.test(id)))
       throw new Error("Invalid repository root Change ID");
     roots.sort();
+    // Store identity is authoritative and path independent.  Root evidence is
+    // deliberately graded by overlap/containment: ordinary history growth must
+    // never manufacture a second repository merely because its root set grew.
+    const candidates = this.db
+      .prepare("SELECT * FROM repository WHERE identity_proven=1")
+      .all() as Record<string, unknown>[];
+    const input = new Set(roots);
+    const matches = candidates.filter((row) => {
+      if (e.storeKey && row.store_key !== null) return String(row.store_key) === e.storeKey;
+      const prior = new Set<string>((JSON.parse(String(row.fingerprint))?.roots ?? []) as string[]);
+      const overlap = [...input].some((id) => prior.has(id));
+      const contained =
+        [...input].every((id) => prior.has(id)) || [...prior].every((id) => input.has(id));
+      return overlap || contained;
+    });
+    if (matches.length > 1) throw new Error("Ambiguous repository identity evidence");
+    const matched = matches[0];
     const fingerprint = JSON.stringify({
       v: 1,
       roots,
       ...(e.storeKey ? { storeKey: e.storeKey } : {}),
     });
-    const repoId = `repo_${createHash("sha256").update(fingerprint).digest("hex").slice(0, 32)}`;
-    this.db
-      .prepare(
-        "INSERT INTO repository(repo_id,fingerprint,roots_truncated,store_key,last_known_root,identity_proven,first_seen_at,last_verified_at) VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(fingerprint) DO UPDATE SET last_known_root=excluded.last_known_root,last_verified_at=excluded.last_verified_at,roots_truncated=excluded.roots_truncated",
-      )
-      .run(
-        repoId,
-        fingerprint,
-        e.rootsTruncated ? 1 : 0,
-        e.storeKey ?? null,
-        e.canonicalRoot,
-        e.now,
-        e.now,
-      );
-    const row = this.db
-      .prepare("SELECT * FROM repository WHERE fingerprint=?")
-      .get(fingerprint) as Record<string, unknown>;
+    const repoId = matched
+      ? String(matched.repo_id)
+      : `repo_${createHash("sha256")
+          .update(e.storeKey ?? fingerprint)
+          .digest("hex")
+          .slice(0, 32)}`;
+    if (matched)
+      this.db
+        .prepare(
+          "UPDATE repository SET fingerprint=?,roots_truncated=?,store_key=coalesce(store_key,?),last_known_root=?,last_verified_at=? WHERE repo_id=?",
+        )
+        .run(
+          fingerprint,
+          e.rootsTruncated ? 1 : 0,
+          e.storeKey ?? null,
+          e.canonicalRoot,
+          e.now,
+          repoId,
+        );
+    else
+      this.db
+        .prepare(
+          "INSERT INTO repository(repo_id,fingerprint,roots_truncated,store_key,last_known_root,identity_proven,first_seen_at,last_verified_at) VALUES(?,?,?,?,?,1,?,?)",
+        )
+        .run(
+          repoId,
+          fingerprint,
+          e.rootsTruncated ? 1 : 0,
+          e.storeKey ?? null,
+          e.canonicalRoot,
+          e.now,
+          e.now,
+        );
+    const row = this.db.prepare("SELECT * FROM repository WHERE repo_id=?").get(repoId) as Record<
+      string,
+      unknown
+    >;
     return {
       repoId: String(row.repo_id),
       fingerprint: String(row.fingerprint),
