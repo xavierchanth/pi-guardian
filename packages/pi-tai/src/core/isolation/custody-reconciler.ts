@@ -64,15 +64,6 @@ export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDeci
             ? []
             : r.headChangeIds;
 
-  // A verified receipt is terminal proof and therefore precedes weaker hidden/unavailable observations.
-  if (e.abandonReceipt)
-    return result(
-      "abandoned",
-      transitionCause(r.disposition, "abandoned", "abandon_receipted"),
-      "verified abandon receipt",
-      r.disposition === "abandoned" ? r.headChangeIds : heads,
-    );
-
   // Unavailable is not contradictory evidence. In particular, never persist unknown over known authority.
   if (
     e.repository === "unknown" ||
@@ -90,6 +81,26 @@ export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDeci
       "foreign repository",
       heads,
     );
+
+  // A visible head disproves abandonment even when the receipt itself is valid.
+  if (e.abandonReceipt && e.heads.kind === "unique")
+    return result(
+      "incident",
+      transitionCause(r.disposition, "incident", "ambiguity"),
+      "abandon_contradicted",
+      heads,
+    );
+
+  // Receipts stabilize abandonment only when usable evidence says its heads are hidden or absent.
+  // This must remain ahead of the generic hidden/absent decisions below.
+  if (e.abandonReceipt && (e.heads.kind === "hidden" || e.heads.kind === "absent"))
+    return result(
+      "abandoned",
+      transitionCause(r.disposition, "abandoned", "abandon_receipted"),
+      "verified abandon receipt",
+      r.disposition === "abandoned" ? r.headChangeIds : heads,
+    );
+
   if (e.heads.kind === "divergent" || e.heads.kind === "hidden")
     return result(
       "incident",

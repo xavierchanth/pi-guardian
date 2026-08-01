@@ -2,14 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   type CustodyEvidence,
+  CustodyReconciler,
   decideCustody,
   type HeadEvidence,
   type RepositoryGrade,
 } from "../../packages/pi-tai/src/core/isolation/custody-reconciler.ts";
 import type {
+  BeginOperationInput,
   CustodyDisposition,
+  CustodyMutation,
   CustodyRecord,
+  WorkspaceCustodyPort,
 } from "../../packages/pi-tai/src/core/isolation/custody-port.ts";
+import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const dispositions: CustodyDisposition[] = [
   "attached",
@@ -49,7 +58,13 @@ const baseline: CustodyEvidence = {
 
 test("K5a ordered rows classify every distinct evidence outcome", () => {
   const rows: Array<[string, Partial<CustodyEvidence>, CustodyDisposition, string, boolean?]> = [
-    ["receipt", { abandonReceipt: true }, "abandoned", "abandon_receipted"],
+    ["visible receipt", { abandonReceipt: true }, "incident", "ambiguity"],
+    [
+      "hidden receipt",
+      { abandonReceipt: true, heads: { kind: "hidden" } },
+      "abandoned",
+      "abandon_receipted",
+    ],
     ["unavailable", { repository: "unknown" }, "attached", "heads_refreshed", false],
     ["foreign", { repository: "foreign" }, "incident", "ambiguity"],
     [
@@ -115,12 +130,11 @@ test("K5a exhaustively returns a closed decision for the full evidence product",
                   assert.ok(decision.reason.length > 0);
                   assert.deepEqual(decision.heads, [...new Set(decision.heads)].sort());
                   if (
-                    !abandonReceipt &&
-                    (repository === "unknown" ||
-                      attachment === "unknown" ||
-                      directory === "unknown" ||
-                      head.kind === "unknown" ||
-                      target === "unknown")
+                    repository === "unknown" ||
+                    attachment === "unknown" ||
+                    directory === "unknown" ||
+                    head.kind === "unknown" ||
+                    target === "unknown"
                   ) {
                     assert.equal(decision.mutate, false);
                     assert.equal(decision.disposition, disposition);
@@ -129,4 +143,98 @@ test("K5a exhaustively returns a closed decision for the full evidence product",
                   cases++;
                 }
   assert.equal(cases, 21_600);
+});
+
+test("receipt ordering rejects unavailable, foreign, and visible evidence", () => {
+  for (const patch of [
+    { repository: "unknown" as const },
+    { heads: { kind: "unknown" as const } },
+  ]) {
+    const decision = decideCustody(record(), { ...baseline, ...patch, abandonReceipt: true });
+    assert.equal(decision.mutate, false);
+    assert.equal(decision.disposition, "attached");
+  }
+  const foreign = decideCustody(record(), {
+    ...baseline,
+    repository: "foreign",
+    abandonReceipt: true,
+  });
+  assert.equal(foreign.disposition, "incident");
+  assert.equal(foreign.reason, "foreign repository");
+
+  const visible = decideCustody(record(), { ...baseline, abandonReceipt: true });
+  assert.equal(visible.disposition, "incident");
+  assert.equal(visible.reason, "abandon_contradicted");
+
+  for (const heads of [{ kind: "hidden" as const }, { kind: "absent" as const }]) {
+    const stable = decideCustody(record(), { ...baseline, heads, abandonReceipt: true });
+    assert.equal(stable.disposition, "abandoned");
+    assert.equal(stable.cause, "abandon_receipted");
+  }
+});
+
+test("K5a decisions with mutations name schema-legal transitions in a real database", () => {
+  const home = mkdtempSync(join(tmpdir(), "custody-k5a-schema-"));
+  const db = openDurableDatabase({ paths: resolveStoragePaths({}, home) });
+  const variants: CustodyEvidence[] = [
+    baseline,
+    { ...baseline, repository: "foreign" },
+    { ...baseline, heads: { kind: "hidden" } },
+    { ...baseline, heads: { kind: "absent" }, attachment: "absent", directory: "absent" },
+    { ...baseline, heads: { kind: "hidden" }, abandonReceipt: true },
+    { ...baseline, mergeReceipt: true, target: "ancestor" },
+  ];
+  for (const from of dispositions) {
+    for (const evidence of variants) {
+      const decision = decideCustody(record(from), evidence);
+      if (!decision.mutate) continue;
+      const legal = db
+        .prepare(
+          "SELECT 1 ok FROM allowed_custody_transition WHERE from_disposition=? AND to_disposition=? AND cause=?",
+        )
+        .get(from, decision.disposition, decision.cause);
+      assert.ok(legal, `${from} -> ${decision.disposition} (${decision.cause})`);
+    }
+  }
+  db.close();
+});
+
+test("CustodyReconciler writes once, is idempotent, and skips mutate-false evidence", async () => {
+  const calls: Array<{ input?: BeginOperationInput; mutation?: CustodyMutation }> = [];
+  let current = record();
+  const port = {
+    async begin(input: BeginOperationInput) {
+      calls.push({ input });
+      return { ...input, state: "intent" as const };
+    },
+    async commit(_opId: string, mutation: CustodyMutation) {
+      calls.push({ mutation });
+      current = {
+        ...current,
+        ...mutation.patch,
+        disposition: mutation.disposition ?? current.disposition,
+        updatedAt: mutation.now,
+      };
+      return current;
+    },
+  } as unknown as WorkspaceCustodyPort;
+  const reconciler = new CustodyReconciler(port, {
+    rootSessionId: "s",
+    pid: 7,
+    processIdentity: "process",
+  });
+
+  const detached = { ...baseline, attachment: "absent" as const };
+  const written = await reconciler.reconcile(current, detached, "2026-01-02");
+  assert.equal(written.disposition, "detached");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.input?.requestedBy, "system_reconcile");
+  assert.equal(calls[1]?.mutation?.cause, "evidence_missing");
+
+  assert.equal(await reconciler.reconcile(written, detached, "2026-01-03"), written);
+  assert.equal(calls.length, 2);
+
+  const unavailable = { ...detached, repository: "unknown" as const };
+  assert.equal(await reconciler.reconcile(written, unavailable, "2026-01-04"), written);
+  assert.equal(calls.length, 2);
 });
