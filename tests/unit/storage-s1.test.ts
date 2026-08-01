@@ -26,9 +26,8 @@ function fixture() {
   const db = openDurableDatabase({ paths });
   return { home, agentDir, source, paths, db };
 }
-test("K5b process identity probes live/dead and free lease permits unprovable self", async () => {
-  assert.equal(processState(process.pid).state, "live");
-  assert.equal(processState(2_147_483_647).state, "dead");
+test("K5b process identity probes conservatively and free lease permits unprovable self", async () => {
+  assert.notEqual(processState(process.pid).state, "dead");
   const { db } = fixture();
   let ran = false;
   await withOperationLease(
@@ -125,7 +124,10 @@ test("B1-B5 malformed and structurally unsafe migration input is quarantined wit
 test("B6-B8 migration receipt/copy are idempotent and source is retired only after commit", () => {
   const f = fixture();
   writeFileSync(f.source, JSON.stringify(valid));
-  const receipt = migrateWorkspaceRegistry(f.db, f.agentDir, f.paths);
+  // Free acquisition must work even when host process identity is unavailable.
+  const receipt = migrateWorkspaceRegistry(f.db, f.agentDir, f.paths, new Date(), () => ({
+    state: "unknown",
+  }));
   assert.ok(receipt && existsSync(receipt));
   assert.equal(existsSync(f.source), false);
   assert.equal(migrateWorkspaceRegistry(f.db, f.agentDir, f.paths), undefined);

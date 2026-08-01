@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { currentProcessStart, processState } from "./operation-lease.ts";
+import { type ProcessState, processState } from "./operation-lease.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
 const CHANGE_ID = /^[k-z]{4,64}$/;
@@ -63,19 +63,24 @@ export function migrateWorkspaceRegistry(
   agentDir: string,
   paths: StoragePaths,
   now = new Date(),
+  probe: (pid: number) => ProcessState = processState,
 ): string | undefined {
   const source = join(agentDir, "pi-tai", "agents", "workspaces.json");
   if (!existsSync(source)) return undefined;
   ensurePrivateDirectory(paths.migration);
   const leaseToken = `${process.pid}:${Date.now()}`;
-  const pidStart = currentProcessStart();
+  // A free lease needs no liveness proof. Retain an explicitly unprovable
+  // identity so restricted procfs/ps environments can still migrate, while
+  // stale-lease stealing below continues to fail closed.
+  const self = probe(process.pid);
+  const pidStart = self.state === "live" ? self.start : "unprovable";
   const deadline = Date.now() + 15_000;
   while (true) {
     const nowMs = Date.now();
     const prior = db.prepare("SELECT * FROM operation_lease WHERE scope='migration'").get() as any;
     let available = !prior;
     if (prior && Number(prior.expires_at) <= nowMs) {
-      const state = processState(Number(prior.pid));
+      const state = probe(Number(prior.pid));
       available =
         state.state === "dead" ||
         (state.state === "live" && state.start !== String(prior.pid_start));

@@ -113,7 +113,7 @@ export class CustodyEvidenceCollector {
   }
 }
 
-async function repositoryStoreKey(root: string): Promise<string | undefined> {
+export async function repositoryStoreKey(root: string): Promise<string | undefined> {
   for (const candidate of [join(root, ".git"), join(root, ".jj", "repo", "store")]) {
     try {
       return await realpath(candidate);
