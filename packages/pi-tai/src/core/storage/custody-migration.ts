@@ -3,7 +3,6 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -67,18 +66,18 @@ export function migrateWorkspaceRegistry(
   const source = join(agentDir, "pi-tai", "agents", "workspaces.json");
   if (!existsSync(source)) return undefined;
   ensurePrivateDirectory(paths.migration);
-  const lock = join(paths.migration, ".custody-migration.lock");
+  const leaseToken = `${process.pid}:${process.uptime()}:${Date.now()}`;
   const deadline = Date.now() + 15_000;
   while (true) {
-    try {
-      mkdirSync(lock, { mode: 0o700 });
-      break;
-    } catch (error: any) {
-      if (error?.code !== "EEXIST") throw error;
-      if (Date.now() >= deadline)
-        throw new Error("Timed out acquiring custody migration operation lock");
-      sleep(20);
-    }
+    const nowMs = Date.now();
+    const result = db
+      .prepare(
+        "INSERT INTO operation_lease(scope,owner,token,pid,pid_start,heartbeat_at,expires_at) VALUES('migration','system_migration',?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET owner=excluded.owner,token=excluded.token,pid=excluded.pid,pid_start=excluded.pid_start,heartbeat_at=excluded.heartbeat_at,expires_at=excluded.expires_at WHERE operation_lease.expires_at<=excluded.heartbeat_at",
+      )
+      .run(leaseToken, process.pid, String(process.uptime()), nowMs, nowMs + 30_000);
+    if (result.changes) break;
+    if (nowMs >= deadline) throw new Error("Timed out acquiring custody migration operation lease");
+    sleep(20);
   }
   try {
     if (!existsSync(source)) return undefined; // another process completed while we waited
@@ -86,9 +85,9 @@ export function migrateWorkspaceRegistry(
     const digest = createHash("sha256").update(bytes).digest("hex");
     const prior = db
       .prepare(
-        "SELECT evidence FROM quarantine WHERE source='workspaces_json' AND reason='migration_completed' AND evidence LIKE ?",
+        "SELECT 1 FROM migration_ledger WHERE source='workspaces_json' AND digest=? AND state='completed'",
       )
-      .get(`%${digest}%`);
+      .get(digest);
     if (prior) return undefined;
     const parsed = validate(bytes);
     if ("reason" in parsed) {
@@ -163,12 +162,27 @@ export function migrateWorkspaceRegistry(
           });
         }
       }
-      quarantine(db, now, collisions.length ? "migration_unresolved" : "migration_completed", {
-        source,
-        sha256: digest,
-        adopted,
-        collisions,
-      });
+      const ledgerEvidence = JSON.stringify({ source, sha256: digest, adopted, collisions }).slice(
+        0,
+        8192,
+      );
+      // Unresolved input remains an incident diagnostic; completion authority
+      // lives only in migration_ledger.
+      if (collisions.length)
+        quarantine(db, now, "migration_unresolved", {
+          source,
+          sha256: digest,
+          adopted,
+          collisions,
+        });
+      db.prepare(
+        "INSERT INTO migration_ledger(source,digest,state,completed_at,evidence) VALUES('workspaces_json',?,?,?,?) ON CONFLICT(source,digest) DO UPDATE SET state=excluded.state,completed_at=excluded.completed_at,evidence=excluded.evidence",
+      ).run(
+        digest,
+        collisions.length ? "unresolved" : "completed",
+        now.toISOString(),
+        ledgerEvidence,
+      );
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -195,6 +209,6 @@ export function migrateWorkspaceRegistry(
     if (existsSync(source) && !existsSync(retired)) renameSync(source, retired);
     return receipt;
   } finally {
-    rmSync(lock, { recursive: true, force: true });
+    db.prepare("DELETE FROM operation_lease WHERE scope='migration' AND token=?").run(leaseToken);
   }
 }

@@ -98,7 +98,9 @@ export function decideCustody(r: CustodyRecord, e: CustodyEvidence): CustodyDeci
       "abandoned",
       transitionCause(r.disposition, "abandoned", "abandon_receipted"),
       "verified abandon receipt",
-      r.disposition === "abandoned" ? r.headChangeIds : heads,
+      // Hidden/absent is evidence about visibility, not authority to erase the
+      // heads named by the receipt. Preserve the recorded custody shape.
+      r.headChangeIds,
     );
 
   if (e.heads.kind === "divergent" || e.heads.kind === "hidden")

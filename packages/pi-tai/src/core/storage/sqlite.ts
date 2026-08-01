@@ -5,7 +5,7 @@ import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../
 import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 export const SCHEMA_SQL_V1 = `
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
@@ -54,14 +54,23 @@ INSERT OR IGNORE INTO allowed_custody_transition VALUES
 ('detached','attached','merge_conflicts_retained'),('missing','attached','merge_conflicts_retained'),('merged','attached','merge_conflicts_retained'),('abandoned','attached','merge_conflicts_retained'),
 ('attached','attached','repo_rebound'),('detached','attached','repo_rebound'),('missing','attached','repo_rebound'),('merged','attached','repo_rebound'),('abandoned','attached','repo_rebound'),('incident','attached','repo_rebound');
 `;
+export const SCHEMA_SQL_V5 = `
+CREATE TABLE migration_ledger(source TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('completed','unresolved')),receipt_path TEXT,completed_at TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(source,digest));
+INSERT OR IGNORE INTO migration_ledger(source,digest,state,completed_at,evidence)
+ SELECT 'workspaces_json',json_extract(evidence,'$.sha256'),CASE reason WHEN 'migration_completed' THEN 'completed' ELSE 'unresolved' END,at,evidence
+ FROM quarantine WHERE source='workspaces_json' AND reason IN('migration_completed','migration_unresolved') AND json_valid(evidence) AND json_extract(evidence,'$.sha256') IS NOT NULL;
+CREATE TABLE operation_lease(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,token TEXT NOT NULL,pid INTEGER NOT NULL,pid_start TEXT NOT NULL,heartbeat_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+`;
 export const MIGRATIONS = [
   { version: 1, sql: SCHEMA_SQL_V1 },
   { version: 2, sql: SCHEMA_SQL_V2 },
   { version: 3, sql: SCHEMA_SQL_V3 },
   { version: 4, sql: SCHEMA_SQL_V4 },
+  { version: 5, sql: SCHEMA_SQL_V5 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
-export const SCHEMA_SQL = SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4;
+export const SCHEMA_SQL =
+  SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4 + SCHEMA_SQL_V5;
 
 export interface OpenSqliteOptions {
   paths: StoragePaths;
@@ -114,7 +123,7 @@ export function openDurableDatabase(options: OpenSqliteOptions): DatabaseSync {
   db.exec("BEGIN IMMEDIATE");
   try {
     // A competing cold opener may have completed while this connection waited for the lock.
-    const version = Number(
+    let version = Number(
       (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
     );
     if (version > SCHEMA_VERSION)
@@ -125,10 +134,12 @@ export function openDurableDatabase(options: OpenSqliteOptions): DatabaseSync {
       const migration = db
         .prepare("SELECT COALESCE(MAX(version),0) AS version FROM schema_migrations")
         .get() as { version: number };
-      if (Number(migration.version) !== version)
-        throw new Error(
-          `Schema authorities disagree: user_version=${version}, migration=${migration.version}`,
-        );
+      // PRAGMA user_version may have been read before a competing WAL writer's
+      // schema commit became visible on this connection. The append-only ledger
+      // is authoritative when it is exactly ahead and supported.
+      if (Number(migration.version) <= SCHEMA_VERSION)
+        version = Math.max(version, Number(migration.version));
+      else throw new Error(`Migration ledger ${migration.version} is newer than supported schema`);
     }
     for (const migration of MIGRATIONS)
       if (migration.version > version) {

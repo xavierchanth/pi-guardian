@@ -1,4 +1,10 @@
 export {
+  CustodyEvidenceCollector,
+  CustodyReconciliationService,
+  type ReconcileReport,
+  type ReconcileScope,
+} from "./custody-evidence.ts";
+export {
   type CustodyDecision,
   type CustodyEvidence,
   CustodyReconciler,
