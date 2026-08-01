@@ -1,0 +1,161 @@
+import assert from "node:assert/strict";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { mkdtempSync } from "node:fs";
+import {
+  executeLegacyMigration,
+  LEGACY_CONFIRM_BYTES,
+  planLegacyMigration,
+} from "../../packages/pi-tai/src/core/storage/legacy-migration.ts";
+import {
+  ensurePrivateDirectory,
+  ensureStoragePaths,
+  privateChild,
+  resolveStoragePaths,
+} from "../../packages/pi-tai/src/core/storage/paths.ts";
+import {
+  openDurableDatabase,
+  SCHEMA_SQL,
+  SqliteDurableRecordStore,
+} from "../../packages/pi-tai/src/core/storage/sqlite.ts";
+
+function fixture() {
+  const home = mkdtempSync(join(tmpdir(), "pi-tai-storage-"));
+  const paths = resolveStoragePaths({}, home);
+  return { home, paths };
+}
+test("XDG resolver ignores relative roots and uses private macOS runtime fallback", () => {
+  const { home } = fixture();
+  const paths = resolveStoragePaths(
+    { XDG_STATE_HOME: "relative", XDG_DATA_HOME: "/data", XDG_CACHE_HOME: "/cache" },
+    home,
+  );
+  assert.equal(paths.state, join(home, ".local/state/pi-tai"));
+  assert.equal(paths.data, "/data/pi-tai");
+  assert.equal(paths.runtime, "/cache/pi-tai/run");
+});
+test("storage roots are private and unsafe roots/keys are refused", () => {
+  const { home, paths } = fixture();
+  ensureStoragePaths(paths);
+  for (const path of [paths.state, paths.data, paths.cache, paths.runtime])
+    assert.equal(statSync(path).mode & 0o777, 0o700);
+  assert.throws(() => privateChild(paths.sessions, ".."));
+  const bad = join(home, "bad");
+  mkdirSync(bad, { mode: 0o777 });
+  chmodSync(bad, 0o777);
+  assert.throws(() => ensurePrivateDirectory(bad), /world-writable/);
+  const link = join(home, "link");
+  symlinkSync(paths.state, link);
+  assert.throws(() => ensurePrivateDirectory(link), /Unsafe/);
+});
+test("schema golden has constrained metadata and no prose columns", () => {
+  for (const forbidden of [
+    "report_body",
+    "transcript",
+    "message_body",
+    "image_bytes",
+    "config_json",
+  ])
+    assert.doesNotMatch(SCHEMA_SQL, new RegExp(forbidden, "i"));
+  assert.match(SCHEMA_SQL, /CHECK\(length\(title\)<=512\)/);
+  assert.match(SCHEMA_SQL, /CREATE INDEX idx_subagent_owner/);
+});
+test("SQLite schema enforces constraints and narrow adapter survives concurrent opens", () => {
+  const { paths } = fixture();
+  const db1 = openDurableDatabase({ paths });
+  const db2 = openDurableDatabase({ paths });
+  const one = new SqliteDurableRecordStore(db1, "root");
+  const two = new SqliteDurableRecordStore(db2, "root");
+  one.note({
+    durableId: "d1",
+    displayId: "sa-1",
+    rootSessionId: "root",
+    disposition: "running",
+    updatedAt: "2026-01-01",
+  });
+  two.note({
+    durableId: "d2",
+    displayId: "sa-2",
+    rootSessionId: "root",
+    disposition: "done",
+    updatedAt: "2026-01-02",
+  });
+  assert.equal(one.counts().total, 2);
+  assert.throws(() => db1.prepare("UPDATE subagent SET backend='bad' WHERE durable_id='d1'").run());
+  db2.close();
+  db1.close();
+  assert.equal(statSync(paths.database).mode & 0o777, 0o600);
+});
+test("newer schema is refused without modifying it", () => {
+  const { paths } = fixture();
+  const db = openDurableDatabase({ paths });
+  db.exec("PRAGMA user_version=999");
+  db.close();
+  assert.throws(() => openDurableDatabase({ paths }), /newer than supported/);
+  const raw = readFileSync(paths.database);
+  assert.ok(raw.length > 0);
+});
+test("corrupt database is quarantined and replaced", () => {
+  const { paths } = fixture();
+  ensurePrivateDirectory(paths.state);
+  writeFileSync(paths.database, "not sqlite", { mode: 0o600 });
+  const db = openDurableDatabase({ paths, now: () => new Date("2026-01-01T00:00:00Z") });
+  db.close();
+  assert.ok(existsSync(join(paths.quarantine, "state-2026-01-01T00-00-00.000Z.corrupt")));
+});
+test("legacy migration is copy-verify, idempotent, and never relocates workspaces", () => {
+  const { home, paths } = fixture();
+  const legacy = join(home, ".pi/agent/pi-tai");
+  const journal = join(legacy, "agents/sessions/d1/journal.jsonl");
+  mkdirSync(join(legacy, "agents/workspaces/w1"), { recursive: true });
+  mkdirSync(join(legacy, "agents/sessions/d1"), { recursive: true });
+  writeFileSync(journal, "hello");
+  writeFileSync(join(legacy, "agents/workspaces/w1/uncommitted"), "precious");
+  const plan = planLegacyMigration(legacy, paths);
+  assert.equal(plan.copies.length, 1);
+  const receipt = executeLegacyMigration(plan, paths)!;
+  assert.equal(receipt.files.length, 1);
+  assert.equal(readFileSync(plan.copies[0]!.destination, "utf8"), "hello");
+  executeLegacyMigration(plan, paths);
+  assert.equal(readFileSync(join(legacy, "agents/workspaces/w1/uncommitted"), "utf8"), "precious");
+  assert.ok(existsSync(join(legacy, "MIGRATED-TO-XDG.txt")));
+});
+test("large legacy migration requires explicit confirmation", () => {
+  const { home, paths } = fixture();
+  const legacy = join(home, "legacy");
+  mkdirSync(join(legacy, "agents/sessions"), { recursive: true });
+  const plan = {
+    sourceRoot: legacy,
+    copies: [],
+    skipped: [],
+    totalBytes: LEGACY_CONFIRM_BYTES + 1,
+  };
+  assert.throws(
+    () =>
+      executeLegacyMigration(
+        {
+          ...plan,
+          copies: [
+            {
+              source: import.meta.filename,
+              destination: join(paths.sessions, "x"),
+              relativePath: "x",
+              bytes: 1,
+            },
+          ],
+        },
+        paths,
+      ),
+    /explicit confirmation/,
+  );
+});

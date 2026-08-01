@@ -28,9 +28,10 @@ export function resolveStoragePaths(
   const data = join(xdg(env.XDG_DATA_HOME, join(home, ".local", "share")), "pi-tai");
   const cache = join(xdg(env.XDG_CACHE_HOME, join(home, ".cache")), "pi-tai");
   // macOS normally has no XDG_RUNTIME_DIR. A private cache child is safer than /tmp.
-  const runtime = env.XDG_RUNTIME_DIR && isAbsolute(env.XDG_RUNTIME_DIR)
-    ? join(env.XDG_RUNTIME_DIR, "pi-tai")
-    : join(cache, "run");
+  const runtime =
+    env.XDG_RUNTIME_DIR && isAbsolute(env.XDG_RUNTIME_DIR)
+      ? join(env.XDG_RUNTIME_DIR, "pi-tai")
+      : join(cache, "run");
   return {
     state,
     data,
@@ -48,17 +49,31 @@ export function resolveStoragePaths(
 export function ensurePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe storage directory: ${path}`);
-  if ((stat.mode & 0o022) !== 0) throw new Error(`Storage directory is group- or world-writable: ${path}`);
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    throw new Error(`Unsafe storage directory: ${path}`);
+  if ((stat.mode & 0o022) !== 0)
+    throw new Error(`Storage directory is group- or world-writable: ${path}`);
 }
 
 export function ensureStoragePaths(paths: StoragePaths): void {
-  for (const path of [paths.state, paths.data, paths.cache, paths.runtime, paths.backups, paths.quarantine, paths.migration, paths.sessions, paths.workspaces]) ensurePrivateDirectory(path);
+  for (const path of [
+    paths.state,
+    paths.data,
+    paths.cache,
+    paths.runtime,
+    paths.backups,
+    paths.quarantine,
+    paths.migration,
+    paths.sessions,
+    paths.workspaces,
+  ])
+    ensurePrivateDirectory(path);
 }
 
 /** Resolve an untrusted artifact/session key without permitting traversal or symlink aliases. */
 export function privateChild(root: string, ...keys: readonly string[]): string {
-  if (keys.some((key) => !/^[A-Za-z0-9_-]+$/.test(key))) throw new Error("Invalid storage path key");
+  if (keys.some((key) => !/^[A-Za-z0-9_-]+$/.test(key)))
+    throw new Error("Invalid storage path key");
   const child = resolve(root, ...keys);
   if (!child.startsWith(resolve(root) + sep)) throw new Error("Storage path escaped its root");
   return child;
@@ -80,4 +95,6 @@ export function createPrivateFile(path: string): number {
   chmodSync(path, 0o600);
   return fd;
 }
-export function closePrivateFile(fd: number): void { closeSync(fd); }
+export function closePrivateFile(fd: number): void {
+  closeSync(fd);
+}

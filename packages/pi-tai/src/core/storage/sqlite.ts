@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, chmodSync } from "node:fs";
+import { chmodSync, existsSync, renameSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../durable/port.ts";
@@ -21,7 +21,11 @@ CREATE INDEX idx_run_durable ON subagent_run(durable_id,generation,terminal_ordi
 CREATE INDEX idx_workspace_root ON workspace(root_session_id,phase);
 `;
 
-export interface OpenSqliteOptions { paths: StoragePaths; now?: () => Date; memory?: boolean }
+export interface OpenSqliteOptions {
+  paths: StoragePaths;
+  now?: () => Date;
+  memory?: boolean;
+}
 
 export function openDurableDatabase(options: OpenSqliteOptions): DatabaseSync {
   const now = options.now ?? (() => new Date());
@@ -40,47 +44,117 @@ export function openDurableDatabase(options: OpenSqliteOptions): DatabaseSync {
     db = new DatabaseSync(target);
   }
   const mode = db.prepare("PRAGMA journal_mode = WAL").get() as { journal_mode: string };
-  db.exec(`PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;`);
-  if (!options.memory && mode.journal_mode.toLowerCase() !== "wal") db.exec("PRAGMA busy_timeout=15000");
-  const version = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
-  if (version > SCHEMA_VERSION) { db.close(); throw new Error(`Database schema ${version} is newer than supported schema ${SCHEMA_VERSION}`); }
+  db.exec(
+    `PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;`,
+  );
+  if (!options.memory && mode.journal_mode.toLowerCase() !== "wal")
+    db.exec("PRAGMA busy_timeout=15000");
+  const version = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+  );
+  if (version > SCHEMA_VERSION) {
+    db.close();
+    throw new Error(`Database schema ${version} is newer than supported schema ${SCHEMA_VERSION}`);
+  }
   if (version === 0) {
     db.exec("BEGIN IMMEDIATE");
     try {
       db.exec(SCHEMA_SQL);
-      db.prepare("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)").run(SCHEMA_VERSION, now().toISOString());
+      db.prepare("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)").run(
+        SCHEMA_VERSION,
+        now().toISOString(),
+      );
       db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
-    } catch (error) { db.exec("ROLLBACK"); throw error; }
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   }
   if (!options.memory) chmodSync(target, 0o600);
   return db;
 }
 
 export class SqliteDurableRecordStore implements DurableRecordStore {
-  constructor(private readonly db: DatabaseSync, private readonly rootSessionId: string) {}
-  ingest(records: Iterable<LifecycleRecord>): void { for (const record of records) this.note(record); }
+  private readonly db: DatabaseSync;
+  private readonly rootSessionId: string;
+  constructor(db: DatabaseSync, rootSessionId: string) {
+    this.db = db;
+    this.rootSessionId = rootSessionId;
+  }
+  ingest(records: Iterable<LifecycleRecord>): void {
+    for (const record of records) this.note(record);
+  }
   note(summary: DurableRecordSummary, authoritative = false): void {
     const root = summary.rootSessionId ?? this.rootSessionId;
     const now = summary.updatedAt;
-    this.db.prepare("INSERT OR IGNORE INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,?,?,?,?)").run(root,"unknown","",now,now);
-    const seq = Number(summary.displayId.match(/\\d+/)?.[0] ?? 1);
-    this.db.prepare(`INSERT INTO subagent(durable_id,owner_session_id,anchor_token,display_seq,display_id,backend,title,cwd,disposition,created_at,updated_at,archived_at,archived_by)
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,?,?,?,?)",
+      )
+      .run(root, "unknown", "", now, now);
+    const seq = Number(summary.displayId.match(/\d+/)?.[0] ?? 1);
+    this.db
+      .prepare(`INSERT INTO subagent(durable_id,owner_session_id,anchor_token,display_seq,display_id,backend,title,cwd,disposition,created_at,updated_at,archived_at,archived_by)
       VALUES(?,?,?,?,?,'pi','imported','',?,?,?,?,?) ON CONFLICT(durable_id) DO UPDATE SET disposition=excluded.disposition,updated_at=excluded.updated_at,archived_at=excluded.archived_at,archived_by=excluded.archived_by
-      WHERE ${authoritative ? "subagent.updated_at <= excluded.updated_at" : "subagent.updated_at < excluded.updated_at"}`).run(summary.durableId,root,`atk_${summary.durableId}`,seq,summary.displayId,summary.disposition,now,now,summary.archivedAt ?? null,summary.archivedBy ?? null);
+      WHERE ${authoritative ? "subagent.updated_at <= excluded.updated_at" : "subagent.updated_at < excluded.updated_at"}`)
+      .run(
+        summary.durableId,
+        root,
+        `atk_${summary.durableId}`,
+        seq,
+        summary.displayId,
+        summary.disposition,
+        now,
+        now,
+        summary.archivedAt ?? null,
+        summary.archivedBy ?? null,
+      );
   }
   get(id: string): DurableRecordSummary | undefined {
-    const row = this.db.prepare("SELECT durable_id,display_id,owner_session_id,disposition,archived_at,archived_by,updated_at FROM subagent WHERE durable_id=?").get(id) as Record<string,string|null>|undefined;
-    return row ? { durableId: row.durable_id!, displayId: row.display_id!, rootSessionId: row.owner_session_id!, disposition: row.disposition as DurableRecordSummary["disposition"], updatedAt: row.updated_at!, ...(row.archived_at ? {archivedAt:row.archived_at,archivedBy:row.archived_by as "user"|"auto_done"}: {}) } : undefined;
+    const row = this.db
+      .prepare(
+        "SELECT durable_id,display_id,owner_session_id,disposition,archived_at,archived_by,updated_at FROM subagent WHERE durable_id=?",
+      )
+      .get(id) as Record<string, string | null> | undefined;
+    return row
+      ? {
+          durableId: row.durable_id!,
+          displayId: row.display_id!,
+          rootSessionId: row.owner_session_id!,
+          disposition: row.disposition as DurableRecordSummary["disposition"],
+          updatedAt: row.updated_at!,
+          ...(row.archived_at
+            ? { archivedAt: row.archived_at, archivedBy: row.archived_by as "user" | "auto_done" }
+            : {}),
+        }
+      : undefined;
   }
-  isInherited(id: string): boolean { const row=this.get(id); return !!row?.rootSessionId && row.rootSessionId!==this.rootSessionId; }
+  isInherited(id: string): boolean {
+    const row = this.get(id);
+    return !!row?.rootSessionId && row.rootSessionId !== this.rootSessionId;
+  }
   counts(): RecordCounts {
-    const rows=this.db.prepare("SELECT owner_session_id,archived_at FROM subagent").all() as {owner_session_id:string;archived_at:string|null}[];
-    let unarchived=0,archived=0,inherited=0; for(const row of rows) row.owner_session_id!==this.rootSessionId?inherited++:row.archived_at?archived++:unarchived++;
-    return {unarchived,archived,inherited,total:rows.length};
+    const rows = this.db.prepare("SELECT owner_session_id,archived_at FROM subagent").all() as {
+      owner_session_id: string;
+      archived_at: string | null;
+    }[];
+    let unarchived = 0,
+      archived = 0,
+      inherited = 0;
+    for (const row of rows)
+      row.owner_session_id !== this.rootSessionId
+        ? inherited++
+        : row.archived_at
+          ? archived++
+          : unarchived++;
+    return { unarchived, archived, inherited, total: rows.length };
   }
 }
 
 export function backupDatabase(db: DatabaseSync, paths: StoragePaths, name: string): string {
-  ensurePrivateDirectory(paths.backups); const destination=join(paths.backups,basename(name));
-  db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`); chmodSync(destination,0o600); return destination;
+  ensurePrivateDirectory(paths.backups);
+  const destination = join(paths.backups, basename(name));
+  db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+  chmodSync(destination, 0o600);
+  return destination;
 }
