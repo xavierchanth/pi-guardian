@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   BackendRegistry,
+  SendNotDeliveredError,
   type SubagentBackend,
 } from "../../packages/pi-tai/src/core/subagents/backend.ts";
 import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
@@ -338,6 +339,58 @@ describe("subagent manager", () => {
       operation: "continue",
       settlementRace: false,
     });
+  });
+
+  it("returns the typed auto settlement-race continuation receipt", async () => {
+    const backend = new StubBackend();
+    const spawn = backend.spawn.bind(backend);
+    backend.spawn = async (task) => {
+      const session = await spawn(task);
+      session.send = async () => {
+        await session.interrupt();
+        await settleQueue();
+        throw new SendNotDeliveredError("settled before delivery");
+      };
+      return session;
+    };
+    const manager = managerWith([backend]);
+    const spawned = await manager.spawn(request({ prompt: "HANG: race" }));
+
+    assert.deepEqual(await manager.send(spawned.id, "continue me"), {
+      operation: "continue",
+      settlementRace: true,
+    });
+  });
+
+  it("persists a continuation running and terminal lifecycle", async () => {
+    const events: LifecycleEvent[] = [];
+    const store: SubagentLifecycleStore = {
+      load: async () => events,
+      append: async (event) => void events.push(event),
+    };
+    const manager = managerWith([new StubBackend()], { lifecycleStore: store });
+    const spawned = await manager.spawn(request());
+    await manager.wait([spawned.id]);
+    await manager.send(spawned.id, "next");
+    await manager.wait([spawned.id]);
+
+    assert.deepEqual(
+      events.map(({ type }) => type),
+      ["spawn_intent", "running", "terminal", "running", "terminal"],
+    );
+    const folded = foldLifecycle(events);
+    assert.equal(folded.rejected.length, 0);
+    assert.equal(folded.records.get(spawned.durableId)?.disposition, "done");
+  });
+
+  it("does not tombstone a settled continuable entry when cancel is requested", async () => {
+    const manager = managerWith([new StubBackend()]);
+    const spawned = await manager.spawn(request());
+    await manager.wait([spawned.id]);
+    await manager.cancel([spawned.id]);
+
+    await manager.send(spawned.id, "still continuable");
+    assert.equal((await manager.wait([spawned.id])).settled[0]?.status, "done");
   });
 
   it("does not let a queued send resurrect an entry cancelled while waiting", async () => {

@@ -94,7 +94,7 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
       !prior ||
       event.generation !== prior.generation ||
       (event.type === "running"
-        ? !["intent", "running"].includes(prior.disposition)
+        ? !["intent", "running", "done", "failed", "interrupted"].includes(prior.disposition)
         : prior.disposition !== "running")
     ) {
       rejected.push(raw);

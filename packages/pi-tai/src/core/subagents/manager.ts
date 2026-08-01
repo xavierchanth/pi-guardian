@@ -494,11 +494,13 @@ export class SubagentManager {
     for (const id of new Set(ids)) {
       const entry = this.entries.get(id);
       if (!entry) throw new Error(`Unknown subagent ${id}.`);
-      entry.closed = true;
       if (entry.snapshot.status !== "running") {
         cancelled.push(entry.snapshot);
         continue;
       }
+      // Settled entries may still be continued; only an active cancellation
+      // tombstones the entry against future sends.
+      entry.closed = true;
       entry.abort.abort();
       try {
         await entry.session?.interrupt();

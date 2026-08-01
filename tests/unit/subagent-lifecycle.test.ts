@@ -44,6 +44,46 @@ test("strict lifecycle fold restores identity, sequence, handle, and terminal st
   assert.equal(folded.records.get(intent.durableId)?.disposition, "done");
 });
 
+test("same-generation continuations fold from terminal back through running", () => {
+  const folded = foldLifecycle([
+    intent,
+    {
+      version: 1,
+      type: "running",
+      durableId: intent.durableId,
+      generation: 2,
+      at: "b",
+    },
+    {
+      version: 1,
+      type: "terminal",
+      durableId: intent.durableId,
+      generation: 2,
+      disposition: "done",
+      at: "c",
+    },
+    {
+      version: 1,
+      type: "running",
+      durableId: intent.durableId,
+      generation: 2,
+      at: "d",
+    },
+    {
+      version: 1,
+      type: "terminal",
+      durableId: intent.durableId,
+      generation: 2,
+      disposition: "failed",
+      at: "e",
+    },
+  ]);
+
+  assert.equal(folded.rejected.length, 0);
+  assert.equal(folded.records.get(intent.durableId)?.disposition, "failed");
+  assert.equal(folded.records.get(intent.durableId)?.updatedAt, "e");
+});
+
 test("unknown versions and invalid transitions are quarantined", () => {
   const folded = foldLifecycle([
     { ...intent, version: 0 },

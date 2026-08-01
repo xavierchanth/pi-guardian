@@ -4,6 +4,7 @@ import {
   ClaudeBackend,
   type ClaudeSdk,
 } from "../../packages/pi-tai/src/core/subagents/backends/claude.ts";
+import { SendNotDeliveredError } from "../../packages/pi-tai/src/core/subagents/backend.ts";
 import { PiBackend } from "../../packages/pi-tai/src/core/subagents/backends/pi.ts";
 import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 
@@ -75,6 +76,41 @@ describe("pi backend", () => {
     await child.send("new direction", "steer");
 
     assert.deepEqual(prompts[1], ["new direction", { streamingBehavior: "steer" }]);
+    child.dispose();
+  });
+
+  it("rejects an idle send as not delivered without prompting", async () => {
+    const prompts: unknown[][] = [];
+    const session = {
+      isStreaming: false,
+      prompt: async (...args: unknown[]) => void prompts.push(args),
+      waitForIdle: async () => new Promise<void>(() => {}),
+      subscribe: () => () => {},
+    };
+    const backend = new PiBackend({
+      config: {} as never,
+      modelRegistry: {} as never,
+      stateRoot: "/tmp/state",
+      factory: {
+        create: async () =>
+          ({
+            contextId: "sa-1",
+            session,
+            sessionId: "session-1",
+            sessionFile: "/tmp/session.jsonl",
+            sessionDir: "/tmp",
+            bridge: {},
+            send() {},
+            async abort() {},
+            async waitForIdle() {},
+            dispose() {},
+          }) as never,
+      },
+    });
+
+    const child = await backend.spawn(task());
+    await assert.rejects(child.send("too late", "steer"), SendNotDeliveredError);
+    assert.deepEqual(prompts, [["do the thing"]]);
     child.dispose();
   });
 });
