@@ -145,42 +145,96 @@ test("B6-B8 simultaneous processes serialize one atomic retirement/receipt with 
     JSON.stringify([...valid, { ...valid[0], id: "w2", name: "other", rootChangeId: "mmmm" }]),
   );
   f.db.close();
-  const barrier = join(f.home, "start");
   const childPath = join(process.cwd(), "tests/fixtures/custody-migration-child.mjs");
-  const ready = [join(f.home, "ready-0"), join(f.home, "ready-1")];
-  const children = ready.map((readyPath) =>
-    spawn(process.execPath, [childPath, f.home, f.agentDir, barrier, readyPath], {
-      stdio: ["ignore", "pipe", "pipe"],
+  const isolatedEnv = join(f.home, "child-env");
+  for (const directory of ["config", "data", "cache"]) {
+    mkdirSync(join(isolatedEnv, directory), { recursive: true });
+  }
+  const env = {
+    ...process.env,
+    HOME: f.home,
+    XDG_CONFIG_HOME: join(isolatedEnv, "config"),
+    XDG_DATA_HOME: join(isolatedEnv, "data"),
+    XDG_CACHE_HOME: join(isolatedEnv, "cache"),
+    JJ_CONFIG: join(isolatedEnv, "config", "jj-config.toml"),
+  };
+  writeFileSync(env.JJ_CONFIG, "");
+  const children = [0, 1].map(() =>
+    spawn(process.execPath, [childPath, f.home, f.agentDir], {
+      env,
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     }),
   );
-  const completed = children.map(
-    (child) =>
-      new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
-        let out = "";
-        let err = "";
-        child.stdout.on("data", (chunk) => {
-          out += chunk;
+  const state = children.map(() => ({
+    out: "",
+    err: "",
+    readyPid: undefined as number | undefined,
+  }));
+  const completed = children.map((child, index) => {
+    const stdout = child.stdout;
+    const stderr = child.stderr;
+    if (!stdout || !stderr) throw new Error(`child ${index} did not expose piped output`);
+    return new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+      out: string;
+      err: string;
+    }>((resolve, reject) => {
+      stdout.on("data", (chunk) => {
+        state[index].out += chunk;
+      });
+      stderr.on("data", (chunk) => {
+        state[index].err += chunk;
+      });
+      child.once("error", reject);
+      child.once("close", (code, signal) =>
+        resolve({ code, signal, out: state[index].out, err: state[index].err }),
+      );
+    });
+  });
+  const ready = children.map(
+    (child, index) =>
+      new Promise<void>((resolve, reject) => {
+        child.once("message", (message: any) => {
+          if (message?.type !== "ready") {
+            reject(new Error(`child ${index} sent invalid readiness: ${JSON.stringify(message)}`));
+            return;
+          }
+          state[index].readyPid = message.pid;
+          resolve();
         });
-        child.stderr.on("data", (chunk) => {
-          err += chunk;
-        });
-        child.on("close", (code) => resolve({ code, out, err }));
+        child.once("close", (code, signal) =>
+          reject(
+            new Error(
+              `child ${index} exited before ready (code=${code}, signal=${signal}, stdout=${JSON.stringify(state[index].out)}, stderr=${JSON.stringify(state[index].err)})`,
+            ),
+          ),
+        );
       }),
   );
-  const readinessDeadline = Date.now() + 30_000;
-  while (!ready.every(existsSync)) {
-    if (Date.now() >= readinessDeadline)
-      throw new Error("migration children failed to become ready");
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  let timeoutHandle: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error(`migration children timed out: ${JSON.stringify(state)}`)),
+      120_000,
+    );
+  });
+  try {
+    await Promise.race([Promise.all(ready), timeout]);
+    // Both independently opened connections now contend for the same lease.
+    for (const child of children) child.send({ type: "start" });
+    const results = await Promise.race([Promise.all(completed), timeout]);
+    const diagnostics = JSON.stringify(results, null, 2);
+    assert.deepEqual(
+      results.map((r) => r.code),
+      [0, 0],
+      diagnostics,
+    );
+    assert.equal(results.filter((r) => JSON.parse(r.out).receipt !== null).length, 1, diagnostics);
+  } finally {
+    clearTimeout(timeoutHandle!);
+    for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");
   }
-  writeFileSync(barrier, "go");
-  const results = await Promise.all(completed);
-  assert.deepEqual(
-    results.map((r) => r.code),
-    [0, 0],
-    results.map((r) => r.err).join("\n"),
-  );
-  assert.equal(results.filter((r) => JSON.parse(r.out).receipt !== null).length, 1);
 
   const db = openDurableDatabase({ paths: f.paths });
   assert.equal(
