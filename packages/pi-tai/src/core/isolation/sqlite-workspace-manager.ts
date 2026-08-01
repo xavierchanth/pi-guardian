@@ -117,9 +117,13 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
 
   async pendingChanges(id: string): Promise<ChangeEntry[] | undefined> {
     const r = await this.port.get(id);
-    if (!r || r.disposition !== "attached" || !(await exists(r.path))) return undefined;
-    const head = await this.jj.changeIdAt(r.path, "@");
-    return (await this.jj.range(r.path, r.baseChangeIds, head)).filter((x) => !x.empty);
+    if (!r || r.disposition !== "attached") return undefined;
+    // A checkout and even its JJ workspace attachment are evidence, never
+    // authority.  Once reconciled, durable Change IDs remain queryable from
+    // any checkout in the repository.
+    const heads = r.headChangeIds;
+    if (!heads.length) return [];
+    return (await this.jj.range(r.repoRoot, r.baseChangeIds, heads)).filter((x) => !x.empty);
   }
 
   assignOwner(id: string, ownerId: string, ownerDisplayId?: string): Promise<void> {
@@ -134,17 +138,21 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       let r = await this.owned(id);
       if (r.disposition !== "attached")
         return { kind: "blocked", reason: `Workspace ${r.name} is ${r.disposition}, not active.` };
-      if (!(await exists(r.path)))
-        return {
-          kind: "blocked",
-          reason: `Workspace directory ${r.path} is missing; run a sweep.`,
-        };
-      const head = await this.jj.changeIdAt(r.path, "@");
-      const entries = await this.jj.range(r.path, r.baseChangeIds, head);
+      const checkoutPresent = await exists(r.path);
+      if (checkoutPresent) {
+        const head = await this.jj.changeIdAt(r.path, "@");
+        const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, head);
+        const heads = await this.jj.headsOf(
+          r.repoRoot,
+          entries.map((x) => x.changeId),
+        );
+        r = await this.refresh(r, { headChangeIds: heads });
+      }
+      const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, r.headChangeIds);
       const content = entries.filter((x) => !x.empty);
       if (!content.length) {
-        await this.coordinator.reclaimScaffold(this.request(r));
-        return { kind: "no_changes", record: publicRecord(r) };
+        const reclaimed = await this.coordinator.reclaimScaffold(this.request(r));
+        return { kind: "no_changes", record: publicRecord(reclaimed) };
       }
       const unnamed = content.filter((x) => !x.description.trim());
       if (unnamed.length)
@@ -153,7 +161,7 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
           reason: `${unnamed.length} change(s) in ${r.name} have no description; describe them before merging.`,
         };
       const heads = await this.jj.headsOf(
-        r.path,
+        r.repoRoot,
         content.map((x) => x.changeId),
       );
       r = await this.refresh(r, { headChangeIds: heads });

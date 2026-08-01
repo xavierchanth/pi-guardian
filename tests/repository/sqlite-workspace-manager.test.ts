@@ -82,6 +82,104 @@ test("SQLite adapter exercises metadata, continuation, pending, discard, sweep a
   assert.ok(swept.some((entry) => entry.id === parent.id));
 });
 
+test("adapter reopens and recovers create after every coordinator crash boundary", async () => {
+  for (const boundary of ["after_intent", "after_jj", "after_receipt", "after_commit"] as const) {
+    const f = fixture();
+    let fired = false;
+    const crashing = new SQLiteWorkspaceManager({
+      jj: f.jj,
+      custody: f.custody,
+      coordinator: new SQLiteCustodyCoordinator(
+        f.db,
+        f.custody,
+        f.jj,
+        `${process.pid}:crash-${boundary}`,
+        () => new Date().toISOString(),
+        (at) => {
+          if (!fired && at === boundary) {
+            fired = true;
+            throw new Error(`crash:${at}`);
+          }
+        },
+      ),
+      sourcePath: f.source,
+      workspaceRoot: join(f.home, "workspaces"),
+      rootSessionId: f.session,
+    });
+    await assert.rejects(() => crashing.create({ label: boundary }), new RegExp(`crash:${boundary}`));
+    const reopenedPort = new SqliteWorkspaceCustody(f.db);
+    const recovery = new SQLiteCustodyCoordinator(f.db, reopenedPort, f.jj);
+    const result = await recovery.recover();
+    assert.equal(result.failed.length, 0);
+    const reopened = new SQLiteWorkspaceManager({
+      jj: f.jj,
+      custody: reopenedPort,
+      coordinator: recovery,
+      sourcePath: f.source,
+      workspaceRoot: join(f.home, "workspaces"),
+      rootSessionId: f.session,
+    });
+    assert.equal((await reopened.list()).length, 1);
+  }
+});
+
+test("adapter no_changes reclaims its scaffold and reports the settled record", async () => {
+  const f = fixture();
+  const workspace = await f.manager.create({ label: "empty" });
+  const result = await f.manager.merge(workspace.id);
+  assert.equal(result.kind, "no_changes");
+  assert.equal(result.record.phase, "discarded");
+  assert.equal((await f.manager.get(workspace.id))?.phase, "discarded");
+});
+
+test("durable Change IDs survive checkout deletion and forgotten JJ attachment", async () => {
+  const f = fixture();
+  const workspace = await f.manager.create({ label: "path-is-not-authority" });
+  writeFileSync(join(workspace.path, "survives.txt"), "durable\n");
+  sh(workspace.path, "describe", "-m", "survives deletion");
+  await f.manager.resolveCustody(workspace.id); // persist the actual owned head
+  sh(f.source, "workspace", "forget", workspace.name);
+  rmSync(workspace.path, { recursive: true, force: true });
+  assert.deepEqual((await f.manager.pendingChanges(workspace.id))?.map((x) => x.description), [
+    "survives deletion",
+  ]);
+  assert.equal((await f.manager.merge(workspace.id)).kind, "merged");
+});
+
+test("real JJ retains a linear conflict and finalizes it after resolution", async () => {
+  const f = fixture();
+  const workspace = await f.manager.create({ label: "conflict" });
+  writeFileSync(join(workspace.path, "base.txt"), "workspace\n");
+  sh(workspace.path, "describe", "-m", "workspace side");
+  writeFileSync(join(f.source, "base.txt"), "target\n");
+  sh(f.source, "describe", "-m", "target side");
+  const first = await f.manager.merge(workspace.id);
+  assert.equal(first.kind, "retained_conflicts");
+  assert.ok(first.summary.conflictPaths.includes("base.txt"));
+  writeFileSync(join(f.source, "base.txt"), "resolved\n");
+  const second = await f.manager.merge(workspace.id);
+  assert.equal(second.kind, "merged");
+});
+
+test("multiple independent owned heads and nested parent workspace merge through adapter", async () => {
+  const f = fixture();
+  const a = await f.manager.create({ label: "a" });
+  const b = await f.manager.create({ label: "b" });
+  writeFileSync(join(a.path, "a.txt"), "a\n");
+  writeFileSync(join(b.path, "b.txt"), "b\n");
+  sh(a.path, "describe", "-m", "independent a");
+  sh(b.path, "describe", "-m", "independent b");
+  assert.equal((await f.manager.merge(a.id)).kind, "merged");
+  assert.equal((await f.manager.merge(b.id)).kind, "merged");
+
+  const parent = await f.manager.create({ label: "nested-parent" });
+  const child = await f.manager.create({ label: "nested-child", parent: parent.id });
+  writeFileSync(join(child.path, "nested.txt"), "nested\n");
+  sh(child.path, "describe", "-m", "nested child");
+  assert.equal((await f.manager.merge(child.id)).kind, "merged");
+  assert.ok((await f.manager.pendingChanges(parent.id))?.some((x) => x.description.includes("nested")));
+});
+
 test("SQLite adapter serializes duplicate settlement and refuses foreign-root mutation", async () => {
   const f = fixture();
   const workspace = await f.manager.create({ label: "race" });

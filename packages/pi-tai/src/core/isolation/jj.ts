@@ -237,9 +237,11 @@ export class JjCli {
   async range(
     cwd: string,
     baseChangeIds: readonly string[],
-    headChangeId: string,
+    headChangeId: string | readonly string[],
   ): Promise<ChangeEntry[]> {
-    const revset = `(${exactAny(baseChangeIds)})..${exact(headChangeId)}`;
+    const heads = typeof headChangeId === "string" ? exact(headChangeId) : exactAny(headChangeId);
+    if (!heads) return [];
+    const revset = `(${exactAny(baseChangeIds)})..(${heads})`;
     const out = await this.read(cwd, [
       "log",
       "--revision",
