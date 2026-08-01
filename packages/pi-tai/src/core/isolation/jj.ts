@@ -239,8 +239,9 @@ export class JjCli {
     baseChangeIds: readonly string[],
     headChangeId: string | readonly string[],
   ): Promise<ChangeEntry[]> {
+    if ((typeof headChangeId !== "string" && headChangeId.length === 0) || !baseChangeIds.length)
+      return [];
     const heads = typeof headChangeId === "string" ? exact(headChangeId) : exactAny(headChangeId);
-    if (!heads) return [];
     const revset = `(${exactAny(baseChangeIds)})..(${heads})`;
     const out = await this.read(cwd, [
       "log",
@@ -367,6 +368,26 @@ export class JjCli {
       "log",
       "--revision",
       `(${revision}):: ~ ${revision}`,
+      "--limit",
+      "1",
+      "--no-graph",
+      "--template",
+      '"x"',
+    ]);
+    return out.includes("x");
+  }
+
+  /** True when an owned change has a descendant outside the complete owned set. */
+  async hasDescendantsOutside(
+    cwd: string,
+    changeId: string,
+    ownedChangeIds: readonly string[],
+  ): Promise<boolean> {
+    const revision = exact(changeId);
+    const out = await this.read(cwd, [
+      "log",
+      "--revision",
+      `(${revision}):: ~ (${exactAny(ownedChangeIds)})`,
       "--limit",
       "1",
       "--no-graph",

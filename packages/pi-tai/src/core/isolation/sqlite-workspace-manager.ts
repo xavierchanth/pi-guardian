@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { repositoryStoreKey } from "./custody-evidence.ts";
+import { CustodyEvidenceCollector, repositoryStoreKey } from "./custody-evidence.ts";
 import type { CustodyRecord, RepositoryIdentity, WorkspaceCustodyPort } from "./custody-port.ts";
 import { CustodyReconciler } from "./custody-reconciler.ts";
 import type {
@@ -37,6 +37,7 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
   private readonly rootSessionId: string;
   private readonly clock: () => string;
   private readonly reconciler: CustodyReconciler;
+  private readonly collector: CustodyEvidenceCollector;
   private repository?: Promise<RepositoryIdentity>;
   private mutations: Promise<unknown> = Promise.resolve();
 
@@ -53,6 +54,7 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       pid: process.pid,
       processIdentity: o.processIdentity ?? `${process.pid}:workspace`,
     });
+    this.collector = new CustodyEvidenceCollector(this.jj, this.port);
   }
 
   async get(id: string) {
@@ -127,10 +129,15 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
   }
 
   assignOwner(id: string, ownerId: string, ownerDisplayId?: string): Promise<void> {
-    return this.patch(id, { ownerId, ...(ownerDisplayId ? { ownerDisplayId } : {}) });
+    return this.patch(
+      id,
+      { ownerId, ...(ownerDisplayId ? { ownerDisplayId } : {}) },
+      "owner_metadata",
+      "system_spawn",
+    );
   }
   assignParent(id: string, parent: string): Promise<void> {
-    return this.patch(id, { parent });
+    return this.patch(id, { parent }, "parent_metadata", "system_spawn");
   }
 
   merge(id: string, _strategy: MergeStrategy = "auto"): Promise<MergeResult> {
@@ -151,7 +158,17 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, r.headChangeIds);
       const content = entries.filter((x) => !x.empty);
       if (!content.length) {
-        const reclaimed = await this.coordinator.reclaimScaffold(this.request(r));
+        // There can be several independent empty heads after concurrent work.
+        // They are all exact owned changes, so settle them together rather than
+        // feeding a multi-head row to the one-head scaffold fast path.
+        const reclaimed =
+          r.headChangeIds.length === 1
+            ? await this.coordinator.reclaimScaffold(this.request(r))
+            : await this.coordinator.run({
+                ...this.request(r),
+                kind: "abandon",
+                requestedBy: "model_tool",
+              });
         return { kind: "no_changes", record: publicRecord(reclaimed) };
       }
       const unnamed = content.filter((x) => !x.description.trim());
@@ -196,16 +213,20 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       const ids = [...r.headChangeIds];
       if (await exists(r.path)) {
         const head = await this.jj.changeIdAt(r.path, "@");
-        const entries = await this.jj.range(r.path, r.baseChangeIds, head);
+        const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, head);
         const heads = await this.jj.headsOf(
-          r.path,
+          r.repoRoot,
           entries.map((x) => x.changeId),
         );
         r = await this.refresh(r, { headChangeIds: heads });
         ids.splice(0, ids.length, ...entries.map((x) => x.changeId));
       }
+      const exactOwned = [...new Set(ids)].sort();
+      // Persist every owned change (including interior and empty changes), not
+      // merely graph heads: the verified receipt and public result must agree.
+      r = await this.refresh(r, { headChangeIds: exactOwned });
       await this.coordinator.run({ ...this.request(r), kind: "abandon", requestedBy: "user" });
-      return { discardedChangeIds: ids };
+      return { discardedChangeIds: exactOwned };
     });
   }
 
@@ -232,17 +253,19 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
           });
           continue;
         }
-        const dir = await exists(r.path),
-          attached = await this.jj.workspaceHead(r.repoRoot, r.name);
-        const rr = await this.reconciler.reconcile(r, {
-          repository: "same",
-          attachment: attached ? "present" : "absent",
-          directory: dir ? "present" : "absent",
-          heads: attached
-            ? { kind: "unique", changeId: attached }
-            : { kind: "hidden", changeIds: r.headChangeIds },
-        });
-        if (rr.disposition === "attached" && dir) {
+        let rr: CustodyRecord;
+        try {
+          rr = await this.reconciler.reconcile(r, await this.collector.collect(r));
+        } catch (error) {
+          out.push({
+            id: r.id,
+            name: r.name,
+            disposition: "needs_attention",
+            reason: `Custody evidence unavailable: ${String(error)}`,
+          });
+          continue;
+        }
+        if (rr.disposition === "attached" && rr.directoryEvidence === "present") {
           const changes = await this.pendingChanges(rr.id);
           if (changes?.length) {
             out.push({
@@ -275,17 +298,13 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
   async resolveCustody(id: string): Promise<WorkspaceRecord | undefined> {
     const r = await this.port.get(id);
     if (!r) return undefined;
-    const head = await this.jj.workspaceHead(r.repoRoot, r.name);
-    return publicRecord(
-      await this.reconciler.reconcile(r, {
-        repository: "same",
-        attachment: head ? "present" : "absent",
-        directory: (await exists(r.path)) ? "present" : "absent",
-        heads: head
-          ? { kind: "unique", changeId: head }
-          : { kind: "hidden", changeIds: r.headChangeIds },
-      }),
-    );
+    // Collection failures are explicitly unprovable and therefore preserve
+    // durable authority rather than manufacturing same-repository/hidden facts.
+    try {
+      return publicRecord(await this.reconciler.reconcile(r, await this.collector.collect(r)));
+    } catch {
+      return publicRecord(r);
+    }
   }
   private request(r: CustodyRecord) {
     return {
@@ -302,21 +321,31 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       throw new Error(`Refusing to mutate workspace ${r.name}: custody belongs to another root.`);
     return r;
   }
-  private patch(id: string, p: Partial<CustodyRecord>): Promise<void> {
+  private patch(
+    id: string,
+    p: Partial<CustodyRecord>,
+    kind: string,
+    requestedBy: string,
+  ): Promise<void> {
     return this.serial(async () => {
       const r = await this.owned(id);
-      await this.refresh(r, p);
+      await this.refresh(r, p, kind, requestedBy);
     });
   }
-  private async refresh(r: CustodyRecord, p: Partial<CustodyRecord>) {
+  private async refresh(
+    r: CustodyRecord,
+    p: Partial<CustodyRecord>,
+    kind = "reconcile",
+    requestedBy = "system_reconcile",
+  ) {
     const now = this.clock(),
       opId = `manager:${randomUUID()}`;
     await this.port.begin({
       opId,
       workspaceId: r.id,
       repoId: r.repoId,
-      kind: "reconcile",
-      requestedBy: "system_reconcile",
+      kind,
+      requestedBy,
       pid: process.pid,
       processIdentity: `${process.pid}:workspace`,
       now,
@@ -362,11 +391,15 @@ function publicRecord(r: CustodyRecord): WorkspaceRecord {
     phase:
       r.disposition === "attached"
         ? "active"
-        : r.disposition === "merged"
-          ? "merged"
-          : r.disposition === "incident"
-            ? "incident"
-            : "discarded",
+        : r.disposition === "detached"
+          ? "detached"
+          : r.disposition === "merged"
+            ? "merged"
+            : r.disposition === "abandoned"
+              ? "abandoned"
+              : r.disposition === "missing"
+                ? "missing"
+                : "incident",
     baseChangeIds: r.baseChangeIds,
     rootChangeId: r.rootChangeId ?? r.headChangeIds[0] ?? "",
     rootSessionId: r.rootSessionId,

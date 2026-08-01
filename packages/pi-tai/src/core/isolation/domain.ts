@@ -25,10 +25,14 @@ export type MergeStrategy =
 export type WorkspacePhase =
   /** Directory and jj workspace exist; an agent may be writing. */
   | "active"
+  /** Attachment is gone but the owned changes remain visible and recoverable. */
+  | "detached"
   /** Changes have been folded into the source graph; attachment removed. */
   | "merged"
-  /** Deliberately thrown away. */
-  | "discarded"
+  /** Deliberately thrown away, with a verified abandon receipt. */
+  | "abandoned"
+  /** Neither attachment nor owned changes can be found. */
+  | "missing"
   /** An operation failed midway; needs a human or a `resume`. */
   | "incident";
 
@@ -114,5 +118,5 @@ export interface SweepEntry {
 }
 
 export function isSettled(record: WorkspaceRecord): boolean {
-  return record.phase === "merged" || record.phase === "discarded";
+  return record.phase === "merged" || record.phase === "abandoned";
 }

@@ -198,8 +198,8 @@ export class SQLiteCustodyCoordinator {
       } else {
         if (!heads.length) throw new Error("Abandon requires owned heads");
         for (const head of heads)
-          if (await this.jj.hasDescendants(request.repoRoot, head))
-            throw new Error("Abandon refused: owned head has descendants");
+          if (await this.jj.hasDescendantsOutside(request.repoRoot, head, heads))
+            throw new Error("Abandon refused: owned change has foreign descendants");
         if (request.requestedBy === "scaffold_reclaim")
           await this.proveScaffold(request, row, heads[0]!);
         // JJ refuses to abandon a live working-copy commit.

@@ -65,7 +65,7 @@ test("SQLite adapter exercises metadata, continuation, pending, discard, sweep a
 
   const receipt = await f.manager.discard(child.id);
   assert.equal(receipt.discardedChangeIds.length, 1);
-  assert.equal((await f.manager.get(child.id))?.phase, "discarded");
+  assert.equal((await f.manager.get(child.id))?.phase, "abandoned");
 
   // Reconstruct both port and facade over the same durable database.
   const reopenedPort = new SqliteWorkspaceCustody(f.db);
@@ -77,7 +77,7 @@ test("SQLite adapter exercises metadata, continuation, pending, discard, sweep a
     workspaceRoot: join(f.home, "workspaces"),
     rootSessionId: f.session,
   });
-  assert.equal((await reopened.get(child.id))?.phase, "discarded");
+  assert.equal((await reopened.get(child.id))?.phase, "abandoned");
   const swept = await reopened.sweep(["owner"]);
   assert.ok(swept.some((entry) => entry.id === parent.id));
 });
@@ -128,8 +128,8 @@ test("adapter no_changes reclaims its scaffold and reports the settled record", 
   const workspace = await f.manager.create({ label: "empty" });
   const result = await f.manager.merge(workspace.id);
   assert.equal(result.kind, "no_changes");
-  assert.equal(result.record.phase, "discarded");
-  assert.equal((await f.manager.get(workspace.id))?.phase, "discarded");
+  assert.equal(result.record.phase, "abandoned");
+  assert.equal((await f.manager.get(workspace.id))?.phase, "abandoned");
 });
 
 test("durable Change IDs survive checkout deletion and forgotten JJ attachment", async () => {
