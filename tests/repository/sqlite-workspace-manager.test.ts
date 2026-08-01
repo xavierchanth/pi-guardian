@@ -56,6 +56,18 @@ test("SQLite adapter exercises metadata, continuation, pending, discard, sweep a
   const child = await f.manager.create({ label: "child", parent: parent.id, ownerId: "old" });
   await f.manager.assignOwner(child.id, "owner", "Worker");
   await f.manager.assignParent(child.id, parent.id);
+  assert.deepEqual(
+    f.db
+      .prepare(
+        "SELECT kind,requested_by FROM custody_operation WHERE workspace_id=? AND kind LIKE 'assign_%' ORDER BY started_at, rowid",
+      )
+      .all(child.id)
+      .map((row) => ({ ...(row as { kind: string; requested_by: string }) })),
+    [
+      { kind: "assign_owner", requested_by: "system_spawn" },
+      { kind: "assign_parent", requested_by: "system_spawn" },
+    ],
+  );
   writeFileSync(join(child.path, "work.txt"), "content\n");
   sh(child.path, "describe", "-m", "work");
   assert.equal((await f.manager.pendingChanges(child.id))?.length, 1);

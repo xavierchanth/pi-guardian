@@ -5,7 +5,7 @@ import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../
 import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 export const SCHEMA_SQL_V1 = `
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
@@ -61,16 +61,26 @@ INSERT OR IGNORE INTO migration_ledger(source,digest,state,completed_at,evidence
  FROM quarantine WHERE source='workspaces_json' AND reason IN('migration_completed','migration_unresolved') AND json_valid(evidence) AND json_extract(evidence,'$.sha256') IS NOT NULL;
 CREATE TABLE operation_lease(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,token TEXT NOT NULL,pid INTEGER NOT NULL,pid_start TEXT NOT NULL,heartbeat_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
 `;
+export const SCHEMA_SQL_V6 = `
+CREATE TABLE custody_operation_v6(op_id TEXT PRIMARY KEY,workspace_id TEXT,repo_id TEXT REFERENCES repository(repo_id),kind TEXT NOT NULL CHECK(kind IN('create','assign_owner','assign_parent','merge','finalize_merge','forget','abandon','adopt','rebind_repo','reconcile','import','resolve_incident')),state TEXT NOT NULL CHECK(state IN('intent','jj_applied','committed','failed','unknown')),requested_by TEXT NOT NULL CHECK(requested_by IN('user','model_tool','system_spawn','system_settle','system_reconcile','system_migration','scaffold_reclaim')),pid INTEGER NOT NULL,process_identity TEXT NOT NULL,jj_op_before TEXT,jj_op_after TEXT,target_change_id TEXT,change_ids TEXT,started_at TEXT NOT NULL,heartbeat_at TEXT NOT NULL,settled_at TEXT,evidence TEXT CHECK(evidence IS NULL OR length(evidence)<=8192),CHECK((settled_at IS NULL)=(state IN('intent','jj_applied'))));
+INSERT INTO custody_operation_v6 SELECT * FROM custody_operation;
+DROP TRIGGER trg_no_reconcile_abandon;
+DROP TABLE custody_operation;
+ALTER TABLE custody_operation_v6 RENAME TO custody_operation;
+CREATE INDEX idx_custody_op_live ON custody_operation(state) WHERE state IN('intent','jj_applied','unknown');
+CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (SELECT requested_by FROM custody_operation WHERE op_id=NEW.op_id) IN('system_reconcile','system_migration','system_spawn','system_settle') BEGIN SELECT RAISE(ABORT,'reconciliation may never abandon'); END;
+`;
 export const MIGRATIONS = [
   { version: 1, sql: SCHEMA_SQL_V1 },
   { version: 2, sql: SCHEMA_SQL_V2 },
   { version: 3, sql: SCHEMA_SQL_V3 },
   { version: 4, sql: SCHEMA_SQL_V4 },
   { version: 5, sql: SCHEMA_SQL_V5 },
+  { version: 6, sql: SCHEMA_SQL_V6 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
 export const SCHEMA_SQL =
-  SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4 + SCHEMA_SQL_V5;
+  SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4 + SCHEMA_SQL_V5 + SCHEMA_SQL_V6;
 
 export interface OpenSqliteOptions {
   paths: StoragePaths;

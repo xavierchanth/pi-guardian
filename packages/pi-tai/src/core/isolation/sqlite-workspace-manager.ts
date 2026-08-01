@@ -132,12 +132,12 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     return this.patch(
       id,
       { ownerId, ...(ownerDisplayId ? { ownerDisplayId } : {}) },
-      "owner_metadata",
+      "assign_owner",
       "system_spawn",
     );
   }
   assignParent(id: string, parent: string): Promise<void> {
-    return this.patch(id, { parent }, "parent_metadata", "system_spawn");
+    return this.patch(id, { parent }, "assign_parent", "system_spawn");
   }
 
   merge(id: string, _strategy: MergeStrategy = "auto"): Promise<MergeResult> {
