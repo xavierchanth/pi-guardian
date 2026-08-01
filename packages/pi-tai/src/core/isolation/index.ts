@@ -24,6 +24,8 @@ export {
   type WorkspaceRecord,
 } from "./domain.ts";
 export { exact, exactAny, JjCli } from "./jj.ts";
+export type { WorkspaceManagerPort } from "./workspace-manager-port.ts";
+export { SQLiteWorkspaceManager, type SQLiteWorkspaceManagerOptions } from "./sqlite-workspace-manager.ts";
 export {
   type CreateWorkspaceInput,
   MANAGED_WORKSPACE_PREFIX,

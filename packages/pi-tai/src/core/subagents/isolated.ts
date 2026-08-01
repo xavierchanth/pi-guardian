@@ -1,4 +1,4 @@
-import type { MergeResult, MergeStrategy, WorkspaceManager } from "../isolation/index.ts";
+import type { MergeResult, MergeStrategy, WorkspaceManagerPort } from "../isolation/index.ts";
 import type { SubagentSnapshot } from "./domain.ts";
 import type { SpawnRequest, SubagentManager } from "./manager.ts";
 
@@ -12,7 +12,7 @@ import type { SpawnRequest, SubagentManager } from "./manager.ts";
  */
 export interface IsolatedSubagentsOptions {
   readonly agents: SubagentManager;
-  readonly workspaces: WorkspaceManager;
+  readonly workspaces: WorkspaceManagerPort;
   /** Fallback cwd for non-isolated spawns; normally the user's own working copy. */
   readonly sourcePath: string;
 }
@@ -40,7 +40,7 @@ export interface IsolatedSpawnRequest
 
 export class IsolatedSubagents {
   private readonly agents: SubagentManager;
-  private readonly workspaces: WorkspaceManager;
+  private readonly workspaces: WorkspaceManagerPort;
   private readonly sourcePath: string;
   /** Subagent id → workspace id, for merge/discard after the child settles. */
   private readonly owned = new Map<string, string>();
