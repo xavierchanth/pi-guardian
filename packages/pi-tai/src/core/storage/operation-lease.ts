@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
 export type ProcessState = { state: "dead" | "unknown" } | { state: "live"; start: string };
@@ -22,11 +23,24 @@ export function processState(pid: number): ProcessState {
   } catch (e: any) {
     return e?.code === "ESRCH" ? { state: "dead" } : { state: "unknown" };
   }
+  // Linux exposes an immutable start tick in field 22. Parse after the final
+  // ')' because comm (field 2) may itself contain spaces and parentheses.
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = stat
+      .slice(stat.lastIndexOf(")") + 2)
+      .trim()
+      .split(/\s+/);
+    const start = fields[19];
+    if (start && /^\d+$/.test(start)) return { state: "live", start: `proc:${start}` };
+  } catch {
+    // Non-Linux and restricted procfs fall through to the portable probe.
+  }
   try {
     const start = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
     }).trim();
-    return start ? { state: "live", start } : { state: "unknown" };
+    return start ? { state: "live", start: `ps:${start}` } : { state: "unknown" };
   } catch {
     return { state: "unknown" };
   }

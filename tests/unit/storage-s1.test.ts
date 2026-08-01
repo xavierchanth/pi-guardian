@@ -10,6 +10,10 @@ import type {
 } from "../../packages/pi-tai/src/core/isolation/custody-port.ts";
 import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
 import { migrateWorkspaceRegistry } from "../../packages/pi-tai/src/core/storage/custody-migration.ts";
+import {
+  processState,
+  withOperationLease,
+} from "../../packages/pi-tai/src/core/storage/operation-lease.ts";
 import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
 
@@ -22,6 +26,69 @@ function fixture() {
   const db = openDurableDatabase({ paths });
   return { home, agentDir, source, paths, db };
 }
+test("K5b process identity probes live/dead and free lease permits unprovable self", async () => {
+  assert.equal(processState(process.pid).state, "live");
+  assert.equal(processState(2_147_483_647).state, "dead");
+  const { db } = fixture();
+  let ran = false;
+  await withOperationLease(
+    db,
+    {
+      scope: "free",
+      owner: "me",
+      pidStart: "unprovable",
+      processState: () => ({ state: "unknown" }),
+    },
+    () => {
+      ran = true;
+    },
+  );
+  assert.equal(ran, true);
+  db.close();
+});
+
+test("K5b expired holders are stolen only when dead or PID-reused", async () => {
+  for (const [state, succeeds] of [
+    [{ state: "dead" } as const, true],
+    [{ state: "live", start: "other" } as const, true],
+    [{ state: "live", start: "held" } as const, false],
+    [{ state: "unknown" } as const, false],
+  ] as const) {
+    const { db } = fixture();
+    db.prepare("INSERT INTO operation_lease VALUES(?,?,?,?,?,?,?)").run(
+      "s",
+      "old",
+      "t",
+      42,
+      "held",
+      0,
+      0,
+    );
+    const attempt = withOperationLease(
+      db,
+      { scope: "s", owner: "new", pidStart: "new", waitMs: 0, processState: () => state },
+      () => undefined,
+    );
+    if (succeeds) await attempt;
+    else await assert.rejects(attempt, /Timed out/);
+    db.close();
+  }
+});
+
+test("K5b token-checked release preserves a successor", async () => {
+  const { db } = fixture();
+  await withOperationLease(db, { scope: "s", owner: "old", pidStart: "a" }, () => {
+    db.prepare(
+      "UPDATE operation_lease SET owner='next',token='next',pid_start='b' WHERE scope='s'",
+    ).run();
+  });
+  assert.equal(
+    (db.prepare("SELECT owner FROM operation_lease WHERE scope='s'").get() as any).owner,
+    "next",
+  );
+  db.close();
+});
+
 const valid = [
   {
     version: 2,

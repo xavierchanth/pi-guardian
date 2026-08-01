@@ -1,4 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
 import type { CustodyEvidence, HeadEvidence, RepositoryGrade } from "./custody-reconciler.ts";
@@ -17,18 +18,37 @@ export class CustodyEvidenceCollector {
   }
 
   async collect(record: CustodyRecord, now = new Date().toISOString()): Promise<CustodyEvidence> {
-    const root = await this.jj.repositoryRoot(record.repoRoot);
+    // The workspace path is the relocation producer: after the recorded root
+    // disappears it can still lead JJ to the repository's current root.
+    let root: string;
+    try {
+      root = await this.jj.repositoryRoot(record.repoRoot);
+    } catch (recordedError) {
+      try {
+        root = await this.jj.repositoryRoot(record.path);
+      } catch {
+        throw recordedError;
+      }
+    }
     const roots = await this.jj.repositoryRoots(root);
+    const storeKey = await repositoryStoreKey(root);
     const identity = await this.custody.establishRepository({
       roots: roots.roots,
       rootsTruncated: roots.truncated,
       canonicalRoot: root,
+      ...(storeKey ? { storeKey } : {}),
       now,
     });
+    let recordedRoot: string | undefined;
+    try {
+      recordedRoot = await realpath(record.repoRoot);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+    }
     const repository: RepositoryGrade =
       identity.repoId !== record.repoId
         ? "foreign"
-        : (await realpath(record.repoRoot)) === (await realpath(root)) && root === record.repoRoot
+        : recordedRoot === (await realpath(root)) && root === record.repoRoot
           ? "same"
           : "relocated";
     const names = await this.jj.workspaceNames(root);
@@ -91,6 +111,17 @@ export class CustodyEvidenceCollector {
       mergeReceipt,
     };
   }
+}
+
+async function repositoryStoreKey(root: string): Promise<string | undefined> {
+  for (const candidate of [join(root, ".git"), join(root, ".jj", "repo", "store")]) {
+    try {
+      return await realpath(candidate);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+    }
+  }
+  return undefined;
 }
 
 export type ReconcileScope = { workspaceId?: string; repoId?: string; rootSessionId?: string };
