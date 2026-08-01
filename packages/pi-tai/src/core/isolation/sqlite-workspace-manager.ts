@@ -12,7 +12,7 @@ import type {
   WorkspaceRecord,
 } from "./domain.ts";
 import { JjCli } from "./jj.ts";
-import { MANAGED_WORKSPACE_PREFIX, type CreateWorkspaceInput } from "./manager.ts";
+import { type CreateWorkspaceInput, MANAGED_WORKSPACE_PREFIX } from "./manager.ts";
 import { SQLiteCustodyCoordinator } from "./sqlite-custody-coordinator.ts";
 import type { WorkspaceManagerPort } from "./workspace-manager-port.ts";
 
@@ -144,7 +144,10 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     return this.serial(async () => {
       let r = await this.owned(id);
       if (r.disposition !== "attached")
-        return { kind: "blocked", reason: `Workspace ${r.name} is ${r.disposition}, not active.` };
+        return {
+          kind: "blocked",
+          reason: `Workspace ${r.name} is ${r.disposition}, not active.`,
+        };
       const checkoutPresent = await exists(r.path);
       if (checkoutPresent) {
         const head = await this.jj.changeIdAt(r.path, "@");
@@ -185,25 +188,26 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       const parent = r.parent ? await this.owned(r.parent) : undefined;
       const targetPath = parent?.path ?? this.sourcePath;
       const target = await this.jj.changeIdAt(targetPath, "@");
-      const parents = await this.jj.parentsOfWorkingCopy(targetPath);
-      const strategy =
-        parents.length === 1 && (await this.jj.isEmpty(targetPath, "@")) ? "linear" : "merge-under";
       const done = await this.coordinator.run({
         ...this.request(r),
         kind: r.conflictRetained ? "finalize_merge" : "merge",
         requestedBy: "model_tool",
         targetChangeId: target,
         targetPath,
+        mergeChangeIds: content.map((x) => x.changeId),
       });
-      const conflicts = await this.jj.conflictedPaths(targetPath);
-      const summary = {
-        strategy,
-        changeIds: content.map((x) => x.changeId),
-        conflictPaths: conflicts,
-      } as const;
+      if (!done.merge) throw new Error("Coordinator completed merge without execution evidence");
       if (done.disposition === "attached")
-        return { kind: "retained_conflicts", record: publicRecord(done), summary };
-      return { kind: "merged", record: publicRecord({ ...done, merge: summary }), summary };
+        return {
+          kind: "retained_conflicts",
+          record: publicRecord(done),
+          summary: done.merge,
+        };
+      return {
+        kind: "merged",
+        record: publicRecord(done),
+        summary: done.merge,
+      };
     });
   }
 
@@ -225,7 +229,11 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       // Persist every owned change (including interior and empty changes), not
       // merely graph heads: the verified receipt and public result must agree.
       r = await this.refresh(r, { headChangeIds: exactOwned });
-      await this.coordinator.run({ ...this.request(r), kind: "abandon", requestedBy: "user" });
+      await this.coordinator.run({
+        ...this.request(r),
+        kind: "abandon",
+        requestedBy: "user",
+      });
       return { discardedChangeIds: exactOwned };
     });
   }
@@ -234,7 +242,9 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     return this.serial(async () => {
       const live = new Set(activeOwners),
         out: SweepEntry[] = [];
-      for (const r of await this.port.list({ repoId: (await this.repo()).repoId })) {
+      for (const r of await this.port.list({
+        repoId: (await this.repo()).repoId,
+      })) {
         if (r.rootSessionId !== this.rootSessionId) {
           out.push({
             id: r.id,

@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 import { type ProcessState, processState, withOperationLease } from "../storage/operation-lease.ts";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
+import type { MergeSummary } from "./domain.ts";
 import { exact, JjCli } from "./jj.ts";
 
 export type CustodySagaKind = "create" | "merge" | "finalize_merge" | "forget" | "abandon";
@@ -17,6 +18,8 @@ export interface CustodySagaRequest {
   /** Required for create. */ record?: CustodyRecord;
   /** Exact destination Change ID for merge/finalize_merge. */ targetChangeId?: string;
   /** Durable destination checkout, including a parent managed workspace. */ targetPath?: string;
+  /** Ordered content changes reported by the public merge result. */ mergeChangeIds?: readonly string[];
+  /** Coordinator-written receipt; callers must never supply or predict it. */ actualMerge?: MergeSummary;
 }
 
 /** Stable across retries, including retries in another process. */
@@ -183,7 +186,20 @@ export class SQLiteCustodyCoordinator {
         if (target.kind !== "unique") throw new Error(`Merge target is ${target.kind}`);
         if ((await this.jj.changeIdAt(targetPath, "@")) !== request.targetChangeId)
           throw new Error("Merge target moved; exact target is not this working copy");
-        if (!(await this.jj.areAncestorsOf(targetPath, heads, request.targetChangeId))) {
+        const alreadyAncestor = await this.jj.areAncestorsOf(
+          targetPath,
+          heads,
+          request.targetChangeId,
+        );
+        let strategy: MergeSummary["strategy"] = "merge-under";
+        let simplification: Pick<
+          MergeSummary,
+          "parentSimplification" | "parentSimplificationReason"
+        > = {
+          parentSimplification: "skipped",
+          parentSimplificationReason: "no-redundancy",
+        };
+        if (!alreadyAncestor) {
           const parents = await this.jj.parentsOfWorkingCopy(targetPath);
           const linear = parents.length === 1 && (await this.jj.isEmpty(targetPath, "@"));
           if (linear) {
@@ -192,9 +208,19 @@ export class SQLiteCustodyCoordinator {
             if (await this.jj.hasConflicts(targetPath, `${heads.map(exact).join(" | ")} | @`)) {
               await this.jj.restoreOperation(targetPath, operation);
               await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
-            }
-          } else await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
+              simplification = await this.simplifyMergedParents(targetPath, heads);
+            } else strategy = "linear";
+          } else {
+            await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
+            simplification = await this.simplifyMergedParents(targetPath, heads);
+          }
         }
+        request.actualMerge = {
+          strategy,
+          changeIds: request.mergeChangeIds ?? heads,
+          conflictPaths: await this.jj.conflictedPaths(targetPath),
+          ...simplification,
+        };
       } else {
         if (!heads.length) throw new Error("Abandon requires owned heads");
         for (const head of heads)
@@ -254,9 +280,10 @@ export class SQLiteCustodyCoordinator {
     }
     if (request.kind === "merge" || request.kind === "finalize_merge") {
       const target = request.targetChangeId!;
-      const ancestor = await this.jj.areAncestorsOf(request.repoRoot, heads, target);
-      if (!ancestor) throw new Error("Merge ancestry not proved");
       const targetPath = request.targetPath ?? request.repoRoot;
+      const ancestor = await this.jj.areAncestorsOf(targetPath, heads, target);
+      if (!ancestor) throw new Error("Merge ancestry not proved");
+      if (!request.actualMerge) throw new Error("Merge execution receipt is missing");
       if (await this.jj.hasConflicts(targetPath, exact(target))) {
         this.fault?.("after_receipt", opId);
         const result = await this.port.commit(opId, {
@@ -264,7 +291,11 @@ export class SQLiteCustodyCoordinator {
           ownRootSessionId: request.rootSessionId,
           cause: "merge_conflicts_retained",
           disposition: "attached",
-          patch: { conflictRetained: true, mergedIntoChangeId: target },
+          patch: {
+            conflictRetained: true,
+            mergedIntoChangeId: target,
+            merge: request.actualMerge,
+          },
           now: this.now(),
         });
         this.fault?.("after_commit", opId);
@@ -286,6 +317,7 @@ export class SQLiteCustodyCoordinator {
           mergedProofOp: opId,
           attachmentEvidence: "absent",
           directoryEvidence: "absent",
+          merge: request.actualMerge,
         },
         now: this.now(),
       });
@@ -321,6 +353,54 @@ export class SQLiteCustodyCoordinator {
     });
     this.fault?.("after_commit", opId);
     return result;
+  }
+
+  private async simplifyMergedParents(
+    targetPath: string,
+    heads: readonly string[],
+  ): Promise<Pick<MergeSummary, "parentSimplification" | "parentSimplificationReason">> {
+    try {
+      const target = await this.jj.changeIdAt(targetPath, "@");
+      if (!(await this.jj.hasRedundantParents(targetPath, target)))
+        return {
+          parentSimplification: "skipped",
+          parentSimplificationReason: "no-redundancy",
+        };
+      if (await this.jj.hasDescendants(targetPath, target))
+        return {
+          parentSimplification: "skipped",
+          parentSimplificationReason: "has-descendants",
+        };
+      const before = await this.jj.currentOperationId(targetPath);
+      try {
+        await this.jj.simplifyParents(targetPath, target);
+        const simplified = await this.jj.changeIdAt(targetPath, "@");
+        if (
+          (await this.jj.hasRedundantParents(targetPath, simplified)) ||
+          !(await this.jj.areAncestorsOf(targetPath, heads, simplified))
+        ) {
+          await this.jj.restoreOperation(targetPath, before);
+          return {
+            parentSimplification: "failed",
+            parentSimplificationReason: "postcheck-failed-rolled-back",
+          };
+        }
+        return {
+          parentSimplification: "applied",
+          parentSimplificationReason: "redundant-parents-removed",
+        };
+      } catch {
+        return {
+          parentSimplification: "failed",
+          parentSimplificationReason: "cosmetic-command-failed",
+        };
+      }
+    } catch {
+      return {
+        parentSimplification: "skipped",
+        parentSimplificationReason: "precheck-failed",
+      };
+    }
   }
 
   private async insertCreated(row: CustodyRecord, opId: string): Promise<CustodyRecord> {
@@ -370,6 +450,10 @@ export class SQLiteCustodyCoordinator {
     const range = await this.jj.range(request.repoRoot, row.baseChangeIds, head);
     if (range.length !== 1 || range[0]!.description.trim())
       throw new Error("Scaffold has user description or history");
-    return this.run({ ...request, kind: "abandon", requestedBy: "scaffold_reclaim" });
+    return this.run({
+      ...request,
+      kind: "abandon",
+      requestedBy: "scaffold_reclaim",
+    });
   }
 }

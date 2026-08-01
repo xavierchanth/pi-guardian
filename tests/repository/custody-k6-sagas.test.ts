@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { CustodyRecord } from "../../packages/pi-tai/src/core/isolation/custody-port.ts";
-import {
-  SQLiteCustodyCoordinator,
-  type CustodySagaRequest,
-} from "../../packages/pi-tai/src/core/isolation/sqlite-custody-coordinator.ts";
 import { JjCli } from "../../packages/pi-tai/src/core/isolation/jj.ts";
 import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
+import {
+  type CustodySagaRequest,
+  SQLiteCustodyCoordinator,
+} from "../../packages/pi-tai/src/core/isolation/sqlite-custody-coordinator.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
@@ -323,6 +323,8 @@ test("K6 auto merge-under preserves a dirty target", async () => {
   const result = await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).run(await mergeRequest(f));
   assert.equal(result.disposition, "attached", "conflict retains custody");
   assert.equal(result.conflictRetained, true);
+  assert.equal(result.merge?.strategy, "merge-under");
+  assert.ok(result.merge?.parentSimplification);
   assert.equal(await f.cli.areAncestorsOf(f.root, [f.head], target), true);
   assert.ok(existsSync(f.record.path));
   f.db.close();
@@ -341,6 +343,8 @@ test("K6 merge targets a nested parent workspace", async () => {
   );
   assert.equal(result.disposition, "merged");
   assert.equal(result.conflictRetained, false);
+  assert.equal(result.merge?.strategy, "merge-under");
+  assert.ok(result.merge?.parentSimplification);
   assert.equal(await f.cli.areAncestorsOf(parent, [f.head], target), true);
   f.db.close();
 });
@@ -358,6 +362,7 @@ test("K6 linear conflict restores then falls back, retaining attachment and path
   const result = await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).run(await mergeRequest(f));
   assert.equal(result.disposition, "attached");
   assert.equal(result.conflictRetained, true);
+  assert.equal(result.merge?.strategy, "merge-under", "receipt records conflict fallback");
   assert.ok(existsSync(f.record.path));
   assert.ok(await f.cli.workspaceHead(f.root, f.record.name));
   assert.notDeepEqual(await f.cli.parentsOfWorkingCopy(f.root), parentBefore);
@@ -376,6 +381,8 @@ test("K6 resolved conflict retry proves ancestry then safely detaches", async ()
   assert.equal((await f.cli.conflictedPaths(f.root)).length, 0);
   const result = await coordinator.run({ ...first, kind: "finalize_merge" });
   assert.equal(result.disposition, "merged");
+  assert.equal(result.merge?.strategy, "merge-under", "already-ancestor finalization is receipted");
+  assert.equal(result.merge?.parentSimplificationReason, "no-redundancy");
   assert.equal(await f.cli.areAncestorsOf(f.root, [f.head], first.targetChangeId!), true);
   assert.equal(await f.cli.workspaceHead(f.root, f.record.name), undefined);
   assert.equal(existsSync(f.record.path), false);

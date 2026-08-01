@@ -147,8 +147,9 @@ test("B6-B8 simultaneous processes serialize one atomic retirement/receipt with 
   f.db.close();
   const barrier = join(f.home, "start");
   const childPath = join(process.cwd(), "tests/fixtures/custody-migration-child.mjs");
-  const children = [0, 1].map(() =>
-    spawn(process.execPath, [childPath, f.home, f.agentDir, barrier], {
+  const ready = [join(f.home, "ready-0"), join(f.home, "ready-1")];
+  const children = ready.map((readyPath) =>
+    spawn(process.execPath, [childPath, f.home, f.agentDir, barrier, readyPath], {
       stdio: ["ignore", "pipe", "pipe"],
     }),
   );
@@ -166,6 +167,12 @@ test("B6-B8 simultaneous processes serialize one atomic retirement/receipt with 
         child.on("close", (code) => resolve({ code, out, err }));
       }),
   );
+  const readinessDeadline = Date.now() + 30_000;
+  while (!ready.every(existsSync)) {
+    if (Date.now() >= readinessDeadline)
+      throw new Error("migration children failed to become ready");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
   writeFileSync(barrier, "go");
   const results = await Promise.all(completed);
   assert.deepEqual(

@@ -106,7 +106,10 @@ test("adapter reopens and recovers create after every coordinator crash boundary
       workspaceRoot: join(f.home, "workspaces"),
       rootSessionId: f.session,
     });
-    await assert.rejects(() => crashing.create({ label: boundary }), new RegExp(`crash:${boundary}`));
+    await assert.rejects(
+      () => crashing.create({ label: boundary }),
+      new RegExp(`crash:${boundary}`),
+    );
     const reopenedPort = new SqliteWorkspaceCustody(f.db);
     const recovery = new SQLiteCustodyCoordinator(f.db, reopenedPort, f.jj);
     const result = await recovery.recover();
@@ -140,9 +143,10 @@ test("durable Change IDs survive checkout deletion and forgotten JJ attachment",
   await f.manager.resolveCustody(workspace.id); // persist the actual owned head
   sh(f.source, "workspace", "forget", workspace.name);
   rmSync(workspace.path, { recursive: true, force: true });
-  assert.deepEqual((await f.manager.pendingChanges(workspace.id))?.map((x) => x.description), [
-    "survives deletion",
-  ]);
+  assert.deepEqual(
+    (await f.manager.pendingChanges(workspace.id))?.map((x) => x.description),
+    ["survives deletion"],
+  );
   assert.equal((await f.manager.merge(workspace.id)).kind, "merged");
 });
 
@@ -177,7 +181,9 @@ test("multiple independent owned heads and nested parent workspace merge through
   writeFileSync(join(child.path, "nested.txt"), "nested\n");
   sh(child.path, "describe", "-m", "nested child");
   assert.equal((await f.manager.merge(child.id)).kind, "merged");
-  assert.ok((await f.manager.pendingChanges(parent.id))?.some((x) => x.description.includes("nested")));
+  assert.ok(
+    (await f.manager.pendingChanges(parent.id))?.some((x) => x.description.includes("nested")),
+  );
 });
 
 test("SQLite adapter serializes duplicate settlement and refuses foreign-root mutation", async () => {
