@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
-import { currentProcessStart, withOperationLease } from "../storage/operation-lease.ts";
+import {
+  type ProcessState,
+  processState,
+  withOperationLease,
+} from "../storage/operation-lease.ts";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
 import { exact, JjCli } from "./jj.ts";
 
@@ -44,6 +48,7 @@ export class SQLiteCustodyCoordinator {
   private readonly processIdentity: string;
   private readonly now: () => string;
   private readonly fault?: (boundary: CustodyCrashBoundary, opId: string) => void;
+  private readonly processState: (pid: number) => ProcessState;
   constructor(
     db: DatabaseSync,
     port: WorkspaceCustodyPort,
@@ -51,6 +56,7 @@ export class SQLiteCustodyCoordinator {
     processIdentity = `${process.pid}:custody`,
     now = () => new Date().toISOString(),
     fault?: (boundary: CustodyCrashBoundary, opId: string) => void,
+    processStateProbe: (pid: number) => ProcessState = processState,
   ) {
     this.db = db;
     this.port = port;
@@ -58,6 +64,7 @@ export class SQLiteCustodyCoordinator {
     this.processIdentity = processIdentity;
     this.now = now;
     this.fault = fault;
+    this.processState = processStateProbe;
   }
 
   async run(request: CustodySagaRequest): Promise<CustodyRecord> {
@@ -131,13 +138,19 @@ export class SQLiteCustodyCoordinator {
   }
 
   private leased<T>(repoId: string, operation: () => Promise<T>): Promise<T> {
+    // As with migration, acquiring a free lease needs no proof of self. The
+    // sentinel can own/renew that lease, while takeover still probes the prior
+    // owner and remains fail-closed on unknown liveness.
+    const self = this.processState(process.pid);
+    const pidStart = self.state === "live" ? self.start : "unprovable";
     return withOperationLease(
       this.db,
       {
         scope: `custody:${repoId}`,
         owner: this.processIdentity,
-        pidStart: currentProcessStart(),
+        pidStart,
         waitMs: 30_000,
+        processState: this.processState,
       },
       operation,
     );

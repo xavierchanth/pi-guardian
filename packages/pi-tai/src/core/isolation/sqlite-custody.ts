@@ -90,29 +90,18 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
     this.clock = clock;
   }
   async establishRepository(e: RepositoryEvidence): Promise<RepositoryIdentity> {
-    if (!e.canonicalRoot.startsWith("/") || (!e.storeKey && !e.roots.length))
-      throw new Error("Repository identity requires a canonical root and durable JJ evidence");
+    if (!e.canonicalRoot.startsWith("/") || !e.storeKey)
+      throw new Error("Repository identity is unprovable without filesystem store identity");
     const roots = [...new Set(e.roots)];
     if (roots.some((id) => !/^[k-z]{4,64}$/.test(id)))
       throw new Error("Invalid repository root Change ID");
     roots.sort();
-    // Store identity is authoritative and path independent.  Root evidence is
-    // deliberately graded by overlap/containment: ordinary history growth must
-    // never manufacture a second repository merely because its root set grew.
-    const candidates = this.db
-      .prepare("SELECT * FROM repository WHERE identity_proven=1")
-      .all() as Record<string, unknown>[];
-    const input = new Set(roots);
-    const matches = candidates.filter((row) => {
-      if (e.storeKey && row.store_key !== null && String(row.store_key) === e.storeKey) return true;
-      // A colocated store's canonical path changes when the whole repository is
-      // moved. Root ancestry remains path-independent relocation evidence.
-      const prior = new Set<string>((JSON.parse(String(row.fingerprint))?.roots ?? []) as string[]);
-      const overlap = [...input].some((id) => prior.has(id));
-      const contained =
-        [...input].every((id) => prior.has(id)) || [...prior].every((id) => input.has(id));
-      return overlap || contained;
-    });
+    // Filesystem store identity is authoritative. In particular, an explicit
+    // mismatch must never fall through to common root-history evidence: clones
+    // commonly have identical roots.
+    const matches = this.db
+      .prepare("SELECT * FROM repository WHERE identity_proven=1 AND store_key=?")
+      .all(e.storeKey) as Record<string, unknown>[];
     if (matches.length > 1) throw new Error("Ambiguous repository identity evidence");
     const matched = matches[0];
     const fingerprint = JSON.stringify({

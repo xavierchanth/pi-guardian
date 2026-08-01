@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, renameSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { repositoryStoreKey } from "../../packages/pi-tai/src/core/isolation/custody-evidence.ts";
 import { JjCli } from "../../packages/pi-tai/src/core/isolation/jj.ts";
 import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
@@ -26,7 +27,7 @@ async function collect(jj: JjCli, root: string) {
     roots: evidence.roots,
     rootsTruncated: evidence.truncated,
     canonicalRoot: await jj.repositoryRoot(root),
-    storeKey: realpathSync(join(root, ".git")),
+    storeKey: await repositoryStoreKey(root),
     now: "2026-02-01",
   };
 }
@@ -42,6 +43,14 @@ test("K5b collector baseline is stable for same repository and unique across rep
   assert.equal((await port.establishRepository(await collect(j, a))).repoId, first.repoId);
   assert.notEqual((await port.establishRepository(await collect(j, b))).repoId, first.repoId);
   db.close();
+});
+
+test("K5b linked JJ workspaces use their shared repository store identity", async () => {
+  const home = mkdtempSync(join(tmpdir(), "pitai-k5b-linked-"));
+  const root = repo(home, "root");
+  const linked = join(home, "linked");
+  run(root, "workspace", "add", linked, "--name", "linked");
+  assert.equal(await repositoryStoreKey(root), await repositoryStoreKey(linked));
 });
 
 test("K5b collector keeps identity across root growth, multiple heads, and relocation", async () => {

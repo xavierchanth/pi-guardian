@@ -149,6 +149,37 @@ for (const kind of ["create", "forget", "abandon", "merge"] as const) {
   }
 }
 
+test("K6 unknown self acquires a free coordinator lease and recovers a saga", async () => {
+  const f = await fixture();
+  let crashed = false;
+  const intent = new SQLiteCustodyCoordinator(
+    f.db,
+    f.port,
+    f.cli,
+    "intent",
+    () => now,
+    (at) => {
+      if (!crashed && at === "after_intent") {
+        crashed = true;
+        throw new Error("crash");
+      }
+    },
+  );
+  await assert.rejects(intent.run(request(f, "forget")), /crash/);
+  const unknownSelf = new SQLiteCustodyCoordinator(
+    f.db,
+    f.port,
+    f.cli,
+    "unknown-self",
+    () => now,
+    undefined,
+    () => ({ state: "unknown" }),
+  );
+  assert.equal((await unknownSelf.recover(f.record.repoId)).recovered.length, 1);
+  assert.equal((await f.port.get("worker"))!.disposition, "detached");
+  f.db.close();
+});
+
 test("K6 scaffold mutation after intent is retained and recovery continues after a failed op", async () => {
   const f = await fixture();
   const coordinator = new SQLiteCustodyCoordinator(

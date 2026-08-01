@@ -1,5 +1,5 @@
-import { realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
 import type { CustodyEvidence, HeadEvidence, RepositoryGrade } from "./custody-reconciler.ts";
@@ -114,9 +114,28 @@ export class CustodyEvidenceCollector {
 }
 
 export async function repositoryStoreKey(root: string): Promise<string | undefined> {
-  for (const candidate of [join(root, ".git"), join(root, ".jj", "repo", "store")]) {
+  // JJ linked workspaces point .jj/repo at their shared repository. Prefer it
+  // over the colocated Git marker so every workspace gets the intended store.
+  for (const marker of [join(root, ".jj", "repo"), join(root, ".git")]) {
     try {
-      return await realpath(candidate);
+      let target = marker;
+      const markerStat = await stat(marker);
+      if (markerStat.isFile()) {
+        const content = (await readFile(marker, "utf8")).trim();
+        const reference = marker.endsWith(".git")
+          ? /^gitdir:\s*(.+?)\s*$/im.exec(content)?.[1]
+          : content;
+        if (!reference) return undefined;
+        target = isAbsolute(reference) ? reference : resolve(dirname(marker), reference);
+      }
+      const canonical = await realpath(target);
+      const identity = await stat(canonical, { bigint: true });
+      // POSIX dev+ino survives a same-filesystem rename and differs for clones.
+      // Some platforms report no useful inode; canonical path is the explicit
+      // conservative fallback (move-unstable, but incapable of clone collapse).
+      if (identity.ino !== 0n)
+        return `fs:v1:${identity.dev.toString(16)}:${identity.ino.toString(16)}`;
+      return `path:v1:${canonical}`;
     } catch (error: any) {
       if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
     }

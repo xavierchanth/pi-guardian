@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -12,7 +12,16 @@ import {
 test("K5b storeKey is populated from a colocated Git store", async () => {
   const root = mkdtempSync(join(tmpdir(), "pitai-store-key-"));
   mkdirSync(join(root, ".git"));
-  assert.equal(await repositoryStoreKey(root), realpathSync(join(root, ".git")));
+  const key = await repositoryStoreKey(root);
+  assert.match(key!, /^fs:v1:/);
+  const moved = `${root}-moved`;
+  renameSync(root, moved);
+  assert.equal(await repositoryStoreKey(moved), key);
+});
+
+test("K5b unavailable store identity is explicit rather than history fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pitai-no-store-"));
+  assert.equal(await repositoryStoreKey(root), undefined);
 });
 
 test("K5b hook facade keeps dashboard SQLite-only, throttles, forces, and reports dropped diagnostics", async () => {
