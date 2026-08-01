@@ -299,7 +299,7 @@ export class SqliteWorkspaceCustody implements WorkspaceCustodyPort {
         .get(opId) as { state: string; workspace_id: string | null } | undefined;
       if (
         !operation ||
-        operation.state !== "intent" ||
+        !["intent", "jj_applied"].includes(operation.state) ||
         (operation.workspace_id && operation.workspace_id !== m.workspaceId)
       )
         throw new Error("Custody operation is not an applicable intent");
