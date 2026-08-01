@@ -134,9 +134,11 @@ requested result ready at that moment, and identifies those still running; call 
 remaining ids to collect staggered completions. Returned results (and only those results) are
 consumed so they are not also auto-delivered. Already-finished ids return immediately.
 
-At most four subagents run at once. The reservation is taken synchronously before the
+At most 24 subagents run at once. The reservation is taken synchronously before the
 first await, so several tool calls in one assistant turn cannot all observe a free
-slot and race past the cap.
+slot and race past the cap. Durable subagent identity is retained up to a hard
+1,024-record safety ceiling, while at most 256 safely-evictable records are kept
+resident in memory. Undelivered results and live workspace custody are never evicted.
 
 ## Tools
 

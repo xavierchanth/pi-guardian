@@ -147,6 +147,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     let isolated!: IsolatedSubagents;
     const agents = new SubagentManager({
       registry: new BackendRegistry(backends),
+      rootSessionId: ctx.sessionManager.getSessionId(),
       // Injected workspace managers are repository-test harnesses without a Pi
       // journal. Real composition fails closed when lifecycle persistence is absent.
       requireLifecycleStore: !dependencies.workspaces,
@@ -666,7 +667,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     // idle, which would strand a finished subagent's result until the next turn.
     if (!runtime) return;
     const { agents } = await runtime;
-    const results = agents.delivery.drain();
+    const results = agents.drainDelivery();
     if (typeof pi.sendMessage !== "function") return;
     for (const result of results) {
       const snapshot = agents.get(result.id);

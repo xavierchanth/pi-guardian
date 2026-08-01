@@ -70,7 +70,11 @@ export type SubagentEvent =
       readonly outputTokens: number;
       readonly contextWindow?: number;
     }
-  | { readonly type: "meta"; readonly model?: string; readonly contextWindow?: number }
+  | {
+      readonly type: "meta";
+      readonly model?: string;
+      readonly contextWindow?: number;
+    }
   | {
       readonly type: "run_settled";
       readonly outcome: RunOutcome;
@@ -113,6 +117,10 @@ export interface SubagentSnapshot {
     readonly contextWindow?: number;
   };
   readonly liveTools: readonly LiveTool[];
+  /** Presentation projection; authority remains DeferredResultDelivery. */
+  readonly deliveryPending?: boolean;
+  /** Unresolved custody incident; protected from residency eviction. */
+  readonly attention?: boolean;
 }
 
 /** Error text is bounded so one broken child cannot flood the parent's context. */
@@ -194,7 +202,11 @@ export function applyEvent(
         liveTools: snapshot.liveTools.map(
           (tool, index, all): LiveTool =>
             index === all.length - 1 && tool.state === "running"
-              ? { ...tool, state, ...(event.preview ? { preview: event.preview } : {}) }
+              ? {
+                  ...tool,
+                  state,
+                  ...(event.preview ? { preview: event.preview } : {}),
+                }
               : tool,
         ),
       };
@@ -206,7 +218,9 @@ export function applyEvent(
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           ...((event.contextWindow ?? snapshot.usage.contextWindow)
-            ? { contextWindow: event.contextWindow ?? snapshot.usage.contextWindow }
+            ? {
+                contextWindow: event.contextWindow ?? snapshot.usage.contextWindow,
+              }
             : {}),
         },
       };

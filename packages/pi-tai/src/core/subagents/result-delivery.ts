@@ -25,6 +25,10 @@ export class DeferredResultDelivery {
     return result;
   }
 
+  isPending(id: string): boolean {
+    return this.pending.has(id);
+  }
+
   /** Takes everything pending, in settle order. */
   drain(): DeferredResult[] {
     const results = [...this.pending.values()];

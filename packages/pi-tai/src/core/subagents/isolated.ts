@@ -58,6 +58,8 @@ export class IsolatedSubagents {
    * the pairing that keeps a failed launch from leaking an attachment.
    */
   async spawn(request: IsolatedSpawnRequest): Promise<SubagentSnapshot> {
+    // Cost optimisation only; manager.spawn remains the authoritative recheck.
+    this.agents.assertAdmission();
     const { isolation, systemPrompt, continueFrom, parent, ...rest } = request;
     const render = (cwd: string) =>
       typeof systemPrompt === "function" ? systemPrompt(cwd) : systemPrompt;

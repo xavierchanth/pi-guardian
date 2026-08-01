@@ -26,12 +26,23 @@ export {
 } from "./domain.ts";
 export {
   MAX_RUNNING_SUBAGENTS,
+  MAX_UNARCHIVED_RECORDS,
+  MAX_DURABLE_RECORDS,
+  MAX_RESIDENT_SUBAGENTS,
   MAX_TRACKED_SUBAGENTS,
+  SubagentCapacityError,
   SubagentManager,
+  type CapacityKind,
+  type CapacityReport,
   type SpawnRequest,
   type SubagentManagerOptions,
 } from "./manager.ts";
 export { DeferredResultDelivery, type DeferredResult } from "./result-delivery.ts";
+export {
+  SubagentRecordIndex,
+  type DurableRecordSummary,
+  type RecordCounts,
+} from "./records.ts";
 export {
   IsolatedSubagents,
   type IsolatedSpawnRequest,

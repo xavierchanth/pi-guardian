@@ -14,6 +14,7 @@ export type LifecycleEvent =
       backend: BackendName;
       title: string;
       cwd: string;
+      rootSessionId?: string;
       at: string;
     }
   | {
@@ -22,7 +23,10 @@ export type LifecycleEvent =
       durableId: string;
       generation: number;
       at: string;
-      resumeHandle?: { kind: "pi_session_file" | "claude_session" | "codex_thread"; value: string };
+      resumeHandle?: {
+        kind: "pi_session_file" | "claude_session" | "codex_thread";
+        value: string;
+      };
     }
   | {
       version: 1;
@@ -41,6 +45,9 @@ export interface LifecycleRecord {
   readonly backend: BackendName;
   readonly title: string;
   readonly cwd: string;
+  readonly rootSessionId?: string;
+  readonly archivedAt?: string;
+  readonly archivedBy?: "user" | "auto_done";
   readonly disposition: "intent" | "running" | "done" | "failed" | "interrupted";
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -82,6 +89,7 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
         backend: event.backend,
         title: event.title,
         cwd: event.cwd,
+        ...(event.rootSessionId ? { rootSessionId: event.rootSessionId } : {}),
         disposition: "intent",
         createdAt: event.at,
         updatedAt: event.at,
@@ -136,7 +144,8 @@ function isEvent(value: unknown): value is LifecycleEvent {
       Number.isInteger(e.sequence) &&
       (e.backend === "pi" || e.backend === "claude" || e.backend === "codex") &&
       typeof e.title === "string" &&
-      typeof e.cwd === "string"
+      typeof e.cwd === "string" &&
+      (e.rootSessionId === undefined || typeof e.rootSessionId === "string")
     );
   if (e.type === "running")
     return (
@@ -166,7 +175,12 @@ export class PiBranchLifecycleStore implements SubagentLifecycleStore {
   async load(): Promise<readonly unknown[]> {
     const branch = this.sessionManager.getBranch?.() ?? [];
     return branch.flatMap((entry) => {
-      const e = entry as { type?: string; customType?: string; data?: unknown; details?: unknown };
+      const e = entry as {
+        type?: string;
+        customType?: string;
+        data?: unknown;
+        details?: unknown;
+      };
       if (e.customType === SUBAGENT_LIFECYCLE_ENTRY || e.type === SUBAGENT_LIFECYCLE_ENTRY)
         return [e.data ?? e.details];
       return [];

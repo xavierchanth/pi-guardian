@@ -16,9 +16,39 @@ import {
 } from "./domain.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
 import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
+import { SubagentRecordIndex } from "./records.ts";
 
-export const MAX_RUNNING_SUBAGENTS = 4;
-export const MAX_TRACKED_SUBAGENTS = 64;
+export const MAX_RUNNING_SUBAGENTS = 24;
+export const MAX_UNARCHIVED_RECORDS = 128;
+export const MAX_DURABLE_RECORDS = 1024;
+export const MAX_RESIDENT_SUBAGENTS = 256;
+/** @deprecated Use MAX_RESIDENT_SUBAGENTS. */
+export const MAX_TRACKED_SUBAGENTS = MAX_RESIDENT_SUBAGENTS;
+
+export type CapacityKind = "running" | "unarchived" | "durable";
+export class SubagentCapacityError extends Error {
+  readonly kind: CapacityKind;
+  constructor(kind: CapacityKind, message: string) {
+    super(message);
+    this.kind = kind;
+    this.name = "SubagentCapacityError";
+  }
+}
+
+export interface CapacityReport {
+  readonly running: number;
+  readonly maxRunning: number;
+  readonly unarchived: number;
+  readonly maxUnarchived: number;
+  readonly archived: number;
+  readonly inherited: number;
+  readonly durable: number;
+  readonly maxDurable: number;
+  readonly resident: number;
+  readonly maxResident: number;
+  readonly archiveEnforced: boolean;
+  readonly orphanReservations: number;
+}
 
 export interface SpawnRequest {
   readonly backend: BackendName;
@@ -43,7 +73,12 @@ export interface WaitResult {
 export interface SubagentManagerOptions {
   readonly registry: BackendRegistry;
   readonly maxRunning?: number;
+  readonly maxUnarchived?: number;
+  readonly maxDurable?: number;
+  readonly maxResident?: number;
+  /** @deprecated Use maxResident. */
   readonly maxTracked?: number;
+  readonly rootSessionId?: string;
   readonly now?: () => string;
   /**
    * Called once per subagent when it reaches a terminal state, before the result
@@ -88,7 +123,11 @@ export interface SendReceipt {
 export class SubagentManager {
   private readonly registry: BackendRegistry;
   private readonly maxRunning: number;
-  private readonly maxTracked: number;
+  private readonly maxUnarchived: number;
+  private readonly maxDurable: number;
+  private readonly maxResident: number;
+  private readonly rootSessionId?: string;
+  private readonly records: SubagentRecordIndex;
   private readonly clock: () => string;
   private readonly onSettled?: (snapshot: SubagentSnapshot) => void | Promise<void>;
   private readonly entries = new Map<string, Entry>();
@@ -109,7 +148,11 @@ export class SubagentManager {
   constructor(options: SubagentManagerOptions) {
     this.registry = options.registry;
     this.maxRunning = options.maxRunning ?? MAX_RUNNING_SUBAGENTS;
-    this.maxTracked = options.maxTracked ?? MAX_TRACKED_SUBAGENTS;
+    this.maxUnarchived = options.maxUnarchived ?? MAX_UNARCHIVED_RECORDS;
+    this.maxDurable = options.maxDurable ?? MAX_DURABLE_RECORDS;
+    this.maxResident = options.maxResident ?? options.maxTracked ?? MAX_RESIDENT_SUBAGENTS;
+    this.rootSessionId = options.rootSessionId;
+    this.records = new SubagentRecordIndex(options.rootSessionId);
     this.clock = options.now ?? (() => new Date().toISOString());
     if (options.onSettled) this.onSettled = options.onSettled;
     if (options.lifecycleStore) this.lifecycleStore = options.lifecycleStore;
@@ -121,6 +164,7 @@ export class SubagentManager {
     this.lifecycleStore = store;
     const folded = foldLifecycle(await store.load());
     this.sequence = Math.max(this.sequence, folded.maxSequence);
+    this.records.ingest(folded.records.values());
     for (const record of folded.records.values()) {
       if ([...this.entries.values()].some((entry) => entry.snapshot.durableId === record.durableId))
         continue;
@@ -190,17 +234,45 @@ export class SubagentManager {
     return [...this.entries.values()].filter((entry) => entry.snapshot.status === "running").length;
   }
 
+  capacity(): CapacityReport {
+    const counts = this.records.counts();
+    return {
+      running: this.reserved,
+      maxRunning: this.maxRunning,
+      unarchived: counts.unarchived,
+      maxUnarchived: this.maxUnarchived,
+      archived: counts.archived,
+      inherited: counts.inherited,
+      durable: counts.total,
+      maxDurable: this.maxDurable,
+      resident: this.entries.size,
+      maxResident: this.maxResident,
+      archiveEnforced: false,
+      orphanReservations: 0,
+    };
+  }
+
+  /** Advisory only: spawn performs the same check before its reservation. */
+  assertAdmission(): void {
+    if (this.reserved >= this.maxRunning)
+      throw new SubagentCapacityError(
+        "running",
+        `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
+      );
+    if (this.records.counts().total >= this.maxDurable)
+      throw new SubagentCapacityError(
+        "durable",
+        `This session has reached its durable subagent record ceiling (${this.maxDurable}). Start a new session to continue delegating; existing records, reports, and workspaces are untouched.`,
+      );
+  }
+
   /** Bounded diagnostics for optional lifecycle writes that failed after spawn. */
   get lifecyclePersistenceErrors(): readonly string[] {
     return this.persistenceErrors;
   }
 
   async spawn(request: SpawnRequest): Promise<SubagentSnapshot> {
-    if (this.reserved >= this.maxRunning) {
-      throw new Error(
-        `At most ${this.maxRunning} subagents may run at once; wait for one to finish.`,
-      );
-    }
+    this.assertAdmission();
     this.reserved += 1;
     const id = `sa-${++this.sequence}`;
     const durableId = randomUUID();
@@ -220,7 +292,16 @@ export class SubagentManager {
         backend: request.backend,
         title: request.title,
         cwd: request.cwd,
+        ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
         at: this.clock(),
+      });
+      const createdAt = this.clock();
+      this.records.note({
+        durableId,
+        displayId: id,
+        ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
+        disposition: "intent",
+        updatedAt: createdAt,
       });
       const backend = await this.registry.require(request.backend);
       const abort = new AbortController();
@@ -237,7 +318,7 @@ export class SubagentManager {
           cwd: request.cwd,
           ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
           ...(request.capability ? { capability: request.capability } : {}),
-          createdAt: this.clock(),
+          createdAt,
         }),
         settled,
         resolveSettled,
@@ -285,7 +366,10 @@ export class SubagentManager {
               durableId,
               generation: entry.generation,
               at: this.clock(),
-              resumeHandle: { kind: "pi_session_file", value: entry.session.sessionFile },
+              resumeHandle: {
+                kind: "pi_session_file",
+                value: entry.session.sessionFile,
+              },
             })
             .catch((error) => this.recordPersistenceError(error));
         }
@@ -321,8 +405,17 @@ export class SubagentManager {
       const settled = snapshots.filter((snapshot) => snapshot.status !== "running");
       const pending = snapshots.filter((snapshot) => snapshot.status === "running");
       // No await is permitted between this status snapshot and consumption.
-      for (const snapshot of settled) this.delivery.consume(snapshot.id);
-      return { settled, pending, reason };
+      for (const snapshot of settled) {
+        this.delivery.consume(snapshot.id);
+        const entry = this.entries.get(snapshot.id);
+        if (entry?.snapshot.deliveryPending)
+          this.update(entry, { ...entry.snapshot, deliveryPending: false });
+      }
+      return {
+        settled: settled.map((snapshot) => this.entries.get(snapshot.id)!.snapshot),
+        pending,
+        reason,
+      };
     };
     if (interruption?.aborted) return collect("user-interrupted");
     if (unique.some((id) => this.entries.get(id)!.snapshot.status !== "running"))
@@ -447,11 +540,11 @@ export class SubagentManager {
   /** Starts a follow-up run in place, reusing the entry so the id stays stable. */
   private async resume(entry: Entry, text: string, resumeToken: string): Promise<void> {
     if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} is closed and cannot resume.`);
-    if (this.reserved >= this.maxRunning) {
-      throw new Error(
-        `At most ${this.maxRunning} subagents may run at once; wait for one to finish.`,
+    if (this.reserved >= this.maxRunning)
+      throw new SubagentCapacityError(
+        "running",
+        `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
       );
-    }
     this.reserved += 1;
     const task: SpawnTask = { ...entry.task, prompt: text, resumeToken };
     let session: SubagentSession | undefined;
@@ -466,7 +559,12 @@ export class SubagentManager {
         generation: entry.generation,
         at: this.clock(),
         ...(session.sessionFile
-          ? { resumeHandle: { kind: "pi_session_file" as const, value: session.sessionFile } }
+          ? {
+              resumeHandle: {
+                kind: "pi_session_file" as const,
+                value: session.sessionFile,
+              },
+            }
           : {}),
       });
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
@@ -484,7 +582,12 @@ export class SubagentManager {
       resolveSettled = resolve;
     });
     Object.assign(entry, { settled, resolveSettled });
-    this.update(entry, { ...entry.snapshot, status: "running", latestText: "", liveTools: [] });
+    this.update(entry, {
+      ...entry.snapshot,
+      status: "running",
+      latestText: "",
+      liveTools: [],
+    });
     this.delivery.consume(entry.snapshot.id);
     void this.pump(entry, session);
   }
@@ -574,8 +677,21 @@ export class SubagentManager {
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
     // consume this result, which it can only do once it exists.
-    this.delivery.defer({ id: snapshot.id, text: snapshot.finalText || snapshot.errorText || "" });
-    entry.resolveSettled(snapshot);
+    this.delivery.defer({
+      id: snapshot.id,
+      text: snapshot.finalText || snapshot.errorText || "",
+    });
+    this.update(entry, { ...entry.snapshot, deliveryPending: true });
+    this.records.note({
+      ...(this.records.get(snapshot.durableId) ?? {
+        durableId: snapshot.durableId,
+        displayId: snapshot.id,
+        updatedAt: snapshot.createdAt,
+      }),
+      disposition,
+      updatedAt: this.clock(),
+    });
+    entry.resolveSettled(entry.snapshot);
     // The hook runs after settlement so a slow or broken workspace reclaim
     // cannot stall the parent's `wait`.
     void Promise.resolve(this.onSettled?.(snapshot)).catch(() => {});
@@ -597,16 +713,38 @@ export class SubagentManager {
     return entry;
   }
 
-  /** Drops the oldest settled entries once the tracked set outgrows its bound. */
+  /** Drains deferred results and clears their presentation projection. */
+  drainDelivery() {
+    const results = this.delivery.drain();
+    for (const result of results) {
+      const entry = this.entries.get(result.id);
+      if (entry?.snapshot.deliveryPending)
+        this.update(entry, { ...entry.snapshot, deliveryPending: false });
+    }
+    return results;
+  }
+
+  /** Drops only safely delivered settled records; durable counts are unaffected. */
   private prune(): void {
-    if (this.entries.size <= this.maxTracked) return;
-    for (const [id, entry] of this.entries) {
-      if (this.entries.size <= this.maxTracked) break;
-      if (entry.snapshot.status === "running") continue;
+    if (this.entries.size <= this.maxResident) return;
+    const candidates = [...this.entries.entries()]
+      .filter(
+        ([, entry]) =>
+          entry.snapshot.status !== "running" &&
+          !this.delivery.isPending(entry.snapshot.id) &&
+          !entry.snapshot.attention &&
+          entry.snapshot.workspaceId === undefined,
+      )
+      .sort(([, a], [, b]) =>
+        (a.snapshot.settledAt ?? a.snapshot.createdAt).localeCompare(
+          b.snapshot.settledAt ?? b.snapshot.createdAt,
+        ),
+      );
+    for (const [id, entry] of candidates) {
+      if (this.entries.size <= this.maxResident) break;
       entry.closed = true;
       entry.session?.dispose();
       this.entries.delete(id);
-      // Durable pending delivery is not consumed by an in-memory eviction.
     }
   }
 }
