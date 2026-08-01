@@ -129,6 +129,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         registry: new FileWorkspaceRegistry(stateRoot),
         sourcePath: ctx.cwd,
         workspaceRoot: join(stateRoot, "workspaces"),
+        rootSessionId: ctx.sessionManager.getSessionId(),
       });
     const backends: SubagentBackend[] = [
       new PiBackend({

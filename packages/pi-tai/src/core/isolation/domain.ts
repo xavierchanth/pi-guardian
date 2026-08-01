@@ -33,7 +33,7 @@ export type WorkspacePhase =
   | "incident";
 
 export interface WorkspaceRecord {
-  readonly version: 1;
+  readonly version: 2;
   readonly id: WorkspaceId;
   readonly name: string;
   readonly path: string;
@@ -43,8 +43,12 @@ export interface WorkspaceRecord {
   readonly baseChangeIds: readonly string[];
   /** Change id of the workspace's own working copy at creation. */
   readonly rootChangeId: string;
-  /** Owner label, normally the subagent id that the workspace was created for. */
-  readonly owner?: string;
+  /** Opaque lifecycle identity used for authority decisions. */
+  readonly ownerId?: string;
+  /** Human-facing label only; never authority (display ids repeat across roots). */
+  readonly ownerDisplayId?: string;
+  /** Durable Pi root session which exclusively owns this custody record. */
+  readonly rootSessionId: string;
   /**
    * Workspace this one branches from and merges back into.
    *
@@ -83,6 +87,8 @@ export interface MergeSummary {
 
 export type MergeResult =
   | { readonly kind: "merged"; readonly record: WorkspaceRecord; readonly summary: MergeSummary }
+  /** Target now contains conflicts; source custody is deliberately retained. */
+  | { readonly kind: "retained_conflicts"; readonly record: WorkspaceRecord; readonly summary: MergeSummary }
   /** The agent produced nothing; the workspace was removed rather than merged. */
   | { readonly kind: "no_changes"; readonly record: WorkspaceRecord }
   /** Refused before mutating anything; `reason` explains what the caller must fix. */

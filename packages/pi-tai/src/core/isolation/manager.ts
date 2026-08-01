@@ -23,13 +23,16 @@ export interface WorkspaceManagerOptions {
   readonly sourcePath: string;
   /** Directory that holds managed workspace checkouts, outside the repository. */
   readonly workspaceRoot: string;
+  /** Durable identity of the current top-level Pi session. */
+  readonly rootSessionId?: string;
   readonly now?: () => string;
 }
 
 export interface CreateWorkspaceInput {
   /** Short slug used to build the workspace name; defaults to a random suffix. */
   readonly label?: string;
-  readonly owner?: string;
+  readonly ownerId?: string;
+  readonly ownerDisplayId?: string;
   /** Branch from this workspace instead of the user's working copy. */
   readonly parent?: WorkspaceId;
 }
@@ -47,6 +50,7 @@ export class WorkspaceManager {
   private readonly sourcePath: string;
   private readonly workspaceRoot: string;
   private readonly clock: () => string;
+  private readonly rootSessionId: string;
   /** Serialises graph mutations; jj rejects concurrent writes to one repo. */
   private mutations: Promise<unknown> = Promise.resolve();
 
@@ -55,6 +59,8 @@ export class WorkspaceManager {
     this.registry = options.registry;
     this.sourcePath = options.sourcePath;
     this.workspaceRoot = options.workspaceRoot;
+    // Tests which do not care about custody still get an opaque, non-colliding root.
+    this.rootSessionId = options.rootSessionId ?? randomUUID();
     this.clock = options.now ?? (() => new Date().toISOString());
   }
 
@@ -99,7 +105,7 @@ export class WorkspaceManager {
         const rootChangeId = await this.jj.changeIdAt(path, "@");
         const at = this.clock();
         const record: WorkspaceRecord = {
-          version: 1,
+          version: 2,
           id: `ws-${randomUUID()}`,
           name,
           path,
@@ -107,7 +113,9 @@ export class WorkspaceManager {
           phase: "active",
           baseChangeIds,
           rootChangeId,
-          ...(input.owner ? { owner: input.owner } : {}),
+          rootSessionId: this.rootSessionId,
+          ...(input.ownerId ? { ownerId: input.ownerId } : {}),
+          ...(input.ownerDisplayId ? { ownerDisplayId: input.ownerDisplayId } : {}),
           ...(input.parent ? { parent: input.parent } : {}),
           createdAt: at,
           updatedAt: at,
@@ -168,6 +176,9 @@ export class WorkspaceManager {
         chosen === "linear"
           ? await this.mergeLinear(record, content, entries, target)
           : await this.mergeUnder(record, content, entries, target);
+      if (summary.conflictPaths.length) {
+        return { kind: "retained_conflicts", record, summary } as const;
+      }
       return {
         kind: "merged",
         record: { ...record, phase: "merged", updatedAt: this.clock(), merge: summary },
@@ -183,11 +194,16 @@ export class WorkspaceManager {
    * does not exist until the child has been spawned into the workspace. Until
    * then the workspace is unowned, and a sweep would treat it as reclaimable.
    */
-  assignOwner(id: WorkspaceId, owner: string): Promise<void> {
+  assignOwner(id: WorkspaceId, ownerId: string, ownerDisplayId?: string): Promise<void> {
     return this.serialise(async () => {
       const record = await this.registry.get(id);
       if (!record) throw new Error(`Unknown workspace ${id}.`);
-      await this.registry.put({ ...record, owner, updatedAt: this.clock() });
+      await this.registry.put({
+        ...record,
+        ownerId,
+        ...(ownerDisplayId ? { ownerDisplayId } : {}),
+        updatedAt: this.clock(),
+      });
     });
   }
 
@@ -241,6 +257,15 @@ export class WorkspaceManager {
       const known = new Set(records.map((record) => record.name));
 
       for (const record of records) {
+        // Version 1 has no durable/root authority and can never be adopted.
+        if (record.version !== 2 || !("rootSessionId" in record)) {
+          results.push({ id: record.id, name: record.name, disposition: "needs_attention", reason: "Legacy custody record is quarantined." });
+          continue;
+        }
+        if (record.rootSessionId !== this.rootSessionId) {
+          results.push({ id: record.id, name: record.name, disposition: "kept", reason: "Owned by a different root session." });
+          continue;
+        }
         if (record.phase === "incident") {
           results.push({
             id: record.id,
@@ -250,7 +275,7 @@ export class WorkspaceManager {
           });
           continue;
         }
-        if (record.owner && live.has(record.owner)) {
+        if (record.ownerId && live.has(record.ownerId)) {
           results.push({
             id: record.id,
             name: record.name,
@@ -298,12 +323,11 @@ export class WorkspaceManager {
       for (const name of await this.jj.workspaceNames(this.sourcePath)) {
         if (!name.startsWith(MANAGED_WORKSPACE_PREFIX) || known.has(name)) continue;
         const path = join(this.workspaceRoot, name);
-        await this.detach(name, path, this.sourcePath);
         results.push({
           id: name,
           name,
-          disposition: "reclaimed",
-          reason: "Untracked managed workspace.",
+          disposition: "needs_attention",
+          reason: "Unknown managed attachment; ownership cannot be proven.",
         });
       }
       return results;
@@ -424,7 +448,9 @@ export class WorkspaceManager {
       }
     }
     const conflictPaths = await this.jj.conflictedPaths(target);
-    await this.reclaim(record, entries, target);
+    // Conflicts live in the target, but source custody remains the durable
+    // recovery copy until a later retry observes a resolved target.
+    if (!conflictPaths.length) await this.reclaim(record, entries, target);
     return {
       strategy: "merge-under",
       changeIds,

@@ -98,7 +98,7 @@ export class IsolatedSubagents {
       this.owned.set(snapshot.id, workspace.id);
       // Only now does an owner exist to record, which is what lets a sweep tell
       // this workspace apart from one abandoned by a dead session.
-      await this.workspaces.assignOwner(workspace.id, snapshot.id);
+      await this.workspaces.assignOwner(workspace.id, snapshot.durableId, snapshot.id);
       return snapshot;
     } catch (error) {
       // Only clean up a workspace this call created; a reused one holds work
@@ -119,7 +119,7 @@ export class IsolatedSubagents {
       };
     }
     const result = await this.workspaces.merge(workspaceId, strategy);
-    if (result.kind !== "blocked") this.owned.delete(subagentId);
+    if (result.kind === "merged" || result.kind === "no_changes") this.owned.delete(subagentId);
     return result;
   }
 
@@ -135,7 +135,7 @@ export class IsolatedSubagents {
     return this.agents
       .list()
       .filter((snapshot) => snapshot.status === "running")
-      .map((snapshot) => snapshot.id);
+      .map((snapshot) => snapshot.durableId);
   }
 
   /**

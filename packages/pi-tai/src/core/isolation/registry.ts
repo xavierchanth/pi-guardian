@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { WorkspaceId, WorkspaceRecord } from "./domain.ts";
 
@@ -18,10 +18,12 @@ export interface WorkspaceRegistryPort {
 
 export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
   private readonly file: string;
+  private readonly lockFile: string;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(stateRoot: string) {
     this.file = join(stateRoot, "workspaces.json");
+    this.lockFile = `${this.file}.lock`;
   }
 
   async list(): Promise<WorkspaceRecord[]> {
@@ -53,14 +55,48 @@ export class FileWorkspaceRegistry implements WorkspaceRegistryPort {
   /** Serialised through `queue` so concurrent settle hooks cannot lose a record. */
   private mutate(update: (records: WorkspaceRecord[]) => WorkspaceRecord[]): Promise<void> {
     const next = this.queue.then(async () => {
-      const records = update(await this.read());
       await mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-      const temporary = `${this.file}.${process.pid}.tmp`;
-      await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, { mode: 0o600 });
-      await rename(temporary, this.file);
+      await this.acquireLock();
+      try {
+        // Read only after obtaining the cross-process lock: otherwise a writer
+        // can replace the document between our read and rename.
+        const records = update(await this.read());
+        const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`;
+        await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, { mode: 0o600 });
+        await rename(temporary, this.file);
+      } finally {
+        await rm(this.lockFile, { force: true });
+      }
     });
     this.queue = next.catch(() => {});
     return next;
+  }
+
+  private async acquireLock(): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (true) {
+      try {
+        const handle = await open(this.lockFile, "wx", 0o600);
+        await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+        await handle.close();
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        // Take over only when metadata is valid, old, and its process is
+        // definitely gone. Ambiguity fails closed.
+        try {
+          const owner = JSON.parse(await readFile(this.lockFile, "utf8")) as { pid: number; createdAt: string };
+          const old = Date.now() - Date.parse(owner.createdAt) > 30_000;
+          let alive = true;
+          try { process.kill(owner.pid, 0); } catch (probe) {
+            if ((probe as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+          }
+          if (old && !alive) { await rm(this.lockFile); continue; }
+        } catch { /* malformed/racing lock: do not steal it */ }
+        if (Date.now() >= deadline) throw new Error(`Timed out waiting for workspace registry lock ${this.lockFile}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
   }
 }
 
