@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
 import type {
   RepositoryEvidence,
   WorkspaceCustodyPort,
 } from "../../packages/pi-tai/src/core/isolation/custody-port.ts";
+import { SqliteWorkspaceCustody } from "../../packages/pi-tai/src/core/isolation/sqlite-custody.ts";
 import { migrateWorkspaceRegistry } from "../../packages/pi-tai/src/core/storage/custody-migration.ts";
 import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
@@ -66,6 +67,67 @@ test("B6-B8 migration receipt/copy are idempotent and source is retired only aft
     1,
   );
   f.db.close();
+});
+
+test("B6-B8 simultaneous processes serialize one atomic retirement/receipt with no duplicate or lost rows, then rerun idempotently", async () => {
+  const f = fixture();
+  writeFileSync(
+    f.source,
+    JSON.stringify([...valid, { ...valid[0], id: "w2", name: "other", rootChangeId: "mmmm" }]),
+  );
+  f.db.close();
+  const barrier = join(f.home, "start");
+  const childPath = join(process.cwd(), "tests/fixtures/custody-migration-child.mjs");
+  const children = [0, 1].map(() =>
+    spawn(process.execPath, [childPath, f.home, f.agentDir, barrier], {
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+  const completed = children.map(
+    (child) =>
+      new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
+        let out = "";
+        let err = "";
+        child.stdout.on("data", (chunk) => {
+          out += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+          err += chunk;
+        });
+        child.on("close", (code) => resolve({ code, out, err }));
+      }),
+  );
+  writeFileSync(barrier, "go");
+  const results = await Promise.all(completed);
+  assert.deepEqual(
+    results.map((r) => r.code),
+    [0, 0],
+    results.map((r) => r.err).join("\n"),
+  );
+  assert.equal(results.filter((r) => JSON.parse(r.out).receipt !== null).length, 1);
+
+  const db = openDurableDatabase({ paths: f.paths });
+  assert.equal(
+    (db.prepare("SELECT count(*) n FROM workspace WHERE id IN ('w1','w2')").get() as { n: number })
+      .n,
+    2,
+  );
+  assert.equal(
+    (
+      db.prepare("SELECT count(*) n FROM quarantine WHERE reason='migration_completed'").get() as {
+        n: number;
+      }
+    ).n,
+    1,
+  );
+  assert.equal(existsSync(f.source), false);
+  assert.equal(migrateWorkspaceRegistry(db, f.agentDir, f.paths), undefined);
+  assert.equal(
+    (db.prepare("SELECT count(*) n FROM workspace WHERE id IN ('w1','w2')").get() as { n: number })
+      .n,
+    2,
+  );
+  db.close();
 });
 
 test("B9-B10 repository fingerprint is stable by evidence, not workspace name or checkout path", async () => {

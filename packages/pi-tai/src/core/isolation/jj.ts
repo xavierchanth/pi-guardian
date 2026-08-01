@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import type { AbsolutePath } from "../jj/domain.ts";
-import { renderJjExecutionFailure, type JjExecutor } from "../jj/executor.ts";
+import { type JjExecutor, renderJjExecutionFailure } from "../jj/executor.ts";
 import { updateStaleSafely } from "../jj/stale-update.ts";
 import type { ChangeEntry } from "./domain.ts";
 
@@ -162,8 +162,9 @@ export class JjCli {
     );
     if (visible.length === 1) return { kind: "unique", commitId: visible[0]! };
     if (visible.length > 1) return { kind: "divergent", commitIds: visible.sort() };
-    const hidden = splitLines(
-      await this.read(repoRoot, [
+    let hiddenOutput: string;
+    try {
+      hiddenOutput = await this.read(repoRoot, [
         "--ignore-working-copy",
         "log",
         "-r",
@@ -171,9 +172,16 @@ export class JjCli {
         "--no-graph",
         "-T",
         'commit_id ++ "\\n"',
-      ]),
-    );
-    return hidden.length ? { kind: "hidden" } : { kind: "unknown" };
+      ]);
+    } catch (error) {
+      // jj's commit-id lookup intentionally errors when the id has never
+      // existed. Only that semantic miss is evidence; all other failures
+      // (I/O, corrupt repository, timeout) remain infrastructure errors.
+      if (error instanceof Error && /Revision `[^`]+\/0` doesn't exist/.test(error.message))
+        return { kind: "unknown" };
+      throw error;
+    }
+    return splitLines(hiddenOutput).length ? { kind: "hidden" } : { kind: "unknown" };
   }
 
   async ownedHeads(
