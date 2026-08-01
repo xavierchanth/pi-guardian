@@ -26,9 +26,9 @@ const manager = (
   options: Omit<ConstructorParameters<typeof SubagentManager>[0], "registry"> = {},
 ) => new SubagentManager({ registry: new BackendRegistry([new StubBackend()]), ...options });
 
-it("ships the 24/1024/256 bounds and compatibility alias", () => {
-  assert.equal(MAX_RUNNING_SUBAGENTS, 24);
-  assert.equal(MAX_DURABLE_RECORDS, 1024);
+it("ships the 32/4096/256 bounds and compatibility alias", () => {
+  assert.equal(MAX_RUNNING_SUBAGENTS, 32);
+  assert.equal(MAX_DURABLE_RECORDS, 4096);
   assert.equal(MAX_RESIDENT_SUBAGENTS, 256);
   assert.equal(MAX_TRACKED_SUBAGENTS, MAX_RESIDENT_SUBAGENTS);
 });

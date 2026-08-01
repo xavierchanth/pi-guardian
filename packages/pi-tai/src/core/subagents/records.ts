@@ -29,9 +29,15 @@ export class SubagentRecordIndex {
     for (const record of records) this.note(record);
   }
 
-  note(summary: DurableRecordSummary): void {
+  note(summary: DurableRecordSummary, authoritative = false): void {
     const prior = this.records.get(summary.durableId);
-    if (prior && prior.updatedAt >= summary.updatedAt) return;
+    // Replayed journal facts are timestamp-ordered, but live facts are already
+    // causally ordered and may share a millisecond under a fixed/fast clock.
+    if (
+      prior &&
+      (authoritative ? prior.updatedAt > summary.updatedAt : prior.updatedAt >= summary.updatedAt)
+    )
+      return;
     this.records.set(summary.durableId, summary);
   }
 

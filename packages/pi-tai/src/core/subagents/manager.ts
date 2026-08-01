@@ -1,26 +1,26 @@
 import { randomUUID } from "node:crypto";
 import {
   type BackendRegistry,
-  SendNotDeliveredError,
   type SendMode,
+  SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
 } from "./backend.ts";
 import {
   applyEvent,
-  emptySnapshot,
   type BackendName,
   type CapabilityName,
+  emptySnapshot,
   type SpawnTask,
   type SubagentSnapshot,
 } from "./domain.ts";
-import { DeferredResultDelivery } from "./result-delivery.ts";
 import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
 import { SubagentRecordIndex } from "./records.ts";
+import { DeferredResultDelivery } from "./result-delivery.ts";
 
-export const MAX_RUNNING_SUBAGENTS = 24;
+export const MAX_RUNNING_SUBAGENTS = 32;
 export const MAX_UNARCHIVED_RECORDS = 128;
-export const MAX_DURABLE_RECORDS = 1024;
+export const MAX_DURABLE_RECORDS = 4096;
 export const MAX_RESIDENT_SUBAGENTS = 256;
 /** @deprecated Use MAX_RESIDENT_SUBAGENTS. */
 export const MAX_TRACKED_SUBAGENTS = MAX_RESIDENT_SUBAGENTS;
@@ -128,6 +128,8 @@ export class SubagentManager {
   private readonly maxResident: number;
   private readonly rootSessionId?: string;
   private readonly records: SubagentRecordIndex;
+  /** Spawn intents reserved before their first await but not yet indexed. */
+  private pendingDurable = 0;
   private readonly clock: () => string;
   private readonly onSettled?: (snapshot: SubagentSnapshot) => void | Promise<void>;
   private readonly entries = new Map<string, Entry>();
@@ -259,7 +261,7 @@ export class SubagentManager {
         "running",
         `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
       );
-    if (this.records.counts().total >= this.maxDurable)
+    if (this.records.counts().total + this.pendingDurable >= this.maxDurable)
       throw new SubagentCapacityError(
         "durable",
         `This session has reached its durable subagent record ceiling (${this.maxDurable}). Start a new session to continue delegating; existing records, reports, and workspaces are untouched.`,
@@ -274,6 +276,8 @@ export class SubagentManager {
   async spawn(request: SpawnRequest): Promise<SubagentSnapshot> {
     this.assertAdmission();
     this.reserved += 1;
+    this.pendingDurable += 1;
+    let durableCommitted = false;
     const id = `sa-${++this.sequence}`;
     const durableId = randomUUID();
     const generation = this.generation;
@@ -296,13 +300,18 @@ export class SubagentManager {
         at: this.clock(),
       });
       const createdAt = this.clock();
-      this.records.note({
-        durableId,
-        displayId: id,
-        ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
-        disposition: "intent",
-        updatedAt: createdAt,
-      });
+      this.records.note(
+        {
+          durableId,
+          displayId: id,
+          ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
+          disposition: "intent",
+          updatedAt: createdAt,
+        },
+        true,
+      );
+      durableCommitted = true;
+      this.pendingDurable -= 1;
       const backend = await this.registry.require(request.backend);
       const abort = new AbortController();
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
@@ -380,7 +389,9 @@ export class SubagentManager {
       void this.pump(entry, entry.session);
       return entry.snapshot;
     } catch (error) {
-      this.reserved = Math.max(0, this.reserved - 1);
+      // Once an entry exists, finish() owns release of the running reservation.
+      if (!this.entries.has(id)) this.reserved = Math.max(0, this.reserved - 1);
+      if (!durableCommitted) this.pendingDurable = Math.max(0, this.pendingDurable - 1);
       throw error;
     }
   }
@@ -582,13 +593,14 @@ export class SubagentManager {
       resolveSettled = resolve;
     });
     Object.assign(entry, { settled, resolveSettled });
+    this.delivery.consume(entry.snapshot.id);
     this.update(entry, {
       ...entry.snapshot,
       status: "running",
       latestText: "",
       liveTools: [],
+      deliveryPending: false,
     });
-    this.delivery.consume(entry.snapshot.id);
     void this.pump(entry, session);
   }
 
@@ -682,15 +694,18 @@ export class SubagentManager {
       text: snapshot.finalText || snapshot.errorText || "",
     });
     this.update(entry, { ...entry.snapshot, deliveryPending: true });
-    this.records.note({
-      ...(this.records.get(snapshot.durableId) ?? {
-        durableId: snapshot.durableId,
-        displayId: snapshot.id,
-        updatedAt: snapshot.createdAt,
-      }),
-      disposition,
-      updatedAt: this.clock(),
-    });
+    this.records.note(
+      {
+        ...(this.records.get(snapshot.durableId) ?? {
+          durableId: snapshot.durableId,
+          displayId: snapshot.id,
+          updatedAt: snapshot.createdAt,
+        }),
+        disposition,
+        updatedAt: this.clock(),
+      },
+      true,
+    );
     entry.resolveSettled(entry.snapshot);
     // The hook runs after settlement so a slow or broken workspace reclaim
     // cannot stall the parent's `wait`.
@@ -735,11 +750,18 @@ export class SubagentManager {
           !entry.snapshot.attention &&
           entry.snapshot.workspaceId === undefined,
       )
-      .sort(([, a], [, b]) =>
-        (a.snapshot.settledAt ?? a.snapshot.createdAt).localeCompare(
-          b.snapshot.settledAt ?? b.snapshot.createdAt,
-        ),
-      );
+      .sort(([, a], [, b]) => {
+        const rank = (entry: Entry): number => {
+          if (this.records.get(entry.snapshot.durableId)?.archivedAt !== undefined) return 0;
+          return entry.snapshot.status === "done" ? 1 : 2;
+        };
+        return (
+          rank(a) - rank(b) ||
+          (a.snapshot.settledAt ?? a.snapshot.createdAt).localeCompare(
+            b.snapshot.settledAt ?? b.snapshot.createdAt,
+          )
+        );
+      });
     for (const [id, entry] of candidates) {
       if (this.entries.size <= this.maxResident) break;
       entry.closed = true;

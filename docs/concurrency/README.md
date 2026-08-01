@@ -134,11 +134,15 @@ requested result ready at that moment, and identifies those still running; call 
 remaining ids to collect staggered completions. Returned results (and only those results) are
 consumed so they are not also auto-delivered. Already-finished ids return immediately.
 
-At most 24 subagents run at once. The reservation is taken synchronously before the
-first await, so several tool calls in one assistant turn cannot all observe a free
-slot and race past the cap. Durable subagent identity is retained up to a hard
-1,024-record safety ceiling, while at most 256 safely-evictable records are kept
-resident in memory. Undelivered results and live workspace custody are never evicted.
+At most 32 subagents run at once. Running and pending durable reservations are taken
+synchronously before the first await, so several tool calls in one assistant turn
+cannot race past either cap. Durable subagent identity is retained up to a hard
+4,096-record safety ceiling. That ceiling counts the monotonic union of records in
+the session file across branch navigation, not only records visible on the active
+branch. At most 256 safely-evictable records are normally kept resident in memory.
+Undelivered results, attention-required records, and workspace-bearing records are
+never evicted; residency may therefore conservatively exceed 256 until durable
+custody-release receipts exist.
 
 ## Tools
 
