@@ -341,7 +341,17 @@ describe("subagent manager", () => {
     });
   });
 
-  it("returns the typed auto settlement-race continuation receipt", async () => {
+  it("serializes truthful terminals before advancement across repeated settlement races", async () => {
+    const events: LifecycleEvent[] = [];
+    const store: SubagentLifecycleStore = {
+      load: async () => events,
+      append: async (event) => {
+        // Reproduce the reviewed poison race: terminal durability yields while
+        // continuation is already trying to advance the generation.
+        if (event.type === "terminal") await settleQueue();
+        events.push(event);
+      },
+    };
     const backend = new StubBackend();
     const spawn = backend.spawn.bind(backend);
     backend.spawn = async (task) => {
@@ -353,7 +363,7 @@ describe("subagent manager", () => {
       };
       return session;
     };
-    const manager = managerWith([backend], { maxRunning: 1 });
+    const manager = managerWith([backend], { maxRunning: 1, lifecycleStore: store });
     const spawned = await manager.spawn(request({ prompt: "HANG: race" }));
 
     for (let generation = 0; generation < 3; generation += 1) {
@@ -362,6 +372,13 @@ describe("subagent manager", () => {
         settlementRace: true,
       });
       await manager.wait([spawned.id]);
+      const reloadedFold = foldLifecycle(events);
+      assert.equal(reloadedFold.rejected.length, 0, "every reload fold remains unpoisoned");
+      assert.equal(
+        reloadedFold.records.get(spawned.durableId)?.generation,
+        generation * 2 + 2,
+        "the successor terminal projects at generation 2 on the first race and stays foldable",
+      );
       assert.equal(
         manager.capacity().running,
         0,
@@ -388,7 +405,16 @@ describe("subagent manager", () => {
 
     assert.deepEqual(
       events.map(({ type }) => type),
-      ["spawn_intent", "running", "terminal", "running", "terminal"],
+      [
+        "spawn_intent",
+        "running",
+        "resume_handle_discovered",
+        "terminal",
+        "generation_advanced",
+        "running",
+        "resume_handle_discovered",
+        "terminal",
+      ],
     );
     const folded = foldLifecycle(events);
     assert.equal(folded.rejected.length, 0);
@@ -431,13 +457,17 @@ describe("subagent manager", () => {
     assert.equal(backend.spawned.length, 1);
   });
 
-  it("fails a continuation closed when its running lifecycle write fails", async () => {
-    let appends = 0;
+  it("retries a failed continuation running append without duplicating advancement", async () => {
+    const facts: LifecycleEvent[] = [];
+    let failRunning = true;
     const store: SubagentLifecycleStore = {
       load: async () => [],
-      append: async () => {
-        appends += 1;
-        if (appends === 4) throw new Error("disk full");
+      append: async (event) => {
+        facts.push(event);
+        if (event.type === "running" && event.generation === 2 && failRunning) {
+          failRunning = false;
+          throw new Error("disk full");
+        }
       },
     };
     const backend = new StubBackend();
@@ -446,6 +476,13 @@ describe("subagent manager", () => {
     await manager.wait([spawned.id]);
     await assert.rejects(manager.send(spawned.id, "next"), /disk full/);
     assert.notEqual(manager.get(spawned.id)?.status, "running");
+
+    await manager.send(spawned.id, "retry");
+    assert.equal(facts.filter((event) => event.type === "generation_advanced").length, 1);
+    assert.equal(
+      facts.filter((event) => event.type === "running" && event.generation === 2).length,
+      2,
+    );
   });
 
   it("frees the concurrency slot again after a resumed run settles", async () => {

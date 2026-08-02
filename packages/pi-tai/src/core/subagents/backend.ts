@@ -55,6 +55,8 @@ export interface SubagentSession {
   readonly resumeToken?: string;
   /** Private durable handle captured for later explicit reopen; never exposed by tools/UI. */
   readonly sessionFile?: string;
+  /** Subscribes to private handle discovery; current handle is replayed immediately. */
+  onResumeHandle?(callback: (handle: string) => void): () => void;
   /** Starts another turn on the same retained backend session, when supported. */
   continueInPlace?(text: string): Promise<void>;
   /** Performs one explicitly selected operation; the manager checks capability/state. */

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,43 @@ async function isolatedRoot() {
   await Promise.all([mkdir(cwd), mkdir(agentDir), mkdir(sessionDir)]);
   return { root, cwd, agentDir, sessionDir };
 }
+
+test("spawned Pi SDK worker cannot observe or mutate caller XDG state", async () => {
+  const paths = await isolatedRoot();
+  const developerState = join(paths.root, "synthetic-developer-state");
+  const sentinel = join(developerState, "sentinel.txt");
+  await mkdir(developerState);
+  await writeFile(sentinel, "must remain untouched");
+
+  const worker = new RuntimeProcessHarness({
+    env: {
+      XDG_STATE_HOME: developerState,
+      XDG_DATA_HOME: join(paths.root, "synthetic-developer-data"),
+      XDG_CACHE_HOME: join(paths.root, "synthetic-developer-cache"),
+      XDG_RUNTIME_DIR: join(paths.root, "synthetic-developer-runtime"),
+      PI_OFFLINE: "1",
+    },
+  });
+  await worker.command("init", "runtime.initialize", initializeParams(1));
+  assert.equal(
+    (
+      await worker.command("create", "session.create", {
+        cwd: paths.cwd,
+        agentDir: paths.agentDir,
+        sessionDir: paths.sessionDir,
+        ...pinnedPolicyParams,
+        faux: true,
+      })
+    ).ok,
+    true,
+  );
+  await worker.command("shutdown", "runtime.shutdown", {});
+  assert.deepEqual(await worker.waitForExit(), { code: 0, signal: null });
+  assert.equal(await readFile(sentinel, "utf8"), "must remain untouched");
+  await assert.rejects(readFile(join(developerState, "pi-tai", "state.sqlite3")), {
+    code: "ENOENT",
+  });
+});
 
 test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits without network models", async () => {
   const paths = await isolatedRoot();

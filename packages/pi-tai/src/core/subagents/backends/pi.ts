@@ -92,6 +92,10 @@ class PiSubagentSession implements SubagentSession {
     return this.active.channel.events;
   }
   readonly sessionFile: string;
+  onResumeHandle(callback: (handle: string) => void): () => void {
+    callback(this.sessionFile);
+    return () => {};
+  }
   private readonly handle: PrivateChildSessionHandle;
   private active: PiRun;
   private disposed = false;

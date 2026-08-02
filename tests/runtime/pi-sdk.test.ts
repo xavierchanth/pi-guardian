@@ -8,6 +8,17 @@ import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
 import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/core/config/provenance.ts";
 import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
+import { createPrivateXdgRoots } from "./private-xdg.ts";
+
+const inheritedXdg = Object.fromEntries(
+  ["XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"].map((key) => [
+    key,
+    process.env[key],
+  ]),
+);
+const privateXdg = createPrivateXdgRoots("pi-runtime-sdk-xdg-");
+Object.assign(process.env, privateXdg.env);
+test.after(() => privateXdg.remove());
 
 function pinnedPolicy() {
   return {
@@ -29,6 +40,14 @@ async function fixture() {
   await (await import("node:fs/promises")).mkdir(cwd, { recursive: true });
   return { root, cwd, agentDir, sessionDir, ...pinnedPolicy() };
 }
+
+test("Pi SDK suite replaces every inherited developer XDG root", () => {
+  for (const [key, privatePath] of Object.entries(privateXdg.env)) {
+    assert.equal(process.env[key], privatePath);
+    if (inheritedXdg[key]) assert.notEqual(privatePath, inheritedXdg[key]);
+    assert.ok(privatePath?.startsWith(privateXdg.root));
+  }
+});
 
 test("hosted extension UI rejects interaction and redacts notifications", async () => {
   const records: Array<{ event: string; data?: Record<string, unknown> }> = [];

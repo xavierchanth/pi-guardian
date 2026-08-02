@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolve } from "node:path";
+import { createPrivateXdgRoots } from "./private-xdg.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const bootstrap = resolve(root, "services/pi-runtime/src/bootstrap.ts");
@@ -15,12 +16,15 @@ export class RuntimeProcessHarness {
   constructor(
     options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[]; cwd?: string } = {},
   ) {
+    const xdg = createPrivateXdgRoots();
     this.child = spawn(
       options.executable ?? process.execPath,
       options.args ?? ["--experimental-strip-types", bootstrap],
       {
         cwd: options.cwd ?? root,
-        env: { ...process.env, ...options.env },
+        // Apply private roots after inherited/caller env: no worker capable of loading
+        // Pi-Tai may observe the developer's XDG database or artifacts.
+        env: { ...process.env, ...options.env, ...xdg.env },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -29,7 +33,10 @@ export class RuntimeProcessHarness {
     this.child.stderr.on("data", (chunk) => {
       this.stderr += chunk;
     });
-    this.child.once("exit", (code, signal) => this.events.emit("exit", { code, signal }));
+    this.child.once("exit", (code, signal) => {
+      xdg.remove();
+      this.events.emit("exit", { code, signal });
+    });
   }
 
   send(frame: unknown): void {
