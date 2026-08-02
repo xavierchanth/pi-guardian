@@ -139,6 +139,10 @@ describe("subagent tool surface", () => {
     assert.match(guidance, /shared index, manifest, README table, or numbered list/);
     assert.match(guidance, /images and attachment objects.*not inherited or forwarded/);
     assert.match(guidance, /user-authorized stable project path/);
+    assert.match(
+      guidance,
+      /Before allowing the agent run to settle.*call subagent_wait.*Repeat until none remain/,
+    );
     const spawnSchema = host.tools.get("subagent_spawn").parameters;
     assert.match(spawnSchema.properties.objective.description, /Text only/);
     assert.equal(spawnSchema.properties.objective.type, "string");
