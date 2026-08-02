@@ -16,7 +16,7 @@ import {
   type SubagentEvent,
   type SubagentSnapshot,
 } from "./domain.ts";
-import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
+import { foldLifecycle, type LifecycleEvent, type SubagentLifecycleStore } from "./lifecycle.ts";
 import { InMemoryRecordStore } from "./records.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
 
@@ -102,9 +102,13 @@ interface Entry {
   task: SpawnTask;
   settled: Promise<SubagentSnapshot>;
   resolveSettled: (snapshot: SubagentSnapshot) => void;
+  /** Current generation's terminal durability barrier, when settlement began. */
+  terminalPersistence?: Promise<void>;
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
-  readonly generation: number;
+  generation: number;
+  /** Advancement persisted but its running fact has not yet succeeded. */
+  generationAwaitingRunning?: boolean;
   readonly sequence: number;
   /** Serializes messages without blocking messages to other children. */
   sendChain: Promise<void>;
@@ -116,6 +120,8 @@ interface Entry {
   restored: boolean;
   /** Workspace custody is independent of the historical workspace identifier. */
   custodyResolved: boolean;
+  /** Unsubscribes private resume-handle discovery from the current session. */
+  resumeHandleDispose?: () => void;
 }
 
 export type RequestedSendMode = SendMode | "auto";
@@ -155,6 +161,8 @@ export class SubagentManager {
   private lifecycleStore?: SubagentLifecycleStore;
   private generation = 1;
   private readonly persistenceErrors: string[] = [];
+  /** Lifecycle facts have one writer; a rejected write must not poison later writes. */
+  private lifecycleAppendChain: Promise<void> = Promise.resolve();
   private readonly requireLifecycleStore: boolean;
 
   constructor(options: SubagentManagerOptions) {
@@ -175,6 +183,10 @@ export class SubagentManager {
   async attachLifecycleStore(store: SubagentLifecycleStore): Promise<void> {
     this.lifecycleStore = store;
     const folded = foldLifecycle(await store.load());
+    if (folded.rejected.length > 0)
+      this.recordPersistenceError(
+        `Lifecycle fold rejected ${folded.rejected.length} persisted fact${folded.rejected.length === 1 ? "" : "s"}.`,
+      );
     this.sequence = Math.max(this.sequence, folded.maxSequence);
     this.records.ingest(folded.records.values());
     for (const record of folded.records.values()) {
@@ -300,8 +312,8 @@ export class SubagentManager {
         throw new Error(
           "Subagent lifecycle persistence is unavailable; refusing to start an unowned child.",
         );
-      await this.lifecycleStore?.append({
-        version: 1,
+      await this.appendLifecycle({
+        version: 2,
         type: "spawn_intent",
         durableId,
         displayId: id,
@@ -309,7 +321,17 @@ export class SubagentManager {
         generation,
         backend: request.backend,
         title: request.title,
-        cwd: request.cwd,
+        backendConfig: {
+          ...(request.model ? { model: request.model } : {}),
+          ...(request.provider ? { provider: request.provider } : {}),
+          ...(request.effort ? { effort: request.effort } : {}),
+          ...(request.tools ? { tools: request.tools } : {}),
+        },
+        workspace: {
+          cwd: request.cwd,
+          ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+        },
+        ...(request.capability ? { capability: request.capability } : {}),
         ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
         at: this.clock(),
       });
@@ -377,29 +399,15 @@ export class SubagentManager {
       entry.task = task;
       try {
         // Running is durable before the backend receives control.
-        await this.lifecycleStore?.append({
-          version: 1,
+        await this.appendLifecycle({
+          version: 2,
           type: "running",
           durableId,
           generation: entry.generation,
           at: this.clock(),
         });
         entry.session = await backend.spawn(task);
-        if (entry.session.sessionFile) {
-          await this.lifecycleStore
-            ?.append({
-              version: 1,
-              type: "running",
-              durableId,
-              generation: entry.generation,
-              at: this.clock(),
-              resumeHandle: {
-                kind: "pi_session_file",
-                value: entry.session.sessionFile,
-              },
-            })
-            .catch((error) => this.recordPersistenceError(error));
-        }
+        this.watchResumeHandle(entry, entry.session);
       } catch (error) {
         this.finish(entry, { type: "backend_error", message: describe(error) }, entry.runToken);
         throw error;
@@ -561,9 +569,16 @@ export class SubagentManager {
   }
 
   private async continueSettled(entry: Entry, text: string, settlementRace = false): Promise<void> {
-    // A settled refusal proves the old run no longer needs its slot even while
-    // its terminal frame remains queued. Release is idempotent across races.
-    if (settlementRace) this.release(entry.runToken);
+    // A settled refusal proves the old run no longer needs its slot, but not its
+    // outcome. Wait for the backend's queued settlement frame: finish records
+    // that truthful terminal through the lifecycle writer before resolving.
+    if (settlementRace) {
+      this.release(entry.runToken);
+      await entry.settled;
+    }
+    // This also covers ordinary continuation immediately after wait: a failed
+    // terminal append must never be followed by generation_advanced.
+    await entry.terminalPersistence;
     const how = entry.backend.capabilities.settledContinuation;
     if (how === "in-place" && entry.session?.continueInPlace) {
       await this.continueInPlace(entry, text);
@@ -594,16 +609,31 @@ export class SubagentManager {
       // Persist the reservation before exposing it. Unlike a respawn, the
       // retained Pi handle can begin producing events synchronously, so all
       // manager state and the single-writer token must be installed first.
-      await this.lifecycleStore?.append({
-        version: 1,
+      const nextGeneration = entry.generationAwaitingRunning
+        ? entry.generation
+        : entry.generation + 1;
+      if (!entry.generationAwaitingRunning) {
+        await this.appendLifecycle({
+          version: 2,
+          type: "generation_advanced",
+          durableId: entry.snapshot.durableId,
+          previousGeneration: entry.generation,
+          generation: nextGeneration,
+          at: this.clock(),
+        });
+        // Commit locally as soon as advancement is durable. A retry then emits
+        // only the missing running fact.
+        entry.generation = nextGeneration;
+        entry.generationAwaitingRunning = true;
+      }
+      await this.appendLifecycle({
+        version: 2,
         type: "running",
         durableId: entry.snapshot.durableId,
-        generation: entry.generation,
+        generation: nextGeneration,
         at: this.clock(),
-        ...(entry.session.sessionFile
-          ? { resumeHandle: { kind: "pi_session_file" as const, value: entry.session.sessionFile } }
-          : {}),
       });
+      entry.generationAwaitingRunning = false;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while continuing.`);
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
       const settled = new Promise<SubagentSnapshot>((resolve) => {
@@ -646,23 +676,30 @@ export class SubagentManager {
     let session: SubagentSession | undefined;
     try {
       session = await entry.backend.spawn(task);
-      // A continuation is not exposed as running until its current-generation
-      // lifecycle fact is durable. Failure leaves the old terminal state intact.
-      await this.lifecycleStore?.append({
-        version: 1,
+      // Advance exactly once before exposing the successor generation.
+      const nextGeneration = entry.generationAwaitingRunning
+        ? entry.generation
+        : entry.generation + 1;
+      if (!entry.generationAwaitingRunning) {
+        await this.appendLifecycle({
+          version: 2,
+          type: "generation_advanced",
+          durableId: entry.snapshot.durableId,
+          previousGeneration: entry.generation,
+          generation: nextGeneration,
+          at: this.clock(),
+        });
+        entry.generation = nextGeneration;
+        entry.generationAwaitingRunning = true;
+      }
+      await this.appendLifecycle({
+        version: 2,
         type: "running",
         durableId: entry.snapshot.durableId,
-        generation: entry.generation,
+        generation: nextGeneration,
         at: this.clock(),
-        ...(session.sessionFile
-          ? {
-              resumeHandle: {
-                kind: "pi_session_file" as const,
-                value: session.sessionFile,
-              },
-            }
-          : {}),
       });
+      entry.generationAwaitingRunning = false;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
       session?.dispose();
@@ -670,8 +707,10 @@ export class SubagentManager {
       throw error;
     }
     entry.task = task;
+    entry.resumeHandleDispose?.();
     entry.session?.dispose();
     entry.session = session;
+    this.watchResumeHandle(entry, session);
     // Reopen the entry so `wait` and result delivery work exactly as on a first run.
     let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
     const settled = new Promise<SubagentSnapshot>((resolve) => {
@@ -701,6 +740,8 @@ export class SubagentManager {
       // Settled entries may still be continued; only an active cancellation
       // tombstones the entry against future sends.
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.abort.abort();
       try {
         await entry.session?.interrupt();
@@ -721,6 +762,8 @@ export class SubagentManager {
     if (running.length) await this.cancel(running);
     for (const entry of this.entries.values()) {
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.session?.dispose();
     }
     this.entries.clear();
@@ -783,16 +826,16 @@ export class SubagentManager {
         : event.type === "run_settled" && event.outcome === "interrupted"
           ? "interrupted"
           : "failed";
-    void this.lifecycleStore
-      ?.append({
-        version: 1,
-        type: "terminal",
-        durableId: entry.snapshot.durableId,
-        generation: entry.generation,
-        disposition,
-        at: this.clock(),
-      })
-      .catch((error) => this.recordPersistenceError(error));
+    const terminalWrite = this.appendLifecycle({
+      version: 2,
+      type: "terminal",
+      durableId: entry.snapshot.durableId,
+      generation: entry.generation,
+      disposition,
+      at: this.clock(),
+    });
+    entry.terminalPersistence = terminalWrite;
+    const terminalSettled = terminalWrite.catch((error) => this.recordPersistenceError(error));
     this.release(token);
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
@@ -815,10 +858,53 @@ export class SubagentManager {
       },
       true,
     );
-    entry.resolveSettled(entry.snapshot);
-    // The hook runs after settlement so a slow or broken workspace reclaim
-    // cannot stall the parent's `wait`.
+    // Settlement is not observable to continuation until its terminal fact has
+    // passed through the same append chain as handle discovery. This gives the
+    // next generation a durable, foldable predecessor even in settlement races.
+    void terminalSettled.then(() => entry.resolveSettled(entry.snapshot));
+    // The hook runs after in-memory settlement so a slow or broken workspace
+    // reclaim cannot stall lifecycle persistence.
     void Promise.resolve(this.onSettled?.(snapshot)).catch(() => {});
+  }
+
+  private watchResumeHandle(entry: Entry, session: SubagentSession): void {
+    const kind =
+      entry.snapshot.backend === "pi"
+        ? "pi_session_file"
+        : entry.snapshot.backend === "claude"
+          ? "claude_session"
+          : "codex_thread";
+    // Normalized last-write semantics: duplicate notifications are suppressed;
+    // a backend may replace its opaque handle, and the final fact wins in fold.
+    let lastValue: string | undefined;
+    const persist = (value: string) => {
+      if (typeof value !== "string" || value.trim() !== value || value.length === 0) return;
+      if (value === lastValue) return;
+      lastValue = value;
+      void this.appendLifecycle({
+        version: 2,
+        type: "resume_handle_discovered",
+        durableId: entry.snapshot.durableId,
+        generation: entry.generation,
+        resumeHandle: { kind, value } as never,
+        at: this.clock(),
+      }).catch((error) => this.recordPersistenceError(error));
+    };
+    entry.resumeHandleDispose?.();
+    entry.resumeHandleDispose = undefined;
+    if (session.onResumeHandle) entry.resumeHandleDispose = session.onResumeHandle(persist);
+    else if (session.sessionFile) persist(session.sessionFile);
+    else if (session.resumeToken) persist(session.resumeToken);
+  }
+
+  private appendLifecycle(event: LifecycleEvent): Promise<void> {
+    if (!this.lifecycleStore) return Promise.resolve();
+    const write = this.lifecycleAppendChain.then(() => this.lifecycleStore?.append(event));
+    this.lifecycleAppendChain = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
   }
 
   private recordPersistenceError(error: unknown): void {
@@ -882,6 +968,8 @@ export class SubagentManager {
     for (const [id, entry] of candidates) {
       if (this.entries.size <= this.maxResident) break;
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.session?.dispose();
       this.entries.delete(id);
     }
