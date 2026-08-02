@@ -27,6 +27,8 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const KEY_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT_SESSION = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const STAGING = /^\.tmp-[0-9]+-[0-9a-f]{32}$/;
+/** Prevent cleanup from racing publishers that are still building a staging record. */
+export const MIN_STAGING_AGE_MS = 60_000;
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 
 export interface BlobStoreOptions {
@@ -60,13 +62,18 @@ interface BlobMetadata {
   key: string;
 }
 
-export class ArtifactStoreError extends Error {
-  readonly code: "invalid-input" | "conflict" | "corrupt" | "unsafe-storage" | "storage-failure";
+export type ArtifactStoreErrorCode =
+  | "invalid-input"
+  | "not-found"
+  | "conflict"
+  | "corrupt"
+  | "unsafe-storage"
+  | "storage-failure";
 
-  constructor(
-    code: "invalid-input" | "conflict" | "corrupt" | "unsafe-storage" | "storage-failure",
-    message: string,
-  ) {
+export class ArtifactStoreError extends Error {
+  readonly code: ArtifactStoreErrorCode;
+
+  constructor(code: ArtifactStoreErrorCode, message: string) {
     super(message);
     this.name = "ArtifactStoreError";
     this.code = code;
@@ -177,7 +184,12 @@ export class PrivateBlobStore {
         throw input("Invalid expected digest");
       this.assertSafeRoot();
       const record = this.recordPath(key);
-      assertPrivateDirectory(record, 0o500);
+      try {
+        assertPrivateDirectory(record, 0o500);
+      } catch (error) {
+        if (isMissing(error)) throw notFound();
+        throw error;
+      }
       const metadata = readMetadata(join(record, "metadata.json"), this.maxBlobBytes);
       if (metadata.key !== key) throw corrupt("Blob key mismatch");
       if (expectedDigest !== undefined && metadata.digest !== expectedDigest)
@@ -200,26 +212,40 @@ export class PrivateBlobStore {
     }
   }
 
-  /** Remove at most maxEntries abandoned staging directories. */
+  /**
+   * Remove at most maxEntries abandoned staging directories. The minimum age is
+   * enforced because zero-age sweeps can delete records from live publishers.
+   */
   cleanupStaging(options: StagingCleanupOptions = {}): number {
     try {
       this.assertSafeRoot();
       const max = options.maxEntries ?? 64;
       const age = options.olderThanMs ?? 60 * 60 * 1000;
       const now = options.now ?? Date.now();
-      if (!Number.isSafeInteger(max) || max < 0 || !Number.isFinite(age) || age < 0)
-        throw input("Invalid staging cleanup bound");
+      if (
+        !Number.isSafeInteger(max) ||
+        max < 0 ||
+        !Number.isFinite(age) ||
+        age < MIN_STAGING_AGE_MS ||
+        !Number.isFinite(now)
+      )
+        throw input("Invalid staging cleanup bound or minimum age");
       let removed = 0;
       for (const name of readdirSync(this.root).sort()) {
-        if (removed >= max || !STAGING.test(name)) continue;
+        if (removed >= max) break;
+        if (!STAGING.test(name)) continue;
         const path = join(this.root, name);
-        const stat = lstatSync(path);
-        if (!stat.isDirectory() || stat.isSymbolicLink() || now - stat.mtimeMs < age) continue;
         try {
+          const stat = lstatSync(path);
+          if (!stat.isDirectory() || stat.isSymbolicLink() || now - stat.mtimeMs < age) continue;
           chmodSync(path, PRIVATE_DIRECTORY_MODE);
-        } catch {}
-        rmSync(path, { recursive: true, force: true });
-        removed++;
+          rmSync(path, { recursive: true });
+          removed++;
+        } catch (error) {
+          // Another cleaner may win between listing, stat, chmod, and removal.
+          if (isMissing(error)) continue;
+          throw error;
+        }
       }
       if (removed) fsyncDirectory(this.root);
       return removed;
@@ -372,6 +398,9 @@ function fsyncDirectory(path: string): void {
 function isExists(error: unknown): boolean {
   return ["EEXIST", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException)?.code ?? "");
 }
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+}
 function pathExists(path: string): boolean {
   try {
     lstatSync(path);
@@ -385,6 +414,9 @@ function input(message: string) {
 }
 function corrupt(message: string) {
   return new ArtifactStoreError("corrupt", message);
+}
+function notFound() {
+  return new ArtifactStoreError("not-found", "Artifact record not found");
 }
 function publicError(error: unknown): ArtifactStoreError {
   if (error instanceof ArtifactStoreError) return error;
