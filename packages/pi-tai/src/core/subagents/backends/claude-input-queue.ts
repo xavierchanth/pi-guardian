@@ -31,6 +31,9 @@ export class ClaudeInputQueue implements AsyncIterable<ClaudeUserMessage> {
   get pendingBytes(): number {
     return this.bytes;
   }
+  get isClosed(): boolean {
+    return this.closed;
+  }
 
   push(content: string): string {
     if (this.closed) throw new SendNotDeliveredError("Claude input is closed.", "closed");

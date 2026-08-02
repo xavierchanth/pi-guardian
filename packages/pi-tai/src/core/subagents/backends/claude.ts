@@ -174,11 +174,17 @@ class ClaudeSubagentSession implements SubagentSession {
         }
       }
       if (this.abort.signal.aborted) this.settle("interrupted");
-      else if (this.result) {
+      else if (this.result && this.input.isClosed) {
         this.settled = true;
         this.channel.push(this.result);
+      } else if (this.result) {
+        // The SDK ended while streaming input was still accepted. Reporting its
+        // earlier result would silently discard guidance that may already have
+        // been yielded to the SDK.
+        throw new Error("Claude ended its stream before accepting all queued input.");
       } else this.settle("completed");
     } catch (error) {
+      this.input.failAll("closed");
       this.channel.push({
         type: "run_settled",
         outcome: this.abort.signal.aborted ? "interrupted" : "failed",
@@ -186,6 +192,8 @@ class ClaudeSubagentSession implements SubagentSession {
       });
       this.settled = true;
     } finally {
+      // Once output ends there is no consumer capable of delivering more input.
+      this.input.failAll("closed");
       this.closeQuery();
     }
   }
@@ -221,7 +229,11 @@ class ClaudeSubagentSession implements SubagentSession {
   private closeQuery(): void {
     if (this.queryClosed) return;
     this.queryClosed = true;
-    this.query.close?.();
+    try {
+      this.query.close?.();
+    } catch {
+      // Closing is best-effort and must not replace the run's terminal event.
+    }
   }
 }
 
