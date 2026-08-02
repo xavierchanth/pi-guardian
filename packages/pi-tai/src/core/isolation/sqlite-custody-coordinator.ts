@@ -235,7 +235,11 @@ export class SQLiteCustodyCoordinator {
           }
           request.actualMerge = row.merge;
         } else {
-          if (alreadyAncestor) throw new Error("Fresh merge source is already in target ancestry");
+          // Pre-existing ancestry is only suspicious before we have issued a
+          // durable execution receipt. On resume it proves the rewrite crossed
+          // the crash boundary and must flow through idempotent finalization.
+          if (alreadyAncestor && !request.receipt)
+            throw new Error("Fresh merge source is already in target ancestry");
           await this.updateSourceStale(row, "custody merge source");
           let classification =
             request.receipt?.classification ??
