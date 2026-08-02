@@ -30,6 +30,7 @@ function harness(initial: SubagentSnapshot[] = [], terminalRows = 10) {
   let renders = 0;
   let resolveCancel: (() => void) | undefined;
   let cancelCalls = 0;
+  let closes = 0;
   const agents: DashboardAgents = {
     list: () => rows,
     subscribe: (next) => {
@@ -55,7 +56,9 @@ function harness(initial: SubagentSnapshot[] = [], terminalRows = 10) {
     agents,
     tui,
     theme,
-    close: () => {},
+    close: () => {
+      closes++;
+    },
     readRows: () => terminalRows,
   });
   return {
@@ -64,11 +67,13 @@ function harness(initial: SubagentSnapshot[] = [], terminalRows = 10) {
     renders: () => renders,
     mutate(next: SubagentSnapshot[]) {
       rows = next;
-      if (next[0]) listener?.(next[0]);
+      const signal = next[0] ?? initial[0];
+      if (signal) listener?.(signal);
     },
     resolveCancel: () => resolveCancel?.(),
     subscribed: () => Boolean(listener),
     cancelCalls: () => cancelCalls,
+    closes: () => closes,
   };
 }
 
@@ -108,17 +113,17 @@ test("§4.8 dispatch table is exhaustive, contextual, and mode-first", () => {
       V: "markAll",
       s: "jumpSubagent",
       w: "jumpWorkspace",
-      i: "taskEdit",
+      i: "taskDetail",
       "\r": "taskEdit",
     },
     subagents: {
       a: "actionMenu",
       x: "cancel",
-      p: undefined,
+      p: "inert",
       e: "archiveRestore",
       v: "mark",
       V: "markAll",
-      s: undefined,
+      s: "inert",
       w: "jumpWorkspace",
       i: "subagentDetail",
       "\r": "subagentDetail",
@@ -126,12 +131,12 @@ test("§4.8 dispatch table is exhaustive, contextual, and mode-first", () => {
     workspaces: {
       a: "actionMenu",
       x: "cancel",
-      p: undefined,
-      e: undefined,
+      p: "inert",
+      e: "inert",
       v: "mark",
       V: "markAll",
       s: "jumpSubagent",
-      w: undefined,
+      w: "inert",
       i: "workspaceCustodyDetail",
       "\r": "workspaceCustodyDetail",
     },
@@ -149,10 +154,23 @@ test("§4.8 dispatch table is exhaustive, contextual, and mode-first", () => {
     assert.equal(resolveAction("]", "normal", tab), undefined);
     assert.equal(resolveAction("x", "search", tab), undefined);
     assert.equal(resolveAction("\x1b", "search", tab), "close");
-    assert.equal(resolveAction("h", "detail", tab), undefined);
-    assert.equal(resolveAction("l", "detail", tab), undefined);
+    assert.equal(resolveAction("h", "detail", tab), "inert");
+    assert.equal(resolveAction("l", "detail", tab), "inert");
+    assert.equal(resolveAction("\t", "detail", tab), "inert");
+    assert.equal(resolveAction("V", "normal", tab), "markAll");
     assert.equal(resolveAction("\x1b[6~", "normal", tab), "pageDown");
   }
+});
+
+test("Tasks distinguishes metadata detail from editing", () => {
+  const detail = harness();
+  detail.view.focus("tasks");
+  detail.view.handleInput("i");
+  assert.match(detail.lines().join("\n"), /Task metadata detail is unavailable/);
+  const edit = harness();
+  edit.view.focus("tasks");
+  edit.view.handleInput("\r");
+  assert.match(edit.lines().join("\n"), /Task editing is unavailable/);
 });
 
 test("row budget holds for list, notice, and detail at every terminal height", () => {
@@ -175,6 +193,24 @@ test("action menu never invokes subagent cancellation and unavailable actions ar
   assert.match(h.lines().join("\n"), /Action menu is not available on Subagents yet/);
   h.view.handleInput("x");
   assert.equal(h.cancelCalls(), 1);
+});
+
+test("detail ignores axes and invalidates a removed target before Esc closes", () => {
+  const running = { ...snapshot("ghost"), status: "running" as const };
+  const h = harness([running], 30);
+  h.view.handleInput("\r");
+  assert.match(h.lines().join("\n"), /Subagent ghost/);
+  h.view.handleInput("\t");
+  h.view.handleInput("h");
+  assert.match(h.lines().join("\n"), /Subagent ghost/);
+  assert.equal(h.cancelCalls(), 0);
+  h.mutate([]);
+  const invalidated = h.lines().join("\n");
+  assert.match(invalidated, /ghost is no longer available\./);
+  assert.doesNotMatch(invalidated, /Subagent ghost/);
+  assert.equal(h.cancelCalls(), 0);
+  h.view.handleInput("\x1b");
+  assert.equal(h.closes(), 1);
 });
 
 test("primary tab navigation never wraps at either boundary", () => {

@@ -49,7 +49,9 @@ export type DashboardAction =
   | "primaryPrevious"
   | "stateNext"
   | "statePrevious"
+  | "inert"
   | "taskEdit"
+  | "taskDetail"
   | "subagentDetail"
   | "workspaceCustodyDetail"
   | "actionMenu"
@@ -85,26 +87,32 @@ export function resolveAction(
   if (matchesKey(data, "ctrl+u") || data === "\x1b[5~") return "pageUp";
   if (matchesKey(data, "g")) return "top";
   if (matchesKey(data, "shift+g") || data === "G") return "bottom";
-  if (mode !== "detail" && (matchesKey(data, "l") || matchesKey(data, "right")))
-    return "primaryNext";
-  if (mode !== "detail" && (matchesKey(data, "h") || matchesKey(data, "left")))
-    return "primaryPrevious";
-  if (matchesKey(data, "tab")) return "stateNext";
-  if (matchesKey(data, "shift+tab")) return "statePrevious";
-  if (matchesKey(data, "enter") || matchesKey(data, "i"))
+  if (matchesKey(data, "l") || matchesKey(data, "right"))
+    return mode === "detail" ? "inert" : "primaryNext";
+  if (matchesKey(data, "h") || matchesKey(data, "left"))
+    return mode === "detail" ? "inert" : "primaryPrevious";
+  if (matchesKey(data, "tab")) return mode === "detail" ? "inert" : "stateNext";
+  if (matchesKey(data, "shift+tab")) return mode === "detail" ? "inert" : "statePrevious";
+  if (matchesKey(data, "enter"))
     return tab === "tasks"
       ? "taskEdit"
       : tab === "subagents"
         ? "subagentDetail"
         : "workspaceCustodyDetail";
+  if (matchesKey(data, "i"))
+    return tab === "tasks"
+      ? "taskDetail"
+      : tab === "subagents"
+        ? "subagentDetail"
+        : "workspaceCustodyDetail";
   if (matchesKey(data, "a")) return "actionMenu";
   if (matchesKey(data, "x")) return "cancel";
-  if (matchesKey(data, "p")) return tab === "tasks" ? "taskImportRevision" : undefined;
-  if (matchesKey(data, "e")) return tab === "workspaces" ? undefined : "archiveRestore";
+  if (matchesKey(data, "p")) return tab === "tasks" ? "taskImportRevision" : "inert";
+  if (matchesKey(data, "e")) return tab === "workspaces" ? "inert" : "archiveRestore";
+  if (data === "V" || matchesKey(data, "shift+v")) return "markAll";
   if (matchesKey(data, "v")) return "mark";
-  if (data === "V") return "markAll";
-  if (matchesKey(data, "s")) return tab === "subagents" ? undefined : "jumpSubagent";
-  if (matchesKey(data, "w")) return tab === "workspaces" ? undefined : "jumpWorkspace";
+  if (matchesKey(data, "s")) return tab === "subagents" ? "inert" : "jumpSubagent";
+  if (matchesKey(data, "w")) return tab === "workspaces" ? "inert" : "jumpWorkspace";
   if (matchesKey(data, "/")) return "search";
   if (matchesKey(data, "?")) return "help";
   return undefined;
@@ -191,7 +199,7 @@ export class SubagentDashboard {
 
   handleInput(data: string): void {
     const action = resolveAction(data, this.detailId ? "detail" : "normal", this.primaryTab);
-    if (!action) return;
+    if (!action || action === "inert") return;
     if (action === "close") {
       if (this.detailId) {
         this.detailId = undefined;
@@ -222,6 +230,8 @@ export class SubagentDashboard {
       } else this.setNotice("Subagent detail is unavailable because no subagent is selected.");
     } else if (action === "taskEdit")
       this.setNotice("Task editing is unavailable until the Tasks adapter is connected.");
+    else if (action === "taskDetail")
+      this.setNotice("Task metadata detail is unavailable until the Tasks adapter is connected.");
     else if (action === "workspaceCustodyDetail")
       this.setNotice(
         "Workspace custody detail is unavailable until the Workspaces adapter is connected.",
@@ -384,6 +394,13 @@ export class SubagentDashboard {
       0,
       this.snapshots.findIndex((row) => row.id === this.selectedId),
     );
+    if (this.detailId && !this.snapshots.some((row) => row.id === this.detailId)) {
+      const id = this.detailId;
+      this.detailId = undefined;
+      this.detailScroll = 0;
+      this.detailMaxScroll = 0;
+      this.notice = `${id} is no longer available.`;
+    }
     this.requestRender();
   }
 
