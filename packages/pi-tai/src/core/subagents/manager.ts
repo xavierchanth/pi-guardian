@@ -315,7 +315,10 @@ export class SubagentManager {
           ...(request.effort ? { effort: request.effort } : {}),
           ...(request.tools ? { tools: request.tools } : {}),
         },
-        workspace: { cwd: request.cwd, ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}) },
+        workspace: {
+          cwd: request.cwd,
+          ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+        },
         ...(request.capability ? { capability: request.capability } : {}),
         charterRef: { kind: "manager_task", value: durableId },
         ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
@@ -597,7 +600,13 @@ export class SubagentManager {
         at: this.clock(),
       });
       const nextGeneration = entry.generation + 1;
-      await this.lifecycleStore?.append({ version: 2, type: "running", durableId: entry.snapshot.durableId, generation: nextGeneration, at: this.clock() });
+      await this.lifecycleStore?.append({
+        version: 2,
+        type: "running",
+        durableId: entry.snapshot.durableId,
+        generation: nextGeneration,
+        at: this.clock(),
+      });
       entry.generation = nextGeneration;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while continuing.`);
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
@@ -642,9 +651,22 @@ export class SubagentManager {
     try {
       session = await entry.backend.spawn(task);
       // Advance exactly once before exposing the successor generation.
-      await this.lifecycleStore?.append({ version: 2, type: "generation_advanced", durableId: entry.snapshot.durableId, previousGeneration: entry.generation, generation: entry.generation + 1, at: this.clock() });
+      await this.lifecycleStore?.append({
+        version: 2,
+        type: "generation_advanced",
+        durableId: entry.snapshot.durableId,
+        previousGeneration: entry.generation,
+        generation: entry.generation + 1,
+        at: this.clock(),
+      });
       const nextGeneration = entry.generation + 1;
-      await this.lifecycleStore?.append({ version: 2, type: "running", durableId: entry.snapshot.durableId, generation: nextGeneration, at: this.clock() });
+      await this.lifecycleStore?.append({
+        version: 2,
+        type: "running",
+        durableId: entry.snapshot.durableId,
+        generation: nextGeneration,
+        at: this.clock(),
+      });
       entry.generation = nextGeneration;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
@@ -806,10 +828,24 @@ export class SubagentManager {
   }
 
   private watchResumeHandle(entry: Entry, session: SubagentSession): void {
-    const kind = entry.snapshot.backend === "pi" ? "pi_session_file" : entry.snapshot.backend === "claude" ? "claude_session" : "codex_thread";
+    const kind =
+      entry.snapshot.backend === "pi"
+        ? "pi_session_file"
+        : entry.snapshot.backend === "claude"
+          ? "claude_session"
+          : "codex_thread";
     const persist = (value: string) => {
       if (!value) return;
-      void this.lifecycleStore?.append({ version: 2, type: "resume_handle_discovered", durableId: entry.snapshot.durableId, generation: entry.generation, resumeHandle: { kind, value } as never, at: this.clock() }).catch((error) => this.recordPersistenceError(error));
+      void this.lifecycleStore
+        ?.append({
+          version: 2,
+          type: "resume_handle_discovered",
+          durableId: entry.snapshot.durableId,
+          generation: entry.generation,
+          resumeHandle: { kind, value } as never,
+          at: this.clock(),
+        })
+        .catch((error) => this.recordPersistenceError(error));
     };
     if (session.onResumeHandle) session.onResumeHandle(persist);
     else if (session.sessionFile) persist(session.sessionFile);

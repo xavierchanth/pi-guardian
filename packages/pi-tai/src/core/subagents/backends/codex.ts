@@ -1,19 +1,19 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface, type Interface } from "node:readline";
 import {
-  EventChannel,
   type AvailabilityResult,
+  EventChannel,
   SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
 } from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
 import {
-  researchAvailability,
   type CodexMethod,
   type CodexParams,
   type CodexResult,
+  researchAvailability,
 } from "./codex-protocol.ts";
 
 /**

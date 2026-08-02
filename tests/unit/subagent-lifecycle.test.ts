@@ -85,20 +85,72 @@ test("same-generation continuations fold from terminal back through running", ()
 });
 
 test("v2 advances generations exactly once and binds handles to their backend", () => {
-  const v2 = { version: 2 as const, type: "spawn_intent" as const, durableId: "v2-id", displayId: "sa-8", sequence: 8, generation: 1, backend: "claude" as const, title: "work", backendConfig: { model: "sonnet" }, workspace: { cwd: "/work", workspaceId: "ws" }, capability: "researcher" as const, charterRef: { kind: "manager_task" as const, value: "v2-id" }, at: "a" };
-  const folded = foldLifecycle([v2,
-    { version:2,type:"running",durableId:"v2-id",generation:1,at:"b" },
-    { version:2,type:"resume_handle_discovered",durableId:"v2-id",generation:1,resumeHandle:{kind:"claude_session",value:"session"},at:"c" },
-    { version:2,type:"terminal",durableId:"v2-id",generation:1,disposition:"done",at:"d" },
-    { version:2,type:"generation_advanced",durableId:"v2-id",previousGeneration:1,generation:2,at:"e" },
-    { version:2,type:"running",durableId:"v2-id",generation:2,at:"f" },
-    { version:2,type:"generation_advanced",durableId:"v2-id",previousGeneration:2,generation:3,at:"bad" },
-    { version:2,type:"resume_handle_discovered",durableId:"v2-id",generation:2,resumeHandle:{kind:"codex_thread",value:"wrong"},at:"bad2" },
+  const v2 = {
+    version: 2 as const,
+    type: "spawn_intent" as const,
+    durableId: "v2-id",
+    displayId: "sa-8",
+    sequence: 8,
+    generation: 1,
+    backend: "claude" as const,
+    title: "work",
+    backendConfig: { model: "sonnet" },
+    workspace: { cwd: "/work", workspaceId: "ws" },
+    capability: "researcher" as const,
+    charterRef: { kind: "manager_task" as const, value: "v2-id" },
+    at: "a",
+  };
+  const folded = foldLifecycle([
+    v2,
+    { version: 2, type: "running", durableId: "v2-id", generation: 1, at: "b" },
+    {
+      version: 2,
+      type: "resume_handle_discovered",
+      durableId: "v2-id",
+      generation: 1,
+      resumeHandle: { kind: "claude_session", value: "session" },
+      at: "c",
+    },
+    {
+      version: 2,
+      type: "terminal",
+      durableId: "v2-id",
+      generation: 1,
+      disposition: "done",
+      at: "d",
+    },
+    {
+      version: 2,
+      type: "generation_advanced",
+      durableId: "v2-id",
+      previousGeneration: 1,
+      generation: 2,
+      at: "e",
+    },
+    { version: 2, type: "running", durableId: "v2-id", generation: 2, at: "f" },
+    {
+      version: 2,
+      type: "generation_advanced",
+      durableId: "v2-id",
+      previousGeneration: 2,
+      generation: 3,
+      at: "bad",
+    },
+    {
+      version: 2,
+      type: "resume_handle_discovered",
+      durableId: "v2-id",
+      generation: 2,
+      resumeHandle: { kind: "codex_thread", value: "wrong" },
+      at: "bad2",
+    },
   ]);
-  const record=folded.records.get("v2-id");
-  assert.equal(record?.generation,2); assert.equal(record?.disposition,"running");
-  assert.deepEqual(record?.resumeHandle,{kind:"claude_session",value:"session"});
-  assert.equal(record?.workspaceId,"ws"); assert.equal(folded.rejected.length,2);
+  const record = folded.records.get("v2-id");
+  assert.equal(record?.generation, 2);
+  assert.equal(record?.disposition, "running");
+  assert.deepEqual(record?.resumeHandle, { kind: "claude_session", value: "session" });
+  assert.equal(record?.workspaceId, "ws");
+  assert.equal(folded.rejected.length, 2);
 });
 
 test("unknown versions and invalid transitions are quarantined", () => {

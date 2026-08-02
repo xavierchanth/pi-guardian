@@ -388,7 +388,16 @@ describe("subagent manager", () => {
 
     assert.deepEqual(
       events.map(({ type }) => type),
-      ["spawn_intent", "running", "resume_handle_discovered", "terminal", "generation_advanced", "running", "resume_handle_discovered", "terminal"],
+      [
+        "spawn_intent",
+        "running",
+        "resume_handle_discovered",
+        "terminal",
+        "generation_advanced",
+        "running",
+        "resume_handle_discovered",
+        "terminal",
+      ],
     );
     const folded = foldLifecycle(events);
     assert.equal(folded.rejected.length, 0);

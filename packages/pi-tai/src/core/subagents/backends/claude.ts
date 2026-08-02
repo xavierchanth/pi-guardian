@@ -1,6 +1,6 @@
 import {
-  EventChannel,
   type AvailabilityResult,
+  EventChannel,
   type SubagentBackend,
   type SubagentSession,
 } from "../backend.ts";
@@ -159,7 +159,11 @@ class ClaudeSubagentSession implements SubagentSession {
           type?: unknown;
           user_message_uuid?: unknown;
         };
-        if (typeof frame.session_id === "string" && frame.session_id && frame.session_id !== this.resumeToken) {
+        if (
+          typeof frame.session_id === "string" &&
+          frame.session_id &&
+          frame.session_id !== this.resumeToken
+        ) {
           this.resumeToken = frame.session_id;
           for (const listener of this.handleListeners) listener(frame.session_id);
         }
