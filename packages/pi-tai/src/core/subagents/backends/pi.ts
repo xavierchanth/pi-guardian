@@ -193,7 +193,10 @@ class PiSubagentSession implements SubagentSession {
     // Refuse before handing it the text, so callers may safely decide whether
     // an explicit continuation is appropriate.
     if (!this.handle.session.isStreaming)
-      throw new SendNotDeliveredError("Pi child is no longer streaming; steer was not delivered.");
+      throw new SendNotDeliveredError(
+        `Pi child is no longer streaming; ${mode} was not delivered.`,
+        "settled",
+      );
     await this.handle.session.prompt(text, { streamingBehavior: mode });
   }
 

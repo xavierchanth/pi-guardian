@@ -18,10 +18,17 @@ export interface SubagentBackend {
 
 export type LiveInputMode = "steer" | "followUp";
 export type SendMode = LiveInputMode | "continue";
+export type NotDeliveredReason = "settled" | "saturated" | "closed" | "precondition";
 
 /** A send rejection that proves the backend accepted no input. */
 export class SendNotDeliveredError extends Error {
   readonly name = "SendNotDeliveredError";
+  constructor(
+    message: string,
+    readonly reason: NotDeliveredReason,
+  ) {
+    super(message);
+  }
 }
 
 export interface BackendCapabilities {
@@ -40,6 +47,8 @@ export type AvailabilityResult =
 export interface SubagentSession {
   /** Normalised event stream; completes after the terminal `run_settled`. */
   readonly events: AsyncIterable<SubagentEvent>;
+  /** Narrows the backend's advertised live-input set after session negotiation. */
+  readonly liveInput?: readonly LiveInputMode[];
   /**
    * Handle for continuing this conversation once it has settled. Populated by
    * harnesses that support it; `undefined` means every turn starts fresh.

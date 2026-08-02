@@ -349,7 +349,7 @@ describe("subagent manager", () => {
       session.send = async () => {
         await session.interrupt();
         await settleQueue();
-        throw new SendNotDeliveredError("settled before delivery");
+        throw new SendNotDeliveredError("settled before delivery", "settled");
       };
       return session;
     };

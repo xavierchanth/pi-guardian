@@ -107,6 +107,8 @@ interface Entry {
   readonly sequence: number;
   /** Serializes messages without blocking messages to other children. */
   sendChain: Promise<void>;
+  /** Identity of the currently pumped run. */
+  runToken: object;
   /** Permanent tombstone: queued work must never reopen this entry. */
   closed: boolean;
   /** Historical records have no spawn task or live continuation handle. */
@@ -219,6 +221,7 @@ export class SubagentManager {
         generation: record.generation,
         sequence: record.sequence,
         sendChain: Promise.resolve(),
+        runToken: {},
         closed: false,
         restored: true,
         custodyResolved: true,
@@ -346,6 +349,7 @@ export class SubagentManager {
         generation,
         sequence: this.sequence,
         sendChain: Promise.resolve(),
+        runToken: {},
         closed: false,
         restored: false,
         custodyResolved: request.workspaceId === undefined,
@@ -397,7 +401,7 @@ export class SubagentManager {
         this.finish(entry, { type: "backend_error", message: describe(error) });
         throw error;
       }
-      void this.pump(entry, entry.session);
+      void this.pump(entry, entry.session, entry.runToken);
       return entry.snapshot;
     } catch (error) {
       // Once an entry exists, finish() owns release of the running reservation.
@@ -513,11 +517,12 @@ export class SubagentManager {
         `Subagent ${id} was restored as a historical record without a live task or continuation handle.`,
       );
     if (entry.snapshot.status === "running") {
+      const liveInput = entry.session?.liveInput ?? entry.backend.capabilities.liveInput;
       const operation =
         requested === "auto"
-          ? entry.backend.capabilities.liveInput.includes("steer")
+          ? liveInput.includes("steer")
             ? "steer"
-            : entry.backend.capabilities.liveInput.includes("followUp")
+            : liveInput.includes("followUp")
               ? "followUp"
               : undefined
           : requested;
@@ -525,7 +530,7 @@ export class SubagentManager {
         throw new Error(
           `Subagent ${id} is still running; continue is only valid after it settles.`,
         );
-      if (!operation || !entry.backend.capabilities.liveInput.includes(operation))
+      if (!operation || !liveInput.includes(operation))
         throw new Error(
           `Subagent ${id} is running, but the ${entry.snapshot.backend} backend does not support ${operation ?? "live input"}.`,
         );
@@ -534,8 +539,8 @@ export class SubagentManager {
         await entry.session.send(text, operation);
         return { operation, settlementRace: false };
       } catch (error) {
-        if (entry.snapshot.status === "running") throw error;
         if (!(error instanceof SendNotDeliveredError)) throw error;
+        if (error.reason !== "settled") throw error;
         if (requested !== "auto")
           throw new Error(
             `Subagent ${id} settled before ${operation} could be delivered; it was not continued.`,
@@ -603,7 +608,7 @@ export class SubagentManager {
     const settled = new Promise<SubagentSnapshot>((resolve) => {
       resolveSettled = resolve;
     });
-    Object.assign(entry, { settled, resolveSettled });
+    Object.assign(entry, { settled, resolveSettled, runToken: {} });
     this.delivery.consume(entry.snapshot.id);
     this.update(entry, {
       ...entry.snapshot,
@@ -612,7 +617,7 @@ export class SubagentManager {
       liveTools: [],
       deliveryPending: false,
     });
-    void this.pump(entry, session);
+    void this.pump(entry, session, entry.runToken);
   }
 
   async cancel(ids: readonly string[]): Promise<SubagentSnapshot[]> {
@@ -654,10 +659,10 @@ export class SubagentManager {
     this.reserved = 0;
   }
 
-  private async pump(entry: Entry, session: SubagentSession): Promise<void> {
+  private async pump(entry: Entry, session: SubagentSession, token: object): Promise<void> {
     try {
       for await (const event of session.events) {
-        if (entry.closed || entry.session !== session) return;
+        if (entry.closed || entry.session !== session || entry.runToken !== token) return;
         if (event.type === "run_settled" || event.type === "backend_error") {
           this.finish(entry, event);
           return;
