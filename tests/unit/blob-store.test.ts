@@ -33,7 +33,10 @@ test("private blob store atomically publishes immutable UTF-8 and binary records
   const record = readdirSync(store.root).find((name) => !name.startsWith(".tmp-"));
   assert.ok(record);
   assert.equal(statSync(join(store.root, record)).mode & 0o777, 0o500);
-  assert.deepEqual(readdirSync(store.root).filter((name) => name.startsWith(".tmp-")), []);
+  assert.deepEqual(
+    readdirSync(store.root).filter((name) => name.startsWith(".tmp-")),
+    [],
+  );
 });
 
 test("keys, root sessions, bounds, Unicode, and digest claims fail closed", () => {
@@ -51,10 +54,7 @@ test("partitions are private and root and record symlinks are never followed", (
   store.publishUtf8("one", "secret");
   assert.equal(store.root.startsWith(paths.data), true);
   assert.equal(store.root.startsWith(paths.runtime), false);
-  assert.notEqual(
-    new PrivateBlobStore({ rootSessionId: "root_2", paths }).root,
-    store.root,
-  );
+  assert.notEqual(new PrivateBlobStore({ rootSessionId: "root_2", paths }).root, store.root);
 
   const unsafePaths = resolveStoragePaths({}, join(home, "unsafe"));
   mkdirSync(unsafePaths.data, { recursive: true, mode: 0o700 });

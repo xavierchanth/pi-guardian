@@ -78,7 +78,12 @@ export class PrivateBlobStore {
     mkdirSync(temporary, { mode: 0o700 });
     try {
       writePrivateDurable(join(temporary, "body"), bytes);
-      const metadata: BlobMetadata = { version: 1, algorithm: "sha256", digest, bytes: bytes.length };
+      const metadata: BlobMetadata = {
+        version: 1,
+        algorithm: "sha256",
+        digest,
+        bytes: bytes.length,
+      };
       writePrivateDurable(join(temporary, "metadata.json"), Buffer.from(JSON.stringify(metadata)));
       chmodSync(join(temporary, "body"), 0o400);
       chmodSync(join(temporary, "metadata.json"), 0o400);
@@ -161,7 +166,10 @@ function validateKey(key: string): void {
   if (key.length < 1 || key.length > 1024 || isAbsolute(key) || key.includes("\\"))
     throw new Error("Invalid blob key");
   const segments = key.split("/");
-  if (segments.length > 16 || segments.some((part) => !KEY_SEGMENT.test(part) || part === "." || part === ".."))
+  if (
+    segments.length > 16 ||
+    segments.some((part) => !KEY_SEGMENT.test(part) || part === "." || part === "..")
+  )
     throw new Error("Invalid blob key");
 }
 
@@ -176,12 +184,17 @@ function mkdirPrivate(path: string): void {
 
 function assertPrivateDirectory(path: string, mode: 0o500 | 0o700): void {
   const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe artifact directory: ${path}`);
+  if (!stat.isDirectory() || stat.isSymbolicLink())
+    throw new Error(`Unsafe artifact directory: ${path}`);
   if ((stat.mode & 0o777) !== mode) throw new Error(`Artifact directory has unsafe mode: ${path}`);
 }
 
 function writePrivateDurable(path: string, bytes: Buffer): void {
-  const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o600);
+  const fd = openSync(
+    path,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW,
+    0o600,
+  );
   try {
     writeFileSync(fd, bytes);
     fsyncSync(fd);
@@ -192,7 +205,12 @@ function writePrivateDurable(path: string, bytes: Buffer): void {
 
 function readPrivateFile(path: string, bound: number): Buffer {
   const before = lstatSync(path);
-  if (!before.isFile() || before.isSymbolicLink() || (before.mode & 0o777) !== 0o400 || before.nlink !== 1)
+  if (
+    !before.isFile() ||
+    before.isSymbolicLink() ||
+    (before.mode & 0o777) !== 0o400 ||
+    before.nlink !== 1
+  )
     throw new Error(`Unsafe artifact file: ${path}`);
   const fd = openSync(path, constants.O_RDONLY | NOFOLLOW);
   try {
