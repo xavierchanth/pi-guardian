@@ -124,7 +124,7 @@ describe("managed jj workspaces", () => {
     assert.deepEqual(await parentsOf(record.path, "@"), parents);
   });
 
-  it("merges linearly when the user's working copy is empty and single-parent", async () => {
+  it("uses merge-under when the user's working copy is empty and single-parent", async () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
     const record = await manager.create({ label: "worker" });
@@ -133,7 +133,7 @@ describe("managed jj workspaces", () => {
     const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
-    assert.equal(result.kind === "merged" && result.summary.strategy, "linear");
+    assert.equal(result.kind === "merged" && result.summary.strategy, "merge-under");
     assert.equal(await readFile(join(source, "feature.txt"), "utf8"), "agent output\n");
     assert.equal((await parentsOf(source, "@")).length, 1, "linear merge keeps a single-parent @");
     assert.deepEqual(await manager.list(), [], "a merged workspace leaves no record");

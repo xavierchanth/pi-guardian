@@ -552,15 +552,6 @@ export class JjCli {
     return !out.includes("x");
   }
 
-  /**
-   * Moves `changeIds` (and nothing else) to sit immediately below `@`.
-   * Run against the source working copy so jj updates it in place rather than
-   * leaving it stale.
-   */
-  async rebaseInsertBefore(cwd: string, changeIds: readonly string[]): Promise<void> {
-    await this.run(cwd, ["rebase", "--revisions", exactAny(changeIds), "--insert-before", "@"]);
-  }
-
   /** The id of the newest operation, used to bound an undo. */
   async currentOperationId(cwd: string): Promise<string> {
     const out = await this.read(cwd, [
