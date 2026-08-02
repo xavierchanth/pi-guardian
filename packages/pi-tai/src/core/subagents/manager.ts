@@ -582,8 +582,11 @@ export class SubagentManager {
         `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
       );
     this.reserved += 1;
+    const previous = entry.snapshot;
     try {
-      await entry.session.continueInPlace(text);
+      // Persist the reservation before exposing it. Unlike a respawn, the
+      // retained Pi handle can begin producing events synchronously, so all
+      // manager state and the single-writer token must be installed first.
       await this.lifecycleStore?.append({
         version: 1,
         type: "running",
@@ -594,23 +597,33 @@ export class SubagentManager {
           ? { resumeHandle: { kind: "pi_session_file" as const, value: entry.session.sessionFile } }
           : {}),
       });
+      if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while continuing.`);
+      let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
+      const settled = new Promise<SubagentSnapshot>((resolve) => {
+        resolveSettled = resolve;
+      });
+      const runToken = {};
+      Object.assign(entry, { settled, resolveSettled, runToken });
+      this.delivery.consume(entry.snapshot.id);
+      this.update(entry, {
+        ...entry.snapshot,
+        status: "running",
+        latestText: "",
+        turns: 0,
+        liveTools: [],
+        deliveryPending: false,
+      });
+      const accepted = entry.session.continueInPlace(text);
+      // Attach the consumer before yielding to completion. EventChannel buffers
+      // synchronous run_started frames, while runToken prevents an old pump
+      // from settling this new generation.
+      void this.pump(entry, entry.session, runToken);
+      await accepted;
     } catch (error) {
+      if (entry.snapshot.status === "running") this.update(entry, previous);
       this.reserved = Math.max(0, this.reserved - 1);
       throw error;
     }
-    let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
-    const settled = new Promise<SubagentSnapshot>((resolve) => { resolveSettled = resolve; });
-    Object.assign(entry, { settled, resolveSettled, runToken: {} });
-    this.delivery.consume(entry.snapshot.id);
-    this.update(entry, {
-      ...entry.snapshot,
-      status: "running",
-      latestText: "",
-      turns: 0,
-      liveTools: [],
-      deliveryPending: false,
-    });
-    void this.pump(entry, entry.session, entry.runToken);
   }
 
   /** Starts a follow-up run in place, reusing the entry so the id stays stable. */

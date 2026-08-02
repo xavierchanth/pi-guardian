@@ -188,28 +188,40 @@ class PiSubagentSession implements SubagentSession {
     }
   }
 
-  async continueInPlace(text: string): Promise<void> {
+  continueInPlace(text: string): Promise<void> {
     if (this.disposed)
-      throw new SendNotDeliveredError("Pi child session was disposed.", "closed");
+      return Promise.reject(new SendNotDeliveredError("Pi child session was disposed.", "closed"));
     if (this.handle.session.isStreaming)
-      throw new SendNotDeliveredError("Pi child is still streaming.", "precondition");
+      return Promise.reject(
+        new SendNotDeliveredError("Pi child is still streaming.", "precondition"),
+      );
     this.unsubscribe();
     this.channel = new EventChannel();
     this.streamed = 0;
     this.lastAssistantText = "";
     this.unsubscribe = this.handle.session.subscribe((event) => this.translate(event));
     this.channel.push({ type: "run_started" });
+    // Acceptance and completion are deliberately separate. The manager must be
+    // able to expose and pump the new run before prompt() eventually settles.
+    void this.runContinuation(text);
+    return Promise.resolve();
+  }
+
+  private async runContinuation(text: string): Promise<void> {
     try {
       await this.handle.session.prompt(text);
       await this.handle.session.waitForIdle();
-      this.channel.push({ type: "run_settled", outcome: "completed", text: this.lastAssistantText });
+      this.channel.push({
+        type: "run_settled",
+        outcome: "completed",
+        text: this.lastAssistantText,
+      });
     } catch (error) {
       this.channel.push({
         type: "run_settled",
-        outcome: "failed",
+        outcome: this.disposed ? "interrupted" : "failed",
         error: error instanceof Error ? error.message : String(error),
       });
-      throw error;
     } finally {
       this.unsubscribe();
     }
