@@ -1,30 +1,31 @@
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-  queryTerminalBackground,
-  type QueryTerminalBackground,
-} from "./src/terminal/ansi-theme/query.ts";
-import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { registerAutoCompaction } from "./src/core/compaction/register.ts";
 import {
   createPiTaiConfigService,
-  registerPiTaiConfig,
   type PiTaiConfigService,
+  registerPiTaiConfig,
 } from "./src/core/config/register.ts";
-import { registerCmux } from "./src/terminal/cmux/register.ts";
-import { registerAutoCompaction } from "./src/core/compaction/register.ts";
 import { registerContextTransfer } from "./src/core/context-transfer/register.ts";
-import { registerFooter } from "./src/terminal/footer/register.ts";
 import { registerApprovalGuardian } from "./src/core/guardian/register.ts";
-import { registerFirstPartyKeybindings } from "./src/terminal/keybindings/register.ts";
 import { registerModelProfiles } from "./src/core/model-profiles/register.ts";
+import type { BackendName } from "./src/core/subagents/domain.ts";
+import { registerAgents } from "./src/core/subagents/register.ts";
 import {
+  type QueryTerminalBackground,
+  queryTerminalBackground,
+} from "./src/terminal/ansi-theme/query.ts";
+import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
+import { registerCmux } from "./src/terminal/cmux/register.ts";
+import { terminalRows } from "./src/terminal/dashboard/rows.ts";
+import { registerFooter } from "./src/terminal/footer/register.ts";
+import { registerFirstPartyKeybindings } from "./src/terminal/keybindings/register.ts";
+import {
+  type NotificationSender,
   registerNotifications,
   sendNativeTerminalNotification,
-  type NotificationSender,
 } from "./src/terminal/notifications/index.ts";
 import { registerResponseEditor } from "./src/terminal/response-editor/register.ts";
 import { registerBtw } from "./src/terminal/sidebar/register.ts";
-import { registerAgents } from "./src/core/subagents/register.ts";
-import type { BackendName } from "./src/core/subagents/domain.ts";
 
 /** Where child sessions run. The legacy out-of-process launcher is retired. */
 export type SubagentRuntimeMode = "pi-cli" | "host-worker";
@@ -75,6 +76,7 @@ const productionRegistrars: PiTaiRegistrars = {
     registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
+      readDashboardRows: terminalRows,
       ...(runtime.backends ? { backends: runtime.backends } : {}),
       ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });

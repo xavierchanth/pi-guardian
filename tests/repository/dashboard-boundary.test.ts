@@ -5,7 +5,7 @@ import test from "node:test";
 
 const root = join(import.meta.dirname, "../..");
 
-test("shared dashboard core has no terminal or TUI dependency", () => {
+test("shared dashboard projections have no terminal or TUI dependency", () => {
   for (const file of [
     "packages/pi-tai/src/core/dashboard/viewport.ts",
     "packages/pi-tai/src/core/subagents/dashboard.ts",
@@ -13,6 +13,18 @@ test("shared dashboard core has no terminal or TUI dependency", () => {
     const source = readFileSync(join(root, file), "utf8");
     assert.doesNotMatch(source, /@earendil-works\/pi-tui|\/terminal\//);
   }
+});
+
+test("core dashboard view receives terminal rows through the composition facade", () => {
+  const view = readFileSync(
+    join(root, "packages/pi-tai/src/core/subagents/dashboard-view.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(view, /(?:from|import\()\s*["'][^"']*terminal(?:\/|["'])/);
+  assert.match(view, /readRows: \(tui: TUI\) => number/);
+
+  const facade = readFileSync(join(root, "packages/pi-tai/pi-tai.ts"), "utf8");
+  assert.match(facade, /readDashboardRows: terminalRows/);
 });
 
 test("terminal budget is read only by the terminal adapter with a documented fallback", () => {

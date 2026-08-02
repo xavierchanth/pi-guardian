@@ -10,24 +10,23 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type TUI } from "@earendil-works/pi-tui";
 import {
-  renderDashboard,
-  renderSubagentDetail,
-  scrollDetail,
-  type DashboardTone,
-} from "./dashboard.ts";
-import type { SubagentSnapshot } from "./domain.ts";
-import {
   cycleTab,
+  type DashboardPrimaryTab,
+  type DashboardStateTab,
   dashboardBodyCapacity,
   ensureVisible,
   moveSelection,
   PRIMARY_TABS,
   reconcileSelection,
   STATE_TABS,
-  type DashboardPrimaryTab,
-  type DashboardStateTab,
 } from "../dashboard/viewport.ts";
-import { terminalRows } from "../../terminal/dashboard/rows.ts";
+import {
+  type DashboardTone,
+  renderDashboard,
+  renderSubagentDetail,
+  scrollDetail,
+} from "./dashboard.ts";
+import type { SubagentSnapshot } from "./domain.ts";
 
 /**
  * The slice of {@link SubagentManager} the dashboard needs. Narrowing it keeps
@@ -53,6 +52,7 @@ class SubagentDashboard {
   private readonly tui: TUI;
   private readonly theme: Theme;
   private readonly close: () => void;
+  private readonly readRows: (tui: TUI) => number;
   private readonly unsubscribe: () => void;
   private snapshots: readonly SubagentSnapshot[];
   private selectedId: string | undefined;
@@ -70,11 +70,13 @@ class SubagentDashboard {
     tui: TUI;
     theme: Theme;
     close: () => void;
+    readRows: (tui: TUI) => number;
   }) {
     this.agents = options.agents;
     this.tui = options.tui;
     this.theme = options.theme;
     this.close = options.close;
+    this.readRows = options.readRows;
     this.snapshots = this.agents?.list() ?? [];
     this.selectedId = this.snapshots[0]?.id;
     this.unsubscribe =
@@ -158,7 +160,7 @@ class SubagentDashboard {
   }
 
   render(width: number): string[] {
-    const rowBudget = terminalRows(this.tui);
+    const rowBudget = this.readRows(this.tui);
     const detail = this.detailId
       ? this.snapshots.find((snapshot) => snapshot.id === this.detailId)
       : undefined;
@@ -247,6 +249,7 @@ class SubagentDashboard {
 export function registerSubagentDashboard(
   pi: ExtensionAPI,
   resolveAgents: () => DashboardAgents | undefined,
+  readRows: (tui: TUI) => number,
 ): void {
   const command = {
     description: "Show running and finished subagents",
@@ -261,7 +264,7 @@ export function registerSubagentDashboard(
       const agents = resolveAgents();
       await ctx.ui.custom<void>(
         (tui, theme, _keybindings, done) =>
-          new SubagentDashboard({ agents, tui, theme, close: () => done() }),
+          new SubagentDashboard({ agents, tui, theme, close: () => done(), readRows }),
         {
           overlay: true,
           overlayOptions: { width: "100%", maxHeight: "100%", anchor: "center", margin: 1 },
