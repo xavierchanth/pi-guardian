@@ -6,7 +6,7 @@ import {
   getAgentDir,
   getMarkdownTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Markdown, Text, type TUI } from "@earendil-works/pi-tui";
+import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { SessionPolicyReader } from "../../core/config/register.ts";
 import {
@@ -34,7 +34,6 @@ import {
   capabilityInstructions,
 } from "./capabilities.ts";
 import { composePiTaiInstructions } from "./charter-domain.ts";
-import { registerSubagentDashboard } from "./dashboard-view.ts";
 import { type BackendName, contextUtilisation, type SubagentSnapshot } from "./domain.ts";
 import { type InstructionLoader, loadPackagedInstructions } from "./instructions.ts";
 import { IsolatedSubagents } from "./isolated.ts";
@@ -78,8 +77,11 @@ export interface AgentsDependencies {
   readonly workspaces?: WorkspaceManagerPort;
   readonly extraBackends?: readonly SubagentBackend[];
   readonly loadInstructions?: InstructionLoader;
-  /** Host adapter for terminal dimensions; production injects the live TUI reader. */
-  readonly readDashboardRows?: (tui: TUI) => number;
+  /** Composition hook: terminal UI registration stays outside core. */
+  readonly registerDashboard?: (
+    pi: ExtensionAPI,
+    resolveAgents: () => SubagentManager | undefined,
+  ) => void;
 }
 
 interface Runtime {
@@ -199,7 +201,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     return built;
   }
 
-  registerSubagentDashboard(pi, () => built?.agents, dependencies.readDashboardRows ?? (() => 24));
+  dependencies.registerDashboard?.(pi, () => built?.agents);
 
   // ---- spawning -------------------------------------------------------------
 

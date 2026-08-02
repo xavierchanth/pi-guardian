@@ -8,6 +8,7 @@ const root = join(import.meta.dirname, "../..");
 test("shared dashboard projections have no terminal or TUI dependency", () => {
   for (const file of [
     "packages/pi-tai/src/core/dashboard/viewport.ts",
+    "packages/pi-tai/src/core/dashboard/row-source.ts",
     "packages/pi-tai/src/core/subagents/dashboard.ts",
   ]) {
     const source = readFileSync(join(root, file), "utf8");
@@ -15,16 +16,13 @@ test("shared dashboard projections have no terminal or TUI dependency", () => {
   }
 });
 
-test("core dashboard view receives terminal rows through the composition facade", () => {
-  const view = readFileSync(
-    join(root, "packages/pi-tai/src/core/subagents/dashboard-view.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(view, /(?:from|import\()\s*["'][^"']*terminal(?:\/|["'])/);
+test("thin terminal shell receives rows through the composition facade", () => {
+  const view = readFileSync(join(root, "packages/pi-tai/src/terminal/dashboard/view.ts"), "utf8");
   assert.match(view, /readRows: \(tui: TUI\) => number/);
+  assert.doesNotMatch(view, /JjCli|SQLiteWorkspaceManager/);
 
   const facade = readFileSync(join(root, "packages/pi-tai/pi-tai.ts"), "utf8");
-  assert.match(facade, /readDashboardRows: terminalRows/);
+  assert.match(facade, /registerDashboardShell\(api, resolveAgents, terminalRows\)/);
 });
 
 test("terminal budget is read only by the terminal adapter with a documented fallback", () => {

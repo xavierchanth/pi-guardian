@@ -17,6 +17,7 @@ import {
 import { registerAnsiTheme } from "./src/terminal/ansi-theme/register.ts";
 import { registerCmux } from "./src/terminal/cmux/register.ts";
 import { terminalRows } from "./src/terminal/dashboard/rows.ts";
+import { registerDashboardShell } from "./src/terminal/dashboard/view.ts";
 import { registerFooter } from "./src/terminal/footer/register.ts";
 import { registerFirstPartyKeybindings } from "./src/terminal/keybindings/register.ts";
 import {
@@ -76,7 +77,8 @@ const productionRegistrars: PiTaiRegistrars = {
     registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
-      readDashboardRows: terminalRows,
+      registerDashboard: (api, resolveAgents) =>
+        registerDashboardShell(api, resolveAgents, terminalRows),
       ...(runtime.backends ? { backends: runtime.backends } : {}),
       ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });

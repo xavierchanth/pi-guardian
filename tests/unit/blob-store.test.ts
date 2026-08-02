@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -14,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { Worker } from "node:worker_threads";
 import {
   ArtifactStoreError,
   MIN_STAGING_AGE_MS,
@@ -103,55 +103,112 @@ test("session ids normalize and staging cleanup enforces age and a strict bound"
   assert.equal(existsSync(join(lower.root, ".tmp-not-owned")), true);
 });
 
+test("fresh staging cleanup claims observe the real-time grace period", () => {
+  const { store } = fixture();
+  const claim = join(store.root, `.tmp-320-${"a".repeat(32)}.cleanup-${"b".repeat(32)}`);
+  mkdirSync(claim, { mode: 0o700 });
+  writeFileSync(join(claim, "body"), "still claimed", { mode: 0o600 });
+
+  assert.equal(
+    store.cleanupStaging({
+      olderThanMs: MIN_STAGING_AGE_MS,
+      now: Date.now() + MIN_STAGING_AGE_MS + 1000,
+    }),
+    0,
+  );
+  assert.equal(existsSync(claim), true);
+});
+
 test("concurrent staging cleaners tolerate lost per-entry races and converge", async () => {
   const { paths, store } = fixture();
-  for (let index = 0; index < 64; index++)
-    mkdirSync(join(store.root, `.tmp-321-${index.toString(16).padStart(32, "0")}`), {
-      mode: 0o700,
-    });
+  const eligibleEntries = 96;
+  for (let index = 0; index < eligibleEntries; index++) {
+    const staging = join(store.root, `.tmp-321-${index.toString(16).padStart(32, "0")}`);
+    mkdirSync(staging, { mode: 0o700 });
+    writeFileSync(join(staging, "body"), Buffer.alloc(4096, index), { mode: 0o600 });
+    writeFileSync(join(staging, "metadata.json"), JSON.stringify({ index }), { mode: 0o600 });
+  }
 
-  const barrier = new SharedArrayBuffer(4);
   const moduleUrl = pathToFileURL(
     join(process.cwd(), "packages/pi-tai/src/core/artifacts/blob-store.ts"),
   ).href;
   const source = `
-    import { parentPort, workerData } from "node:worker_threads";
-    const { PrivateBlobStore, MIN_STAGING_AGE_MS } = await import(workerData.moduleUrl);
-    const gate = new Int32Array(workerData.barrier);
-    parentPort.postMessage("ready");
-    Atomics.wait(gate, 0, 0);
-    const store = new PrivateBlobStore({ rootSessionId: "root_1", paths: workerData.paths });
-    parentPort.postMessage(store.cleanupStaging({
-      maxEntries: 64,
+    const { PrivateBlobStore, MIN_STAGING_AGE_MS } = await import(process.env.MODULE_URL);
+    const paths = JSON.parse(process.env.STORAGE_PATHS);
+    process.stdout.write("READY\\n");
+    await new Promise((resolve) => process.stdin.once("data", resolve));
+    process.stdin.destroy();
+    const store = new PrivateBlobStore({ rootSessionId: "root_1", paths });
+    const count = store.cleanupStaging({
+      maxEntries: ${eligibleEntries},
       olderThanMs: MIN_STAGING_AGE_MS,
       now: Date.now() + MIN_STAGING_AGE_MS + 1000,
-    }));
+    });
+    process.stdout.write("RESULT:" + count + "\\n");
   `;
-  const workers = [0, 1].map(
-    () => new Worker(source, { eval: true, workerData: { barrier, moduleUrl, paths } }),
-  );
-  await Promise.all(
-    workers.map((worker) => new Promise((resolve) => worker.once("message", resolve))),
-  );
-  Atomics.store(new Int32Array(barrier), 0, 1);
-  Atomics.notify(new Int32Array(barrier), 0, workers.length);
-  const counts = await Promise.all(
-    workers.map(
-      (worker) =>
-        new Promise<number>((resolve, reject) => {
-          worker.once("message", resolve);
-          worker.once("error", reject);
-        }),
-    ),
-  );
-  assert.equal(
-    counts.every((count) => count <= 64),
-    true,
-  );
-  assert.equal(
-    readdirSync(store.root).some((name) => /^\.tmp-321-/.test(name)),
-    false,
-  );
+  const workers = Array.from({ length: 4 }, () => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      env: { ...process.env, MODULE_URL: moduleUrl, STORAGE_PATHS: JSON.stringify(paths) },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const diagnostics = () =>
+      `exit=${child.exitCode} signal=${child.signalCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`;
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`cleaner readiness timed out: ${diagnostics()}`)),
+        5000,
+      );
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        child.stdout.off("data", onData);
+        child.off("error", onError);
+        child.off("close", onClose);
+        error ? reject(error) : resolve();
+      };
+      const onData = () => stdout.includes("READY\n") && finish();
+      const onError = (error: Error) => finish(error);
+      const onClose = () => finish(new Error(`cleaner closed before ready: ${diagnostics()}`));
+      child.stdout.on("data", onData);
+      child.once("error", onError);
+      child.once("close", onClose);
+    });
+    const result = new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => {
+        const match = stdout.match(/RESULT:(\d+)\n/);
+        if (code === 0 && match) resolve(Number(match[1]));
+        else reject(new Error(`cleaner failed: ${diagnostics()}`));
+      });
+    });
+    return { child, ready, result };
+  });
+
+  try {
+    await Promise.all(workers.map((worker) => worker.ready));
+    workers.forEach(({ child }) => {
+      child.stdin.end("go\n");
+    });
+    const counts = await Promise.all(workers.map((worker) => worker.result));
+    assert.equal(
+      counts.reduce((sum, count) => sum + count, 0),
+      eligibleEntries,
+    );
+    assert.equal(
+      readdirSync(store.root).some((name) => /^\.tmp-321-/.test(name)),
+      false,
+    );
+  } finally {
+    for (const { child } of workers) if (child.exitCode === null) child.kill("SIGKILL");
+    await Promise.allSettled(workers.map((worker) => worker.result));
+  }
 });
 
 test("missing records have a typed path-private error", () => {

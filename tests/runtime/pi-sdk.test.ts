@@ -1,13 +1,32 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import test from "node:test";
-import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
-import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
 import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/core/config/provenance.ts";
 import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { createHeadlessUiContext } from "../../services/pi-runtime/src/headless-ui.ts";
+import { PiSdkRuntimePort } from "../../services/pi-runtime/src/pi-runtime.ts";
 import type { RuntimeEventInput } from "../../services/pi-runtime/src/runtime-port.ts";
+import { createPrivateXdgRoots } from "./private-xdg.ts";
+
+const inheritedXdg = Object.fromEntries(
+  ["XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"].map((key) => [
+    key,
+    process.env[key],
+  ]),
+);
+const privateXdg = createPrivateXdgRoots("pi-runtime-sdk-xdg-");
+delete process.env.XDG_RUNTIME_DIR;
+Object.assign(process.env, privateXdg.env);
+test.after(() => {
+  for (const [key, value] of Object.entries(inheritedXdg)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  privateXdg.remove();
+});
 
 function pinnedPolicy() {
   return {
@@ -29,6 +48,26 @@ async function fixture() {
   await (await import("node:fs/promises")).mkdir(cwd, { recursive: true });
   return { root, cwd, agentDir, sessionDir, ...pinnedPolicy() };
 }
+
+test("Pi SDK suite replaces every inherited developer XDG root", () => {
+  for (const [key, privatePath] of Object.entries(privateXdg.env)) {
+    assert.equal(process.env[key], privatePath);
+    if (inheritedXdg[key]) assert.notEqual(privatePath, inheritedXdg[key]);
+    assert.ok(privatePath?.startsWith(privateXdg.root));
+  }
+  const inheritedRuntime = inheritedXdg.XDG_RUNTIME_DIR;
+  if (inheritedRuntime && isAbsolute(inheritedRuntime))
+    assert.ok(process.env.XDG_RUNTIME_DIR?.startsWith(privateXdg.root));
+  else {
+    assert.equal(process.env.XDG_RUNTIME_DIR, undefined);
+    assert.equal(
+      resolveStoragePaths(process.env).runtime,
+      join(privateXdg.root, "cache", "pi-tai", "run"),
+    );
+  }
+  for (const path of Object.values(resolveStoragePaths(process.env)))
+    assert.ok(path.startsWith(privateXdg.root), `${path} escaped the private XDG root`);
+});
 
 test("hosted extension UI rejects interaction and redacts notifications", async () => {
   const records: Array<{ event: string; data?: Record<string, unknown> }> = [];

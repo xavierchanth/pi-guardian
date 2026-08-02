@@ -117,6 +117,8 @@ export interface DetailInput {
   readonly now: number;
   readonly scroll: number;
   readonly bodyHeight?: number;
+  /** Total terminal rows; when supplied the complete detail is one bounded viewport. */
+  readonly maxRows?: number;
   readonly notice?: string;
 }
 
@@ -159,7 +161,20 @@ export function renderSubagentDetail(input: DetailInput): DetailRender {
   ];
   const body = outputLines.slice(scroll, scroll + bodyHeight);
   const position = `Lines ${outputLines.length ? scroll + 1 : 0}-${Math.min(outputLines.length, scroll + bodyHeight)} of ${outputLines.length}`;
-  const content = [...fields, ...body, position];
+  let content = [...fields, ...body, position];
+  let viewportScroll = scroll;
+  let viewportMax = maxScroll;
+  if (input.maxRows !== undefined) {
+    const capacity = Math.max(0, Math.trunc(input.maxRows) - 3 - (input.notice ? 1 : 0));
+    const complete = [
+      ...fields,
+      ...outputLines,
+      `Lines 1-${outputLines.length} of ${outputLines.length}`,
+    ];
+    viewportMax = Math.max(0, complete.length - capacity);
+    viewportScroll = Math.min(Math.max(0, Math.trunc(input.scroll)), viewportMax);
+    content = complete.slice(viewportScroll, viewportScroll + capacity);
+  }
   const rows: DashboardRow[] = [
     { text: topBorder(input.width, `Subagent ${s.id}`), tone: "border" },
     ...content.map((text) => ({
@@ -177,7 +192,7 @@ export function renderSubagentDetail(input: DetailInput): DetailRender {
     { text: frame(truncateToWidth(DETAIL_HINT, inner, "..."), inner), tone: "muted" },
     { text: bottomBorder(input.width), tone: "border" },
   ];
-  return { rows, scroll, maxScroll };
+  return { rows, scroll: viewportScroll, maxScroll: viewportMax };
 }
 
 export function scrollDetail(

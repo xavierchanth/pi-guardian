@@ -1,6 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolve } from "node:path";
+import { createPrivateXdgRoots } from "./private-xdg.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const bootstrap = resolve(root, "services/pi-runtime/src/bootstrap.ts");
@@ -8,6 +9,8 @@ const bootstrap = resolve(root, "services/pi-runtime/src/bootstrap.ts");
 export class RuntimeProcessHarness {
   readonly child: ChildProcessWithoutNullStreams;
   readonly frames: any[] = [];
+  readonly xdgEnv: NodeJS.ProcessEnv;
+  readonly xdgRoot: string;
   stderr = "";
   private readonly events = new EventEmitter();
   private buffer = Buffer.alloc(0);
@@ -15,12 +18,24 @@ export class RuntimeProcessHarness {
   constructor(
     options: { env?: NodeJS.ProcessEnv; executable?: string; args?: string[]; cwd?: string } = {},
   ) {
+    const xdgKeys = ["XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
+    const callerXdg = xdgKeys.find((key) => options.env?.[key] !== undefined);
+    if (callerXdg)
+      throw new Error(
+        `${callerXdg} is harness-owned; spawned runtime tests always use private XDG roots`,
+      );
+    const xdg = createPrivateXdgRoots();
+    this.xdgEnv = xdg.env;
+    this.xdgRoot = xdg.root;
+    const childEnv = { ...process.env, ...options.env, ...this.xdgEnv };
+    // Spreading process.env must not manufacture or retain an invalid runtime variable.
+    if (!this.xdgEnv.XDG_RUNTIME_DIR) delete childEnv.XDG_RUNTIME_DIR;
     this.child = spawn(
       options.executable ?? process.execPath,
       options.args ?? ["--experimental-strip-types", bootstrap],
       {
         cwd: options.cwd ?? root,
-        env: { ...process.env, ...options.env },
+        env: childEnv,
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -30,6 +45,8 @@ export class RuntimeProcessHarness {
       this.stderr += chunk;
     });
     this.child.once("exit", (code, signal) => this.events.emit("exit", { code, signal }));
+    // Unlike `exit`, `close` also follows spawn failures. Removal is force/idempotent.
+    this.child.once("close", () => xdg.remove());
   }
 
   send(frame: unknown): void {

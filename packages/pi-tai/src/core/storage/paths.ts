@@ -5,6 +5,15 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 export const PRIVATE_DIRECTORY_MODE = 0o700 as const;
 export const PRIVATE_FILE_MODE = 0o600 as const;
 
+export interface XdgRoots {
+  state: string;
+  data: string;
+  cache: string;
+  runtime: string;
+  /** Distinguishes the cache-derived runtime layout from an explicit runtime root. */
+  runtimeFromCache: boolean;
+}
+
 export interface StoragePaths {
   state: string;
   data: string;
@@ -18,8 +27,23 @@ export interface StoragePaths {
   workspaces: string;
 }
 
-function xdg(value: string | undefined, fallback: string): string {
+function absoluteOr(value: string | undefined, fallback: string): string {
   return value && isAbsolute(value) ? value : fallback;
+}
+
+/** The single cross-platform authority for XDG roots used by Pi-Tai. */
+export function resolveXdgRoots(env: NodeJS.ProcessEnv = process.env, home = homedir()): XdgRoots {
+  // Linux-style fallbacks are appended beneath the native home path from os.homedir().
+  // Relative XDG values never override them.
+  const cache = absoluteOr(env.XDG_CACHE_HOME, join(home, ".cache"));
+  const explicitRuntime = env.XDG_RUNTIME_DIR && isAbsolute(env.XDG_RUNTIME_DIR);
+  return {
+    state: absoluteOr(env.XDG_STATE_HOME, join(home, ".local", "state")),
+    data: absoluteOr(env.XDG_DATA_HOME, join(home, ".local", "share")),
+    cache,
+    runtime: explicitRuntime ? env.XDG_RUNTIME_DIR! : cache,
+    runtimeFromCache: !explicitRuntime,
+  };
 }
 
 /** The single resolver for Pi-Tai-owned durable paths. There is intentionally no config override. */
@@ -27,14 +51,13 @@ export function resolveStoragePaths(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
 ): StoragePaths {
-  const state = join(xdg(env.XDG_STATE_HOME, join(home, ".local", "state")), "pi-tai");
-  const data = join(xdg(env.XDG_DATA_HOME, join(home, ".local", "share")), "pi-tai");
-  const cache = join(xdg(env.XDG_CACHE_HOME, join(home, ".cache")), "pi-tai");
-  // macOS normally has no XDG_RUNTIME_DIR. A private cache child is safer than /tmp.
-  const runtime =
-    env.XDG_RUNTIME_DIR && isAbsolute(env.XDG_RUNTIME_DIR)
-      ? join(env.XDG_RUNTIME_DIR, "pi-tai")
-      : join(cache, "run");
+  const xdg = resolveXdgRoots(env, home);
+  const state = join(xdg.state, "pi-tai");
+  const data = join(xdg.data, "pi-tai");
+  const cache = join(xdg.cache, "pi-tai");
+  const runtime = xdg.runtimeFromCache
+    ? join(xdg.runtime, "pi-tai", "run")
+    : join(xdg.runtime, "pi-tai");
   return {
     state,
     data,

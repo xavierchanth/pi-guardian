@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { RuntimeProcessHarness, initializeParams, pinnedPolicyParams } from "./process-harness.ts";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { initializeParams, pinnedPolicyParams, RuntimeProcessHarness } from "./process-harness.ts";
 
 async function isolatedRoot() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-blackbox-"));
@@ -13,6 +14,33 @@ async function isolatedRoot() {
   await Promise.all([mkdir(cwd), mkdir(agentDir), mkdir(sessionDir)]);
   return { root, cwd, agentDir, sessionDir };
 }
+
+test("spawned Pi SDK worker stores its database only beneath its private XDG root", async () => {
+  const paths = await isolatedRoot();
+  const worker = new RuntimeProcessHarness({
+    env: { PI_OFFLINE: "1" },
+  });
+  for (const path of Object.values(resolveStoragePaths(worker.xdgEnv)))
+    assert.ok(path.startsWith(worker.xdgRoot), `${path} escaped the harness XDG root`);
+  await worker.command("init", "runtime.initialize", initializeParams(1));
+  assert.equal(
+    (
+      await worker.command("create", "session.create", {
+        cwd: paths.cwd,
+        agentDir: paths.agentDir,
+        sessionDir: paths.sessionDir,
+        ...pinnedPolicyParams,
+        faux: true,
+      })
+    ).ok,
+    true,
+  );
+  const database = join(worker.xdgRoot, "state", "pi-tai", "state.sqlite3");
+  await access(database);
+  assert.equal(resolveStoragePaths(worker.xdgEnv).database, database);
+  await worker.command("shutdown", "runtime.shutdown", {});
+  assert.deepEqual(await worker.waitForExit(), { code: 0, signal: null });
+});
 
 test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits without network models", async () => {
   const paths = await isolatedRoot();

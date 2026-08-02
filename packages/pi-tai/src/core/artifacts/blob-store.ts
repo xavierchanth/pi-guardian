@@ -26,7 +26,8 @@ import {
 const SHA256 = /^[0-9a-f]{64}$/;
 const KEY_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT_SESSION = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const STAGING = /^\.tmp-[0-9]+-[0-9a-f]{32}$/;
+const STAGING = /^\.tmp-[0-9]+-[0-9a-f]{32}(?:\.cleanup-[0-9a-f]{32})?$/;
+const CLAIMED_STAGING = /\.cleanup-[0-9a-f]{32}$/;
 /** Prevent cleanup from racing publishers that are still building a staging record. */
 export const MIN_STAGING_AGE_MS = 60_000;
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
@@ -238,11 +239,27 @@ export class PrivateBlobStore {
         try {
           const stat = lstatSync(path);
           if (!stat.isDirectory() || stat.isSymbolicLink() || now - stat.mtimeMs < age) continue;
-          chmodSync(path, PRIVATE_DIRECTORY_MODE);
-          rmSync(path, { recursive: true });
+          // A claim's ctime is advanced by rename. Never steal a fresh claim,
+          // even when callers inject a future eligibility clock for testing.
+          if (CLAIMED_STAGING.test(name) && Date.now() - stat.ctimeMs < MIN_STAGING_AGE_MS)
+            continue;
+
+          // Atomically claim the entry before traversing it. This prevents two
+          // cleaners from concurrently driving rm's recursive directory walk.
+          // Abandoned claims remain recognizable and can be reclaimed later.
+          const claim = join(
+            this.root,
+            `${name.replace(CLAIMED_STAGING, "")}.cleanup-${randomBytes(16).toString("hex")}`,
+          );
+          renameSync(path, claim);
+          const claimedStat = lstatSync(claim);
+          if (!claimedStat.isDirectory() || claimedStat.isSymbolicLink())
+            throw new Error("Staging entry changed type while being claimed");
+          chmodSync(claim, PRIVATE_DIRECTORY_MODE);
+          rmSync(claim, { recursive: true });
           removed++;
         } catch (error) {
-          // Another cleaner may win between listing, stat, chmod, and removal.
+          // Another cleaner may win the claim or remove a claimed entry first.
           if (isMissing(error)) continue;
           throw error;
         }

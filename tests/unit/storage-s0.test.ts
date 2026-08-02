@@ -9,8 +9,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import {
   executeLegacyMigration,
@@ -22,6 +22,7 @@ import {
   ensureStoragePaths,
   privateChild,
   resolveStoragePaths,
+  resolveXdgRoots,
 } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import {
   openDurableDatabase,
@@ -34,15 +35,83 @@ function fixture() {
   const paths = resolveStoragePaths({}, home);
   return { home, paths };
 }
-test("XDG resolver ignores relative roots and uses private macOS runtime fallback", () => {
+test("XDG root authority resolves fallbacks and independent partial overrides", () => {
   const { home } = fixture();
-  const paths = resolveStoragePaths(
-    { XDG_STATE_HOME: "relative", XDG_DATA_HOME: "/data", XDG_CACHE_HOME: "/cache" },
-    home,
-  );
-  assert.equal(paths.state, join(home, ".local/state/pi-tai"));
-  assert.equal(paths.data, "/data/pi-tai");
-  assert.equal(paths.runtime, "/cache/pi-tai/run");
+  const state = resolve(tmpdir(), "xdg-state");
+  const data = resolve(tmpdir(), "xdg-data");
+  const cache = resolve(tmpdir(), "xdg-cache");
+  const runtime = resolve(tmpdir(), "xdg-runtime");
+  const cases = [
+    {
+      env: {},
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_STATE_HOME: state },
+      expected: {
+        state,
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_DATA_HOME: data, XDG_CACHE_HOME: "relative", XDG_RUNTIME_DIR: "relative" },
+      expected: {
+        state: join(home, ".local", "state"),
+        data,
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_CACHE_HOME: cache },
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache,
+        runtime: cache,
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_RUNTIME_DIR: runtime },
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime,
+        runtimeFromCache: false,
+      },
+    },
+  ];
+  for (const { env, expected } of cases) assert.deepEqual(resolveXdgRoots(env, home), expected);
+});
+
+test("absolute XDG roots win and default fallbacks append beneath os.homedir", () => {
+  const root = resolve(tmpdir(), "pi-tai-explicit-xdg");
+  const paths = resolveStoragePaths({
+    XDG_STATE_HOME: join(root, "state"),
+    XDG_DATA_HOME: join(root, "data"),
+    XDG_CACHE_HOME: join(root, "cache"),
+    XDG_RUNTIME_DIR: join(root, "runtime"),
+  });
+  assert.equal(paths.database, join(root, "state", "pi-tai", "state.sqlite3"));
+  assert.equal(paths.sessions, join(root, "data", "pi-tai", "sessions"));
+  assert.equal(paths.runtime, join(root, "runtime", "pi-tai"));
+
+  const fallback = resolveStoragePaths({});
+  assert.equal(fallback.state, join(homedir(), ".local", "state", "pi-tai"));
+  assert.equal(fallback.data, join(homedir(), ".local", "share", "pi-tai"));
+  assert.equal(fallback.cache, join(homedir(), ".cache", "pi-tai"));
 });
 test("storage roots are private and unsafe roots/keys are refused", () => {
   const { home, paths } = fixture();
