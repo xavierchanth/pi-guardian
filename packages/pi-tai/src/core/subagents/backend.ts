@@ -23,11 +23,10 @@ export type NotDeliveredReason = "settled" | "saturated" | "closed" | "precondit
 /** A send rejection that proves the backend accepted no input. */
 export class SendNotDeliveredError extends Error {
   readonly name = "SendNotDeliveredError";
-  constructor(
-    message: string,
-    readonly reason: NotDeliveredReason,
-  ) {
+  readonly reason: NotDeliveredReason;
+  constructor(message: string, reason: NotDeliveredReason) {
     super(message);
+    this.reason = reason;
   }
 }
 
@@ -56,6 +55,8 @@ export interface SubagentSession {
   readonly resumeToken?: string;
   /** Private durable handle captured for later explicit reopen; never exposed by tools/UI. */
   readonly sessionFile?: string;
+  /** Starts another turn on the same retained backend session, when supported. */
+  continueInPlace?(text: string): Promise<void>;
   /** Performs one explicitly selected operation; the manager checks capability/state. */
   send(text: string, mode: SendMode): Promise<void>;
   interrupt(): Promise<void>;

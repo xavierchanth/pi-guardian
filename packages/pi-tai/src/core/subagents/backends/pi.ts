@@ -45,7 +45,7 @@ export class PiBackend implements SubagentBackend {
   readonly name: BackendName = "pi";
   readonly capabilities = {
     liveInput: ["steer", "followUp"] as const,
-    settledContinuation: "none" as const,
+    settledContinuation: "in-place" as const,
     modelSelection: true,
     reasoningEffort: true,
   };
@@ -88,11 +88,13 @@ export class PiBackend implements SubagentBackend {
 }
 
 class PiSubagentSession implements SubagentSession {
-  readonly events: AsyncIterable<SubagentEvent>;
+  get events(): AsyncIterable<SubagentEvent> {
+    return this.channel.events;
+  }
   readonly sessionFile: string;
   private readonly handle: PrivateChildSessionHandle;
-  private readonly channel = new EventChannel();
-  private readonly unsubscribe: () => void;
+  private channel = new EventChannel();
+  private unsubscribe: () => void = () => {};
   /** Length of the streaming text already emitted, so deltas stay incremental. */
   private streamed = 0;
   private lastAssistantText = "";
@@ -101,7 +103,6 @@ class PiSubagentSession implements SubagentSession {
   constructor(handle: PrivateChildSessionHandle, task: SpawnTask) {
     this.handle = handle;
     this.sessionFile = handle.sessionFile;
-    this.events = this.channel.events;
     this.unsubscribe = handle.session.subscribe((event) => this.translate(event));
     this.channel.push({ type: "run_started" });
     this.channel.push({
@@ -184,6 +185,33 @@ class PiSubagentSession implements SubagentSession {
         return;
       default:
         return;
+    }
+  }
+
+  async continueInPlace(text: string): Promise<void> {
+    if (this.disposed)
+      throw new SendNotDeliveredError("Pi child session was disposed.", "closed");
+    if (this.handle.session.isStreaming)
+      throw new SendNotDeliveredError("Pi child is still streaming.", "precondition");
+    this.unsubscribe();
+    this.channel = new EventChannel();
+    this.streamed = 0;
+    this.lastAssistantText = "";
+    this.unsubscribe = this.handle.session.subscribe((event) => this.translate(event));
+    this.channel.push({ type: "run_started" });
+    try {
+      await this.handle.session.prompt(text);
+      await this.handle.session.waitForIdle();
+      this.channel.push({ type: "run_settled", outcome: "completed", text: this.lastAssistantText });
+    } catch (error) {
+      this.channel.push({
+        type: "run_settled",
+        outcome: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      this.unsubscribe();
     }
   }
 

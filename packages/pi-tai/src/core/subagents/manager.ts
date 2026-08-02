@@ -545,9 +545,7 @@ export class SubagentManager {
           throw new Error(
             `Subagent ${id} settled before ${operation} could be delivered; it was not continued.`,
           );
-        const resumeToken = entry.session?.resumeToken;
-        if (entry.backend.capabilities.settledContinuation === "none" || !resumeToken) throw error;
-        await this.resume(entry, text, resumeToken);
+        await this.continueSettled(entry, text);
         return { operation: "continue", settlementRace: true };
       }
     }
@@ -555,13 +553,64 @@ export class SubagentManager {
       throw new Error(
         `Subagent ${id} settled before ${requested} could be delivered; it was not continued.`,
       );
-    const resumeToken = entry.session?.resumeToken;
-    if (entry.backend.capabilities.settledContinuation === "none" || !resumeToken)
-      throw new Error(
-        `Subagent ${id} has finished and the ${entry.snapshot.backend} harness cannot continue its conversation; spawn a new subagent instead.`,
-      );
-    await this.resume(entry, text, resumeToken);
+    await this.continueSettled(entry, text);
     return { operation: "continue", settlementRace: false };
+  }
+
+  private async continueSettled(entry: Entry, text: string): Promise<void> {
+    const how = entry.backend.capabilities.settledContinuation;
+    if (how === "in-place" && entry.session?.continueInPlace) {
+      await this.continueInPlace(entry, text);
+      return;
+    }
+    const resumeToken = entry.session?.resumeToken;
+    if (how === "respawn" && resumeToken) {
+      await this.resume(entry, text, resumeToken);
+      return;
+    }
+    throw new Error(
+      `Subagent ${entry.snapshot.id} has finished and the ${entry.snapshot.backend} harness cannot continue its conversation; spawn a new subagent instead.`,
+    );
+  }
+
+  private async continueInPlace(entry: Entry, text: string): Promise<void> {
+    if (entry.closed || !entry.session?.continueInPlace)
+      throw new Error(`Subagent ${entry.snapshot.id} has no retained live conversation.`);
+    if (this.reserved >= this.maxRunning)
+      throw new SubagentCapacityError(
+        "running",
+        `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
+      );
+    this.reserved += 1;
+    try {
+      await entry.session.continueInPlace(text);
+      await this.lifecycleStore?.append({
+        version: 1,
+        type: "running",
+        durableId: entry.snapshot.durableId,
+        generation: entry.generation,
+        at: this.clock(),
+        ...(entry.session.sessionFile
+          ? { resumeHandle: { kind: "pi_session_file" as const, value: entry.session.sessionFile } }
+          : {}),
+      });
+    } catch (error) {
+      this.reserved = Math.max(0, this.reserved - 1);
+      throw error;
+    }
+    let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
+    const settled = new Promise<SubagentSnapshot>((resolve) => { resolveSettled = resolve; });
+    Object.assign(entry, { settled, resolveSettled, runToken: {} });
+    this.delivery.consume(entry.snapshot.id);
+    this.update(entry, {
+      ...entry.snapshot,
+      status: "running",
+      latestText: "",
+      turns: 0,
+      liveTools: [],
+      deliveryPending: false,
+    });
+    void this.pump(entry, entry.session, entry.runToken);
   }
 
   /** Starts a follow-up run in place, reusing the entry so the id stays stable. */
