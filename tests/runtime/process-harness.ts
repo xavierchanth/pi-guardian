@@ -42,10 +42,9 @@ export class RuntimeProcessHarness {
     this.child.stderr.on("data", (chunk) => {
       this.stderr += chunk;
     });
-    this.child.once("exit", (code, signal) => {
-      xdg.remove();
-      this.events.emit("exit", { code, signal });
-    });
+    this.child.once("exit", (code, signal) => this.events.emit("exit", { code, signal }));
+    // Unlike `exit`, `close` also follows spawn failures. Removal is force/idempotent.
+    this.child.once("close", () => xdg.remove());
   }
 
   send(frame: unknown): void {
