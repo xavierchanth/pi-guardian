@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { SendNotDeliveredError } from "../../packages/pi-tai/src/core/subagents/backend.ts";
 import {
   ClaudeBackend,
   type ClaudeSdk,
 } from "../../packages/pi-tai/src/core/subagents/backends/claude.ts";
-import { SendNotDeliveredError } from "../../packages/pi-tai/src/core/subagents/backend.ts";
+import { ClaudeInputQueue } from "../../packages/pi-tai/src/core/subagents/backends/claude-input-queue.ts";
 import { PiBackend } from "../../packages/pi-tai/src/core/subagents/backends/pi.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
 import type { SpawnTask, SubagentEvent } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 
 function task(overrides: Partial<SpawnTask> = {}): SpawnTask {
@@ -84,6 +86,57 @@ describe("pi backend", () => {
     child.dispose();
   });
 
+  it("continues a settled session in place and rejects a second writer", async () => {
+    const prompts: string[] = [];
+    let streaming = false;
+    let release!: () => void;
+    const session = {
+      get isStreaming() {
+        return streaming;
+      },
+      prompt: async (text: string) => {
+        prompts.push(text);
+        if (prompts.length > 1) {
+          streaming = true;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          streaming = false;
+        }
+      },
+      waitForIdle: async () => {},
+      subscribe: () => () => {},
+    };
+    const backend = new PiBackend({
+      config: {} as never,
+      modelRegistry: {} as never,
+      stateRoot: "/tmp/state",
+      factory: {
+        create: async () =>
+          ({
+            session,
+            sessionFile: "/tmp/session.jsonl",
+            async abort() {},
+            dispose() {},
+          }) as never,
+      },
+    });
+
+    const child = await backend.spawn(task());
+    await collect(child.events);
+    await child.continueInPlace?.("second turn");
+    await assert.rejects(child.continueInPlace!("racing turn"), SendNotDeliveredError);
+    release();
+    const continuation = await collect(child.events);
+
+    assert.deepEqual(prompts, ["do the thing", "second turn"]);
+    assert.deepEqual(
+      continuation.map((event) => event.type),
+      ["run_started", "run_settled"],
+    );
+    child.dispose();
+  });
+
   it("rejects an idle send as not delivered without prompting", async () => {
     const prompts: unknown[][] = [];
     const session = {
@@ -117,6 +170,82 @@ describe("pi backend", () => {
     await assert.rejects(child.send("too late", "steer"), SendNotDeliveredError);
     assert.deepEqual(prompts, [["do the thing"]]);
     child.dispose();
+  });
+});
+
+describe("stub backend", () => {
+  it("models steer, follow-up and continuation distinctly and narrows transcripts by id", async () => {
+    const backend = new StubBackend({ settledContinuation: "respawn" });
+    const first = await backend.spawn(task({ id: "same", prompt: "first" }));
+    await collect(first.events);
+    await first.send("live", "steer");
+    await first.send("queued", "followUp");
+    const other = await backend.spawn(task({ id: "other", prompt: "secret-other-session" }));
+    await collect(other.events);
+    const resumed = await backend.spawn(task({ id: "same", prompt: "second" }));
+    await collect(resumed.events);
+    await resumed.send("again", "continue");
+
+    assert.deepEqual(
+      backend.sends.map(({ mode, phase }) => ({ mode, phase })),
+      [
+        { mode: "steer", phase: "settled" },
+        { mode: "followUp", phase: "settled" },
+        { mode: "continue", phase: "settled" },
+      ],
+    );
+    assert.ok(
+      !backend.spawned
+        .filter((entry) => entry.id === "same")
+        .some((entry) => entry.prompt.includes("secret")),
+    );
+  });
+
+  it("reports typed refusal reasons without recording delivery", async () => {
+    const backend = new StubBackend({ sendBehaviour: () => "saturated" });
+    const session = await backend.spawn(task({ prompt: "HANG:" }));
+    await assert.rejects(
+      session.send("no room", "followUp"),
+      (error: unknown) => error instanceof SendNotDeliveredError && error.reason === "saturated",
+    );
+    assert.equal(backend.sends.length, 0);
+  });
+});
+
+describe("claude input queue", () => {
+  it("is FIFO, assigns UUIDs, tracks bytes, and drains to an exact close", async () => {
+    const queue = new ClaudeInputQueue();
+    const firstUuid = queue.push("α");
+    const secondUuid = queue.push("beta");
+    assert.match(firstUuid, /^[0-9a-f]{8}-[0-9a-f-]{27}$/i);
+    assert.notEqual(firstUuid, secondUuid);
+    assert.equal(queue.pendingBytes, Buffer.byteLength("αbeta"));
+    const iterator = queue[Symbol.asyncIterator]();
+    assert.equal((await iterator.next()).value?.message.content, "α");
+    assert.equal(queue.lastYieldedUuid, firstUuid);
+    assert.equal((await iterator.next()).value?.message.content, "beta");
+    queue.close();
+    queue.close();
+    assert.deepEqual(await iterator.next(), { value: undefined, done: true });
+    assert.throws(() => queue.push("late"), SendNotDeliveredError);
+  });
+
+  it("enforces message and UTF-8 byte bounds and rejects an interrupted waiter", async () => {
+    const countBound = new ClaudeInputQueue();
+    for (let index = 0; index < ClaudeInputQueue.maxMessages; index++) countBound.push("x");
+    assert.throws(
+      () => countBound.push("overflow"),
+      (error: unknown) => error instanceof SendNotDeliveredError && error.reason === "saturated",
+    );
+
+    const byteBound = new ClaudeInputQueue();
+    byteBound.push("x".repeat(ClaudeInputQueue.maxBytes));
+    assert.throws(() => byteBound.push("é"), SendNotDeliveredError);
+
+    const interrupted = new ClaudeInputQueue();
+    const waiting = interrupted[Symbol.asyncIterator]().next();
+    interrupted.failAll("closed");
+    await assert.rejects(waiting, SendNotDeliveredError);
   });
 });
 
