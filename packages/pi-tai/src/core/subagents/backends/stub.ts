@@ -79,7 +79,9 @@ export class StubBackend implements SubagentBackend {
         if (mode === "steer") {
           channel.push({ type: "assistant_message", text: `steer: ${text}` });
         } else if (mode === "followUp") {
-          queueMicrotask(() => channel.push({ type: "assistant_message", text: `followUp: ${text}` }));
+          queueMicrotask(() =>
+            channel.push({ type: "assistant_message", text: `followUp: ${text}` }),
+          );
         } else {
           channel.push({
             type: "assistant_message",

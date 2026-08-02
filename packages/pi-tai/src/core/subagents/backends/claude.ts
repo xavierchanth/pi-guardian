@@ -127,6 +127,7 @@ class ClaudeSubagentSession implements SubagentSession {
   private lastAssistantText = "";
   private result?: Extract<SubagentEvent, { type: "run_settled" }>;
   private settled = false;
+  private queryClosed = false;
 
   constructor(query: ClaudeQuery, abort: AbortController, input: ClaudeInputQueue) {
     this.query = query;
@@ -140,21 +141,30 @@ class ClaudeSubagentSession implements SubagentSession {
   private async pump(): Promise<void> {
     try {
       const iterator = this.query[Symbol.asyncIterator]();
-      let draining = false;
+      let drainDeadline: number | undefined;
       while (true) {
-        const next = draining ? await nextWithDrainTimeout(iterator) : await iterator.next();
+        const next = drainDeadline
+          ? await nextBeforeDrainDeadline(iterator, drainDeadline)
+          : await iterator.next();
         if (next.done) break;
         const message = next.value;
-        const frame = message as { session_id?: unknown; type?: unknown; user_message_uuid?: unknown };
-        if (typeof frame.session_id === "string" && frame.session_id) this.resumeToken = frame.session_id;
+        const frame = message as {
+          session_id?: unknown;
+          type?: unknown;
+          user_message_uuid?: unknown;
+        };
+        if (typeof frame.session_id === "string" && frame.session_id)
+          this.resumeToken = frame.session_id;
         if (frame.type === "result") {
           this.result = translate(message).find(
-            (event): event is Extract<SubagentEvent, { type: "run_settled" }> => event.type === "run_settled",
+            (event): event is Extract<SubagentEvent, { type: "run_settled" }> =>
+              event.type === "run_settled",
           );
-          const uuid = typeof frame.user_message_uuid === "string" ? frame.user_message_uuid : undefined;
+          const uuid =
+            typeof frame.user_message_uuid === "string" ? frame.user_message_uuid : undefined;
           if (this.input.pending === 0 && (!uuid || uuid === this.input.lastYieldedUuid)) {
             this.input.close();
-            draining = true;
+            drainDeadline ??= Date.now() + CLAUDE_DRAIN_TIMEOUT_MS;
           }
           continue;
         }
@@ -176,14 +186,18 @@ class ClaudeSubagentSession implements SubagentSession {
       });
       this.settled = true;
     } finally {
-      this.query.close?.();
+      this.closeQuery();
     }
   }
 
   private settle(outcome: "completed" | "interrupted"): void {
     if (this.settled) return;
     this.settled = true;
-    this.channel.push({ type: "run_settled", outcome, ...(outcome === "completed" ? { text: this.lastAssistantText } : {}) });
+    this.channel.push({
+      type: "run_settled",
+      outcome,
+      ...(outcome === "completed" ? { text: this.lastAssistantText } : {}),
+    });
   }
 
   async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
@@ -200,8 +214,14 @@ class ClaudeSubagentSession implements SubagentSession {
   dispose(): void {
     this.abort.abort();
     this.input.failAll("closed");
-    this.query.close?.();
+    this.closeQuery();
     this.channel.close();
+  }
+
+  private closeQuery(): void {
+    if (this.queryClosed) return;
+    this.queryClosed = true;
+    this.query.close?.();
   }
 }
 
@@ -300,9 +320,14 @@ function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-async function nextWithDrainTimeout<T>(
+const CLAUDE_DRAIN_TIMEOUT_MS = 30_000;
+
+async function nextBeforeDrainDeadline<T>(
   iterator: AsyncIterator<T>,
+  deadline: number,
 ): Promise<IteratorResult<T>> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Claude did not end its stream after input was closed.");
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -310,7 +335,7 @@ async function nextWithDrainTimeout<T>(
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error("Claude did not end its stream after input was closed.")),
-          30_000,
+          remaining,
         );
       }),
     ]);

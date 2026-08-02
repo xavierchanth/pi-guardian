@@ -22,14 +22,23 @@ export class ClaudeInputQueue implements AsyncIterable<ClaudeUserMessage> {
   private closed = false;
   private yieldedUuid?: string;
 
-  get lastYieldedUuid(): string | undefined { return this.yieldedUuid; }
-  get pending(): number { return this.buffer.length; }
-  get pendingBytes(): number { return this.bytes; }
+  get lastYieldedUuid(): string | undefined {
+    return this.yieldedUuid;
+  }
+  get pending(): number {
+    return this.buffer.length;
+  }
+  get pendingBytes(): number {
+    return this.bytes;
+  }
 
   push(content: string): string {
     if (this.closed) throw new SendNotDeliveredError("Claude input is closed.", "closed");
     const bytes = Buffer.byteLength(content, "utf8");
-    if (this.buffer.length >= ClaudeInputQueue.maxMessages || this.bytes + bytes > ClaudeInputQueue.maxBytes)
+    if (
+      this.buffer.length >= ClaudeInputQueue.maxMessages ||
+      this.bytes + bytes > ClaudeInputQueue.maxBytes
+    )
       throw new SendNotDeliveredError("Claude input queue is saturated.", "saturated");
     const uuid = randomUUID();
     const message: ClaudeUserMessage = {
@@ -43,8 +52,10 @@ export class ClaudeInputQueue implements AsyncIterable<ClaudeUserMessage> {
     if (waiter) {
       this.yieldedUuid = uuid;
       waiter.resolve({ value: message, done: false });
+    } else {
+      this.buffer.push(message);
+      this.bytes += bytes;
     }
-    else { this.buffer.push(message); this.bytes += bytes; }
     return uuid;
   }
 

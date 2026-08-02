@@ -368,8 +368,10 @@ class CodexSubagentSession implements SubagentSession {
         "Codex does not support steering for this session.",
         "precondition",
       );
-    if (!this.threadId || !this.turnId)
-      throw new SendNotDeliveredError("Codex has no active turn to steer.", "precondition");
+    if (!this.threadId)
+      throw new SendNotDeliveredError("Codex has no thread to steer.", "precondition");
+    if (!this.turnId)
+      throw new SendNotDeliveredError("The Codex turn already settled before steering.", "settled");
     try {
       await this.request("turn/steer", {
         threadId: this.threadId,
@@ -381,16 +383,25 @@ class CodexSubagentSession implements SubagentSession {
       if (!(error instanceof CodexRpcError)) throw error;
       if (error.code === -32601) {
         this.steerEnabled = false;
-        throw new SendNotDeliveredError("Codex app-server does not support turn/steer.", "precondition");
+        throw new SendNotDeliveredError(
+          "Codex app-server does not support turn/steer.",
+          "precondition",
+        );
       }
       if (error.code === -32600) {
-        const info = (error.data as { codex_error_info?: Record<string, unknown> } | undefined)
-          ?.codex_error_info;
-        if (info?.ActiveTurnNotSteerable !== undefined) {
+        const info = (error.data as { codex_error_info?: unknown } | undefined)?.codex_error_info;
+        if (isCodexErrorVariant(info, "ActiveTurnNotSteerable")) {
           this.steerEnabled = false;
-          throw new SendNotDeliveredError("The active Codex turn is not steerable.", "precondition");
+          throw new SendNotDeliveredError(
+            "The active Codex turn is not steerable.",
+            "precondition",
+          );
         }
-        throw new SendNotDeliveredError("The Codex turn settled before steering.", "settled");
+        if (isCodexErrorVariant(info, "NoActiveTurn") || isCodexErrorVariant(info, "TurnNotFound"))
+          throw new SendNotDeliveredError("The Codex turn settled before steering.", "settled");
+        // -32600 is also used for unrelated invalid requests. Guessing that an
+        // unknown wire shape means settlement could silently redeliver input as
+        // a continuation, so preserve the protocol error and fail closed.
       }
       throw error;
     }
@@ -466,6 +477,14 @@ class CodexSubagentSession implements SubagentSession {
   private write(frame: unknown): void {
     this.child.stdin.write(`${JSON.stringify(frame)}\n`);
   }
+}
+
+function isCodexErrorVariant(value: unknown, variant: string): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.hasOwn(value as Record<string, unknown>, variant)
+  );
 }
 
 function threadIdOf(result: Record<string, unknown>): string | undefined {
