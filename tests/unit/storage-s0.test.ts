@@ -22,6 +22,7 @@ import {
   ensureStoragePaths,
   privateChild,
   resolveStoragePaths,
+  resolveXdgRoots,
 } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import {
   openDurableDatabase,
@@ -34,21 +35,65 @@ function fixture() {
   const paths = resolveStoragePaths({}, home);
   return { home, paths };
 }
-test("XDG resolver uses Linux-style home fallbacks on every platform", () => {
+test("XDG root authority resolves fallbacks and independent partial overrides", () => {
   const { home } = fixture();
-  const paths = resolveStoragePaths(
+  const state = resolve(tmpdir(), "xdg-state");
+  const data = resolve(tmpdir(), "xdg-data");
+  const cache = resolve(tmpdir(), "xdg-cache");
+  const runtime = resolve(tmpdir(), "xdg-runtime");
+  const cases = [
     {
-      XDG_STATE_HOME: "relative-state",
-      XDG_DATA_HOME: "relative-data",
-      XDG_CACHE_HOME: "relative-cache",
-      XDG_RUNTIME_DIR: "relative-runtime",
+      env: {},
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
     },
-    home,
-  );
-  assert.equal(paths.state, join(home, ".local", "state", "pi-tai"));
-  assert.equal(paths.data, join(home, ".local", "share", "pi-tai"));
-  assert.equal(paths.cache, join(home, ".cache", "pi-tai"));
-  assert.equal(paths.runtime, join(home, ".cache", "pi-tai", "run"));
+    {
+      env: { XDG_STATE_HOME: state },
+      expected: {
+        state,
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_DATA_HOME: data, XDG_CACHE_HOME: "relative", XDG_RUNTIME_DIR: "relative" },
+      expected: {
+        state: join(home, ".local", "state"),
+        data,
+        cache: join(home, ".cache"),
+        runtime: join(home, ".cache"),
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_CACHE_HOME: cache },
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache,
+        runtime: cache,
+        runtimeFromCache: true,
+      },
+    },
+    {
+      env: { XDG_RUNTIME_DIR: runtime },
+      expected: {
+        state: join(home, ".local", "state"),
+        data: join(home, ".local", "share"),
+        cache: join(home, ".cache"),
+        runtime,
+        runtimeFromCache: false,
+      },
+    },
+  ];
+  for (const { env, expected } of cases) assert.deepEqual(resolveXdgRoots(env, home), expected);
 });
 
 test("absolute XDG roots win and default fallbacks append beneath os.homedir", () => {
