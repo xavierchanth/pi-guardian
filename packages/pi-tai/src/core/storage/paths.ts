@@ -2,6 +2,9 @@ import { chmodSync, closeSync, lstatSync, mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
+export const PRIVATE_DIRECTORY_MODE = 0o700 as const;
+export const PRIVATE_FILE_MODE = 0o600 as const;
+
 export interface StoragePaths {
   state: string;
   data: string;
@@ -47,7 +50,7 @@ export function resolveStoragePaths(
 }
 
 export function ensurePrivateDirectory(path: string): void {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
+  mkdirSync(path, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
   const stat = lstatSync(path);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new Error(`Unsafe storage directory: ${path}`);
@@ -91,8 +94,8 @@ export function artifactPathKey(value: string): ArtifactPathKey {
 }
 
 export function createPrivateFile(path: string): number {
-  const fd = openSync(path, "wx", 0o600);
-  chmodSync(path, 0o600);
+  const fd = openSync(path, "wx", PRIVATE_FILE_MODE);
+  chmodSync(path, PRIVATE_FILE_MODE);
   return fd;
 }
 export function closePrivateFile(fd: number): void {

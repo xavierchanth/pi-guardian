@@ -28,7 +28,8 @@ test("private blob store atomically publishes immutable UTF-8 and binary records
   const receipt = store.publishUtf8("opaque/report.v1", "# bytes only\n");
   assert.equal(store.readUtf8("opaque/report.v1", receipt.digest), "# bytes only\n");
   assert.deepEqual([...store.readBinary("opaque/report.v1")], [...Buffer.from("# bytes only\n")]);
-  assert.throws(() => store.publishUtf8("opaque/report.v1", "replacement"));
+  assert.equal(store.publishUtf8("opaque/report.v1", "# bytes only\n").outcome, "already-present");
+  assert.throws(() => store.publishUtf8("opaque/report.v1", "replacement"), /different content/);
 
   const record = readdirSync(store.root).find((name) => !name.startsWith(".tmp-"));
   assert.ok(record);
@@ -62,7 +63,7 @@ test("partitions are private and root and record symlinks are never followed", (
   symlinkSync(home, unsafeArtifacts);
   assert.throws(
     () => new PrivateBlobStore({ rootSessionId: "root_bad", paths: unsafePaths }),
-    /Unsafe artifact directory/,
+    /storage operation failed/,
   );
 
   const fresh = new PrivateBlobStore({ rootSessionId: "root_3", paths });
@@ -72,7 +73,35 @@ test("partitions are private and root and record symlinks are never followed", (
   rmSync(join(record, "body"));
   symlinkSync(join(record, "metadata.json"), join(record, "body"));
   chmodSync(record, 0o500);
-  assert.throws(() => fresh.readBinary("linked"), /Unsafe artifact file/);
+  assert.throws(() => fresh.readBinary("linked"), /storage operation failed/);
+});
+
+test("session ids normalize for case-insensitive filesystems and staging cleanup is bounded", () => {
+  const { paths } = fixture();
+  const lower = new PrivateBlobStore({ rootSessionId: "root_case", paths });
+  const upper = new PrivateBlobStore({ rootSessionId: "ROOT_CASE", paths });
+  assert.equal(lower.root, upper.root);
+  for (const suffix of ["1", "2", "3"]) {
+    const staging = join(lower.root, `.tmp-123-${suffix.repeat(32)}`);
+    mkdirSync(staging, { mode: 0o700 });
+  }
+  mkdirSync(join(lower.root, ".tmp-not-owned"), { mode: 0o700 });
+  assert.equal(lower.cleanupStaging({ maxEntries: 2, olderThanMs: 0, now: Date.now() + 1000 }), 2);
+  assert.equal(lower.cleanupStaging({ maxEntries: 2, olderThanMs: 0, now: Date.now() + 1000 }), 1);
+  assert.equal(existsSync(join(lower.root, ".tmp-not-owned")), true);
+});
+
+test("mode drift is rejected without leaking absolute paths", () => {
+  const { store, home } = fixture();
+  store.publishUtf8("mode", "body");
+  chmodSync(store.root, 0o755);
+  assert.throws(
+    () => store.readUtf8("mode"),
+    (error: Error) => {
+      assert.equal(error.message.includes(home), false);
+      return true;
+    },
+  );
 });
 
 test("corruption and interrupted temporary records are not observable", () => {
