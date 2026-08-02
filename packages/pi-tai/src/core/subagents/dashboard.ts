@@ -6,7 +6,7 @@
  * colours and forwards keystrokes.
  */
 
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { dashboardBodyCapacity } from "../dashboard/viewport.ts";
 import { contextUtilisation, type SubagentSnapshot } from "./domain.ts";
 
 export type DashboardTone = "border" | "accent" | "text" | "muted" | "error";
@@ -23,6 +23,12 @@ export interface DashboardInput {
   readonly width: number;
   /** Epoch milliseconds, injected so elapsed times are deterministic under test. */
   readonly now: number;
+  /** Total terminal row budget. Omit only for non-terminal compatibility callers. */
+  readonly maxRows?: number;
+  /** First item in the already reconciled virtual window. */
+  readonly start?: number;
+  readonly primaryTab?: "tasks" | "subagents" | "workspaces";
+  readonly stateTab?: "current" | "archived";
   /** Transient feedback, such as why an abort failed. */
   readonly notice?: string;
 }
@@ -67,17 +73,31 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
   const inner = input.width - 4;
   const selected = clampSelection(input.snapshots.length, input.selected);
 
+  const capacity =
+    input.maxRows === undefined
+      ? Math.max(1, input.snapshots.length)
+      : dashboardBodyCapacity(input.maxRows, Boolean(input.notice));
+  const start = Math.max(0, Math.trunc(input.start ?? 0));
   const body: DashboardRow[] = input.snapshots.length
-    ? input.snapshots.map((snapshot, index) => ({
-        text: entryText(snapshot, index === selected, inner, input.now),
-        tone: rowTone(snapshot, index === selected),
-      }))
-    : [{ text: truncateToWidth(DASHBOARD_EMPTY, inner, "..."), tone: "muted" }];
+    ? input.snapshots.slice(start, start + capacity).map((snapshot, offset) => {
+        const index = start + offset;
+        return {
+          text: entryText(snapshot, index === selected, inner, input.now),
+          tone: rowTone(snapshot, index === selected),
+        };
+      })
+    : capacity > 0
+      ? [{ text: truncateToWidth(DASHBOARD_EMPTY, inner, "..."), tone: "muted" }]
+      : [];
 
+  const primary = input.primaryTab ?? "subagents";
+  const state = input.stateTab ?? "current";
   return [
-    { text: topBorder(input.width), tone: "border" },
+    { text: topBorder(input.width, `Dashboard · ${titleCase(primary)}`), tone: "border" },
+    { text: frame(tabLine(["tasks", "subagents", "workspaces"], primary), inner), tone: "accent" },
+    { text: frame(tabLine(["current", "archived"], state), inner), tone: "muted" },
     ...body.map((row) => ({ text: frame(row.text, inner), tone: row.tone })),
-    { text: frame("", inner), tone: "border" },
+
     ...(input.notice
       ? [
           {
@@ -228,6 +248,31 @@ function frame(text: string, inner: number): string {
 function topBorder(width: number, title = DASHBOARD_TITLE): string {
   const label = ` ${title} `;
   return `┌─${label}${"─".repeat(Math.max(0, width - 3 - visibleWidth(label)))}┐`;
+}
+
+function tabLine<T extends string>(tabs: readonly T[], active: T): string {
+  return tabs
+    .map((tab) => (tab === active ? `[${titleCase(tab)}]` : ` ${titleCase(tab)} `))
+    .join("  ");
+}
+
+function titleCase(value: string): string {
+  return value[0]?.toUpperCase() + value.slice(1);
+}
+
+function visibleWidth(value: string): number {
+  return Array.from(value).length;
+}
+
+function truncateToWidth(value: string, width: number, suffix = ""): string {
+  if (visibleWidth(value) <= width) return value;
+  if (width <= 0) return "";
+  const ending = Array.from(suffix).slice(0, width).join("");
+  return (
+    Array.from(value)
+      .slice(0, Math.max(0, width - visibleWidth(ending)))
+      .join("") + ending
+  );
 }
 
 function bottomBorder(width: number): string {

@@ -49,8 +49,8 @@ const settled = snapshot({
 });
 
 function bodyLines(rows: readonly DashboardRow[]): string[] {
-  // Drop the borders and the trailing blank, notice, and hint rows.
-  return dashboardText(rows).slice(1, -3);
+  // Drop the shared shell's border/tabs and trailing hint/border.
+  return dashboardText(rows).slice(3, -2);
 }
 
 test("shows an empty state when nothing has been delegated", () => {
@@ -59,8 +59,8 @@ test("shows an empty state when nothing has been delegated", () => {
   );
 
   assert.ok(lines[0]?.includes(DASHBOARD_TITLE));
-  assert.equal(lines.length, 5);
-  assert.ok(lines[1]?.includes(DASHBOARD_EMPTY));
+  assert.equal(lines.length, 6);
+  assert.ok(lines.some((line) => line.includes(DASHBOARD_EMPTY)));
   assert.ok(lines.at(-2)?.includes(DASHBOARD_HINT));
   assert.ok(lines.at(-1)?.startsWith("└"));
 });

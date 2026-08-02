@@ -10,13 +10,24 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, type TUI } from "@earendil-works/pi-tui";
 import {
-  clampSelection,
   renderDashboard,
   renderSubagentDetail,
   scrollDetail,
   type DashboardTone,
 } from "./dashboard.ts";
 import type { SubagentSnapshot } from "./domain.ts";
+import {
+  cycleTab,
+  dashboardBodyCapacity,
+  ensureVisible,
+  moveSelection,
+  PRIMARY_TABS,
+  reconcileSelection,
+  STATE_TABS,
+  type DashboardPrimaryTab,
+  type DashboardStateTab,
+} from "../dashboard/viewport.ts";
+import { terminalRows } from "../../terminal/dashboard/rows.ts";
 
 /**
  * The slice of {@link SubagentManager} the dashboard needs. Narrowing it keeps
@@ -44,7 +55,11 @@ class SubagentDashboard {
   private readonly close: () => void;
   private readonly unsubscribe: () => void;
   private snapshots: readonly SubagentSnapshot[];
-  private selected = 0;
+  private selectedId: string | undefined;
+  private selectedIndex = 0;
+  private viewportStart = 0;
+  private primaryTab: DashboardPrimaryTab = "subagents";
+  private stateTab: DashboardStateTab = "current";
   private notice: string | undefined;
   private detailId: string | undefined;
   private detailScroll = 0;
@@ -61,10 +76,22 @@ class SubagentDashboard {
     this.theme = options.theme;
     this.close = options.close;
     this.snapshots = this.agents?.list() ?? [];
+    this.selectedId = this.snapshots[0]?.id;
     this.unsubscribe =
       this.agents?.subscribe(() => {
+        const oldIndex = this.selectedId
+          ? this.snapshots.findIndex((s) => s.id === this.selectedId)
+          : this.selectedIndex;
         this.snapshots = this.agents?.list() ?? [];
-        this.selected = clampSelection(this.snapshots.length, this.selected);
+        this.selectedId = reconcileSelection(
+          this.snapshots.map((s) => s.id),
+          this.selectedId,
+          oldIndex,
+        );
+        this.selectedIndex = Math.max(
+          0,
+          this.snapshots.findIndex((s) => s.id === this.selectedId),
+        );
         if (this.detailId && !this.snapshots.some((snapshot) => snapshot.id === this.detailId)) {
           const id = this.detailId;
           this.detailId = undefined;
@@ -89,7 +116,7 @@ class SubagentDashboard {
       return;
     }
     if (matchesKey(data, "x")) {
-      this.abort();
+      if (this.primaryTab === "subagents") this.abort();
       return;
     }
     if (this.detailId) {
@@ -101,8 +128,23 @@ class SubagentDashboard {
       else if (matchesKey(data, "shift+g") || data === "G") this.scroll("bottom");
       return;
     }
-    if (matchesKey(data, "enter")) {
-      const target = this.snapshots[this.selected];
+    if (matchesKey(data, "tab") || matchesKey(data, "l")) {
+      this.primaryTab = cycleTab(PRIMARY_TABS, this.primaryTab, 1);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, "shift+tab") || matchesKey(data, "h")) {
+      this.primaryTab = cycleTab(PRIMARY_TABS, this.primaryTab, -1);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, "[") || matchesKey(data, "]")) {
+      this.stateTab = cycleTab(STATE_TABS, this.stateTab, matchesKey(data, "]") ? 1 : -1);
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, "enter") && this.primaryTab === "subagents") {
+      const target = this.snapshots.find((snapshot) => snapshot.id === this.selectedId);
       if (target) {
         this.detailId = target.id;
         this.detailScroll = 0;
@@ -116,6 +158,7 @@ class SubagentDashboard {
   }
 
   render(width: number): string[] {
+    const rowBudget = terminalRows(this.tui);
     const detail = this.detailId
       ? this.snapshots.find((snapshot) => snapshot.id === this.detailId)
       : undefined;
@@ -132,16 +175,33 @@ class SubagentDashboard {
       this.detailScroll = rows.scroll;
       this.detailMaxScroll = rows.maxScroll;
     }
-    return (
-      rows?.rows ??
-      renderDashboard({
-        snapshots: this.snapshots,
-        selected: this.selected,
-        width,
-        now: Date.now(),
-        ...(this.notice ? { notice: this.notice } : {}),
-      })
-    ).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+    if (rows)
+      return rows.rows
+        .slice(0, rowBudget)
+        .map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+    const ids = this.snapshots.map((snapshot) => snapshot.id);
+    const placeholder =
+      this.primaryTab === "subagents"
+        ? this.notice
+        : `${this.primaryTab === "tasks" ? "Tasks" : "Workspaces"} are not available yet.`;
+    const viewport = ensureVisible(
+      ids,
+      this.selectedId,
+      dashboardBodyCapacity(rowBudget, Boolean(placeholder)),
+      this.viewportStart,
+    );
+    this.viewportStart = viewport.start;
+    return renderDashboard({
+      snapshots: this.primaryTab === "subagents" ? this.snapshots : [],
+      selected: Math.max(0, ids.indexOf(this.selectedId ?? "")),
+      width,
+      now: Date.now(),
+      maxRows: rowBudget,
+      start: viewport.start,
+      primaryTab: this.primaryTab,
+      stateTab: this.stateTab,
+      ...(placeholder ? { notice: placeholder } : {}),
+    }).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
   }
 
   invalidate(): void {}
@@ -151,7 +211,9 @@ class SubagentDashboard {
   }
 
   private move(delta: number): void {
-    this.selected = clampSelection(this.snapshots.length, this.selected + delta);
+    const ids = this.snapshots.map((snapshot) => snapshot.id);
+    this.selectedId = moveSelection(ids, this.selectedId, delta);
+    this.selectedIndex = Math.max(0, ids.indexOf(this.selectedId ?? ""));
     this.tui.requestRender();
   }
 
@@ -163,7 +225,7 @@ class SubagentDashboard {
   private abort(): void {
     const target = this.detailId
       ? this.snapshots.find((snapshot) => snapshot.id === this.detailId)
-      : this.snapshots[this.selected];
+      : this.snapshots.find((snapshot) => snapshot.id === this.selectedId);
     if (!target || !this.agents) return;
     if (target.status !== "running") {
       this.setNotice(`${target.id} has already finished.`);
@@ -186,7 +248,7 @@ export function registerSubagentDashboard(
   pi: ExtensionAPI,
   resolveAgents: () => DashboardAgents | undefined,
 ): void {
-  pi.registerCommand("subagents", {
+  const command = {
     description: "Show running and finished subagents",
     handler: async (_args, ctx) => {
       if (ctx.mode !== "tui") {
@@ -206,5 +268,10 @@ export function registerSubagentDashboard(
         },
       );
     },
+  } satisfies Parameters<ExtensionAPI["registerCommand"]>[1];
+  pi.registerCommand("subagents", command);
+  pi.registerCommand("dashboard", {
+    ...command,
+    description: "Open the Tasks, Subagents, and Workspaces dashboard",
   });
 }
