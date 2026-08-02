@@ -5,6 +5,7 @@ import {
   type SubagentSession,
 } from "../backend.ts";
 import type { BackendName, SpawnTask, SubagentEvent } from "../domain.ts";
+import { ClaudeInputQueue } from "./claude-input-queue.ts";
 
 /**
  * Opt-in backend running children on the Claude Agent SDK.
@@ -53,7 +54,7 @@ export class ClaudeBackend implements SubagentBackend {
   // Steering needs streaming-input mode; resuming does not, and a fresh run per
   // turn keeps no process alive between them.
   readonly capabilities = {
-    liveInput: [] as const,
+    liveInput: ["followUp"] as const,
     settledContinuation: "respawn" as const,
     modelSelection: true,
     reasoningEffort: false,
@@ -88,8 +89,10 @@ export class ClaudeBackend implements SubagentBackend {
     const sdk = await this.load();
     const abort = new AbortController();
     if (task.signal) task.signal.addEventListener("abort", () => abort.abort(), { once: true });
+    const input = new ClaudeInputQueue();
+    input.push(task.prompt);
     const query = sdk.query({
-      prompt: task.prompt,
+      prompt: input,
       options: {
         cwd: task.cwd,
         systemPrompt: task.systemPrompt,
@@ -109,7 +112,7 @@ export class ClaudeBackend implements SubagentBackend {
         ...(task.resumeToken ? { resume: task.resumeToken } : {}),
       },
     });
-    return new ClaudeSubagentSession(query, abort);
+    return new ClaudeSubagentSession(query, abort, input);
   }
 }
 
@@ -119,12 +122,16 @@ class ClaudeSubagentSession implements SubagentSession {
   resumeToken?: string;
   private readonly query: ClaudeQuery;
   private readonly abort: AbortController;
+  private readonly input: ClaudeInputQueue;
   private readonly channel = new EventChannel();
   private lastAssistantText = "";
+  private result?: Extract<SubagentEvent, { type: "run_settled" }>;
+  private settled = false;
 
-  constructor(query: ClaudeQuery, abort: AbortController) {
+  constructor(query: ClaudeQuery, abort: AbortController, input: ClaudeInputQueue) {
     this.query = query;
     this.abort = abort;
+    this.input = input;
     this.events = this.channel.events;
     this.channel.push({ type: "run_started" });
     void this.pump();
@@ -133,42 +140,58 @@ class ClaudeSubagentSession implements SubagentSession {
   private async pump(): Promise<void> {
     try {
       for await (const message of this.query) {
-        const sessionId = (message as { session_id?: unknown }).session_id;
-        if (typeof sessionId === "string" && sessionId) this.resumeToken = sessionId;
+        const frame = message as { session_id?: unknown; type?: unknown; user_message_uuid?: unknown };
+        if (typeof frame.session_id === "string" && frame.session_id) this.resumeToken = frame.session_id;
+        if (frame.type === "result") {
+          this.result = translate(message).find(
+            (event): event is Extract<SubagentEvent, { type: "run_settled" }> => event.type === "run_settled",
+          );
+          const uuid = typeof frame.user_message_uuid === "string" ? frame.user_message_uuid : undefined;
+          if (this.input.pending === 0 && (!uuid || uuid === this.input.lastYieldedUuid)) this.input.close();
+          continue;
+        }
         for (const event of translate(message)) {
           if (event.type === "assistant_message") this.lastAssistantText = event.text;
           this.channel.push(event);
         }
       }
-      // The SDK ends its stream after the result message; if that message did
-      // not settle us, close out here rather than hanging the manager.
-      this.channel.push({
-        type: "run_settled",
-        outcome: this.abort.signal.aborted ? "interrupted" : "completed",
-        text: this.lastAssistantText,
-      });
+      if (this.abort.signal.aborted) this.settle("interrupted");
+      else if (this.result) {
+        this.settled = true;
+        this.channel.push(this.result);
+      } else this.settle("completed");
     } catch (error) {
       this.channel.push({
         type: "run_settled",
         outcome: this.abort.signal.aborted ? "interrupted" : "failed",
         error: error instanceof Error ? error.message : String(error),
       });
+      this.settled = true;
+    } finally {
+      this.query.close?.();
     }
   }
 
-  async send(): Promise<void> {
-    throw new Error(
-      "The claude backend does not support steering; cancel and respawn with a revised task.",
-    );
+  private settle(outcome: "completed" | "interrupted"): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.channel.push({ type: "run_settled", outcome, ...(outcome === "completed" ? { text: this.lastAssistantText } : {}) });
+  }
+
+  async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
+    if (mode !== "followUp") throw new Error("Claude only supports queued follow-up input.");
+    this.input.push(text);
   }
 
   async interrupt(): Promise<void> {
     this.abort.abort();
+    this.input.failAll("closed");
     await this.query.interrupt?.().catch(() => {});
   }
 
   dispose(): void {
     this.abort.abort();
+    this.input.failAll("closed");
     this.query.close?.();
     this.channel.close();
   }
