@@ -104,7 +104,7 @@ interface Entry {
   resolveSettled: (snapshot: SubagentSnapshot) => void;
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
-  readonly generation: number;
+  generation: number;
   readonly sequence: number;
   /** Serializes messages without blocking messages to other children. */
   sendChain: Promise<void>;
@@ -301,7 +301,7 @@ export class SubagentManager {
           "Subagent lifecycle persistence is unavailable; refusing to start an unowned child.",
         );
       await this.lifecycleStore?.append({
-        version: 1,
+        version: 2,
         type: "spawn_intent",
         durableId,
         displayId: id,
@@ -309,7 +309,15 @@ export class SubagentManager {
         generation,
         backend: request.backend,
         title: request.title,
-        cwd: request.cwd,
+        backendConfig: {
+          ...(request.model ? { model: request.model } : {}),
+          ...(request.provider ? { provider: request.provider } : {}),
+          ...(request.effort ? { effort: request.effort } : {}),
+          ...(request.tools ? { tools: request.tools } : {}),
+        },
+        workspace: { cwd: request.cwd, ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}) },
+        ...(request.capability ? { capability: request.capability } : {}),
+        charterRef: { kind: "manager_task", value: durableId },
         ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
         at: this.clock(),
       });
@@ -378,28 +386,14 @@ export class SubagentManager {
       try {
         // Running is durable before the backend receives control.
         await this.lifecycleStore?.append({
-          version: 1,
+          version: 2,
           type: "running",
           durableId,
           generation: entry.generation,
           at: this.clock(),
         });
         entry.session = await backend.spawn(task);
-        if (entry.session.sessionFile) {
-          await this.lifecycleStore
-            ?.append({
-              version: 1,
-              type: "running",
-              durableId,
-              generation: entry.generation,
-              at: this.clock(),
-              resumeHandle: {
-                kind: "pi_session_file",
-                value: entry.session.sessionFile,
-              },
-            })
-            .catch((error) => this.recordPersistenceError(error));
-        }
+        this.watchResumeHandle(entry, entry.session);
       } catch (error) {
         this.finish(entry, { type: "backend_error", message: describe(error) }, entry.runToken);
         throw error;
@@ -595,15 +589,16 @@ export class SubagentManager {
       // retained Pi handle can begin producing events synchronously, so all
       // manager state and the single-writer token must be installed first.
       await this.lifecycleStore?.append({
-        version: 1,
-        type: "running",
+        version: 2,
+        type: "generation_advanced",
         durableId: entry.snapshot.durableId,
-        generation: entry.generation,
+        previousGeneration: entry.generation,
+        generation: entry.generation + 1,
         at: this.clock(),
-        ...(entry.session.sessionFile
-          ? { resumeHandle: { kind: "pi_session_file" as const, value: entry.session.sessionFile } }
-          : {}),
       });
+      const nextGeneration = entry.generation + 1;
+      await this.lifecycleStore?.append({ version: 2, type: "running", durableId: entry.snapshot.durableId, generation: nextGeneration, at: this.clock() });
+      entry.generation = nextGeneration;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while continuing.`);
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
       const settled = new Promise<SubagentSnapshot>((resolve) => {
@@ -646,23 +641,11 @@ export class SubagentManager {
     let session: SubagentSession | undefined;
     try {
       session = await entry.backend.spawn(task);
-      // A continuation is not exposed as running until its current-generation
-      // lifecycle fact is durable. Failure leaves the old terminal state intact.
-      await this.lifecycleStore?.append({
-        version: 1,
-        type: "running",
-        durableId: entry.snapshot.durableId,
-        generation: entry.generation,
-        at: this.clock(),
-        ...(session.sessionFile
-          ? {
-              resumeHandle: {
-                kind: "pi_session_file" as const,
-                value: session.sessionFile,
-              },
-            }
-          : {}),
-      });
+      // Advance exactly once before exposing the successor generation.
+      await this.lifecycleStore?.append({ version: 2, type: "generation_advanced", durableId: entry.snapshot.durableId, previousGeneration: entry.generation, generation: entry.generation + 1, at: this.clock() });
+      const nextGeneration = entry.generation + 1;
+      await this.lifecycleStore?.append({ version: 2, type: "running", durableId: entry.snapshot.durableId, generation: nextGeneration, at: this.clock() });
+      entry.generation = nextGeneration;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
       session?.dispose();
@@ -672,6 +655,7 @@ export class SubagentManager {
     entry.task = task;
     entry.session?.dispose();
     entry.session = session;
+    this.watchResumeHandle(entry, session);
     // Reopen the entry so `wait` and result delivery work exactly as on a first run.
     let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
     const settled = new Promise<SubagentSnapshot>((resolve) => {
@@ -785,7 +769,7 @@ export class SubagentManager {
           : "failed";
     void this.lifecycleStore
       ?.append({
-        version: 1,
+        version: 2,
         type: "terminal",
         durableId: entry.snapshot.durableId,
         generation: entry.generation,
@@ -819,6 +803,17 @@ export class SubagentManager {
     // The hook runs after settlement so a slow or broken workspace reclaim
     // cannot stall the parent's `wait`.
     void Promise.resolve(this.onSettled?.(snapshot)).catch(() => {});
+  }
+
+  private watchResumeHandle(entry: Entry, session: SubagentSession): void {
+    const kind = entry.snapshot.backend === "pi" ? "pi_session_file" : entry.snapshot.backend === "claude" ? "claude_session" : "codex_thread";
+    const persist = (value: string) => {
+      if (!value) return;
+      void this.lifecycleStore?.append({ version: 2, type: "resume_handle_discovered", durableId: entry.snapshot.durableId, generation: entry.generation, resumeHandle: { kind, value } as never, at: this.clock() }).catch((error) => this.recordPersistenceError(error));
+    };
+    if (session.onResumeHandle) session.onResumeHandle(persist);
+    else if (session.sessionFile) persist(session.sessionFile);
+    else if (session.resumeToken) persist(session.resumeToken);
   }
 
   private recordPersistenceError(error: unknown): void {

@@ -130,6 +130,12 @@ class CodexSubagentSession implements SubagentSession {
   private readonly lines: Interface;
   private nextId = 1;
   private threadId?: string;
+  private readonly handleListeners = new Set<(handle: string) => void>();
+  onResumeHandle(callback: (handle: string) => void): () => void {
+    this.handleListeners.add(callback);
+    if (this.threadId) callback(this.threadId);
+    return () => this.handleListeners.delete(callback);
+  }
   /** The thread id, which is how a settled subagent is continued. */
   get resumeToken(): string | undefined {
     return this.threadId;
@@ -199,6 +205,7 @@ class CodexSubagentSession implements SubagentSession {
           });
       this.threadId = threadIdOf(thread) ?? this.task.resumeToken;
       if (!this.threadId) throw new Error("codex thread/start returned no thread id.");
+      for (const listener of this.handleListeners) listener(this.threadId);
       this.channel.push({ type: "run_started" });
       if (this.task.model ?? this.options.defaultModel) {
         this.channel.push({ type: "meta", model: (this.task.model ?? this.options.defaultModel)! });

@@ -120,6 +120,12 @@ class ClaudeSubagentSession implements SubagentSession {
   readonly events: AsyncIterable<SubagentEvent>;
   /** The SDK's session id, learned from the init message. */
   resumeToken?: string;
+  private readonly handleListeners = new Set<(handle: string) => void>();
+  onResumeHandle(callback: (handle: string) => void): () => void {
+    this.handleListeners.add(callback);
+    if (this.resumeToken) callback(this.resumeToken);
+    return () => this.handleListeners.delete(callback);
+  }
   private readonly query: ClaudeQuery;
   private readonly abort: AbortController;
   private readonly input: ClaudeInputQueue;
@@ -153,8 +159,10 @@ class ClaudeSubagentSession implements SubagentSession {
           type?: unknown;
           user_message_uuid?: unknown;
         };
-        if (typeof frame.session_id === "string" && frame.session_id)
+        if (typeof frame.session_id === "string" && frame.session_id && frame.session_id !== this.resumeToken) {
           this.resumeToken = frame.session_id;
+          for (const listener of this.handleListeners) listener(frame.session_id);
+        }
         if (frame.type === "result") {
           this.result = translate(message).find(
             (event): event is Extract<SubagentEvent, { type: "run_settled" }> =>

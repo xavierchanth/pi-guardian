@@ -388,7 +388,7 @@ describe("subagent manager", () => {
 
     assert.deepEqual(
       events.map(({ type }) => type),
-      ["spawn_intent", "running", "terminal", "running", "terminal"],
+      ["spawn_intent", "running", "resume_handle_discovered", "terminal", "generation_advanced", "running", "resume_handle_discovered", "terminal"],
     );
     const folded = foldLifecycle(events);
     assert.equal(folded.rejected.length, 0);
@@ -437,7 +437,7 @@ describe("subagent manager", () => {
       load: async () => [],
       append: async () => {
         appends += 1;
-        if (appends === 4) throw new Error("disk full");
+        if (appends === 6) throw new Error("disk full");
       },
     };
     const backend = new StubBackend();
