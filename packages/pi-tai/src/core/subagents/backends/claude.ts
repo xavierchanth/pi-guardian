@@ -139,7 +139,12 @@ class ClaudeSubagentSession implements SubagentSession {
 
   private async pump(): Promise<void> {
     try {
-      for await (const message of this.query) {
+      const iterator = this.query[Symbol.asyncIterator]();
+      let draining = false;
+      while (true) {
+        const next = draining ? await nextWithDrainTimeout(iterator) : await iterator.next();
+        if (next.done) break;
+        const message = next.value;
         const frame = message as { session_id?: unknown; type?: unknown; user_message_uuid?: unknown };
         if (typeof frame.session_id === "string" && frame.session_id) this.resumeToken = frame.session_id;
         if (frame.type === "result") {
@@ -147,7 +152,10 @@ class ClaudeSubagentSession implements SubagentSession {
             (event): event is Extract<SubagentEvent, { type: "run_settled" }> => event.type === "run_settled",
           );
           const uuid = typeof frame.user_message_uuid === "string" ? frame.user_message_uuid : undefined;
-          if (this.input.pending === 0 && (!uuid || uuid === this.input.lastYieldedUuid)) this.input.close();
+          if (this.input.pending === 0 && (!uuid || uuid === this.input.lastYieldedUuid)) {
+            this.input.close();
+            draining = true;
+          }
           continue;
         }
         for (const event of translate(message)) {
@@ -290,6 +298,25 @@ function usageEvent(usage: Record<string, number>): SubagentEvent {
 
 function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+async function nextWithDrainTimeout<T>(
+  iterator: AsyncIterator<T>,
+): Promise<IteratorResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      iterator.next(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Claude did not end its stream after input was closed.")),
+          30_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function defaultLoad(): Promise<ClaudeSdk> {

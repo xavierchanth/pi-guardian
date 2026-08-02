@@ -364,7 +364,10 @@ class CodexSubagentSession implements SubagentSession {
 
   async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
     if (mode !== "steer" || !this.steerEnabled)
-      throw new SendNotDeliveredError("Codex steering is unavailable for this session.", "precondition");
+      throw new SendNotDeliveredError(
+        "Codex does not support steering for this session.",
+        "precondition",
+      );
     if (!this.threadId || !this.turnId)
       throw new SendNotDeliveredError("Codex has no active turn to steer.", "precondition");
     try {
