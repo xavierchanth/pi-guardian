@@ -1,13 +1,13 @@
 import type { ExtensionContext, InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { SessionPolicyReader } from "../../../core/config/register.ts";
 import {
   PrivateChildSessionFactory,
   type PrivateChildSessionFactoryPort,
   type PrivateChildSessionHandle,
 } from "../../concurrency/child-session.ts";
-import type { SessionPolicyReader } from "../../../core/config/register.ts";
 import {
-  EventChannel,
   type AvailabilityResult,
+  EventChannel,
   SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
@@ -207,6 +207,11 @@ class PiSubagentSession implements SubagentSession {
     const previous = this.active;
     previous.active = false;
     previous.unsubscribe();
+    // The manager replaces its pump for every in-place generation. Complete the
+    // superseded stream so that pump cannot remain parked on this channel and
+    // retain the old run; its generation token prevents this close from
+    // settling the successor.
+    previous.channel.close();
     const run = this.startRun();
     this.active = run;
     void this.run(run, text);

@@ -353,13 +353,25 @@ describe("subagent manager", () => {
       };
       return session;
     };
-    const manager = managerWith([backend]);
+    const manager = managerWith([backend], { maxRunning: 1 });
     const spawned = await manager.spawn(request({ prompt: "HANG: race" }));
 
-    assert.deepEqual(await manager.send(spawned.id, "continue me"), {
-      operation: "continue",
-      settlementRace: true,
-    });
+    for (let generation = 0; generation < 3; generation += 1) {
+      assert.deepEqual(await manager.send(spawned.id, `continue generation ${generation}`), {
+        operation: "continue",
+        settlementRace: true,
+      });
+      await manager.wait([spawned.id]);
+      assert.equal(
+        manager.capacity().running,
+        0,
+        "the refused run's reservation must not leak after its successor settles",
+      );
+      if (generation < 2) {
+        await manager.send(spawned.id, `HANG: generation ${generation + 1}`);
+        assert.equal(manager.get(spawned.id)?.status, "running");
+      }
+    }
   });
 
   it("persists a continuation running and terminal lifecycle", async () => {

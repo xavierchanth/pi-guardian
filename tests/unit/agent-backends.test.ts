@@ -165,20 +165,34 @@ describe("pi backend", () => {
     });
 
     const child = await backend.spawn(task());
-    const oldEvents = child.events;
+    const firstEvents = child.events;
+    const firstPump = collect(firstEvents);
     await child.continueInPlace?.("second");
-    const newEvents = child.events;
-    assert.notEqual(oldEvents, newEvents);
+    const secondEvents = child.events;
+    const secondPump = collect(secondEvents);
+    await child.continueInPlace?.("third");
+    const thirdEvents = child.events;
+    assert.notEqual(firstEvents, secondEvents);
+    assert.notEqual(secondEvents, thirdEvents);
+    assert.deepEqual(
+      await firstPump,
+      [{ type: "run_started" }, { type: "meta" }],
+      "a superseded generation closes its parked consumer",
+    );
+    assert.deepEqual(await secondPump, [{ type: "run_started" }]);
 
     idleResolvers[0]?.();
+    idleResolvers[1]?.();
     await new Promise((resolve) => setImmediate(resolve));
     subscribers[0]?.({ type: "message_end", message: { role: "assistant", content: "old" } });
-    subscribers[1]?.({ type: "message_end", message: { role: "assistant", content: "new" } });
-    idleResolvers[1]?.();
-    const continuation = await collect(newEvents);
+    subscribers[1]?.({ type: "message_end", message: { role: "assistant", content: "also old" } });
+    subscribers[2]?.({ type: "message_end", message: { role: "assistant", content: "new" } });
+    idleResolvers[2]?.();
+    const continuation = await collect(thirdEvents);
 
-    assert.equal(prompts, 2);
+    assert.equal(prompts, 3);
     assert.ok(unsubscribed.includes(0), "the old completion only unsubscribes its own generation");
+    assert.ok(unsubscribed.includes(1));
     assert.deepEqual(
       continuation.filter((event) => event.type === "assistant_message"),
       [{ type: "assistant_message", text: "new" }],
