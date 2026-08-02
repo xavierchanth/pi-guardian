@@ -16,6 +16,17 @@ test("shared dashboard projections have no terminal or TUI dependency", () => {
   }
 });
 
+test("core composes outward to terminal without reversing the dependency", () => {
+  const coreRegister = readFileSync(
+    join(root, "packages/pi-tai/src/core/subagents/register.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(coreRegister, /(?:from|import\()\s*["'][^"']*terminal/);
+  assert.match(coreRegister, /dependencies\.registerDashboard\?\.\(pi, \(\) => built\?\.agents\)/);
+  assert.match(coreRegister, /SQLiteCustodyCoordinator/);
+  assert.match(coreRegister, /coordinator\.recover\(\)/);
+});
+
 test("thin terminal shell receives rows through the composition facade", () => {
   const view = readFileSync(join(root, "packages/pi-tai/src/terminal/dashboard/view.ts"), "utf8");
   assert.match(view, /readRows: \(tui: TUI\) => number/);
@@ -23,6 +34,7 @@ test("thin terminal shell receives rows through the composition facade", () => {
 
   const facade = readFileSync(join(root, "packages/pi-tai/pi-tai.ts"), "utf8");
   assert.match(facade, /registerDashboardShell\(api, resolveAgents, terminalRows\)/);
+  assert.match(facade, /registerAgents/);
 });
 
 test("terminal budget is read only by the terminal adapter with a documented fallback", () => {
