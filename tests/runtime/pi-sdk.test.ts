@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import test from "node:test";
 import { FIELD_DESCRIPTORS } from "../../packages/pi-tai/src/core/config/provenance.ts";
 import { DEFAULT_SESSION_POLICY } from "../../packages/pi-tai/src/core/config/schema.ts";
@@ -18,6 +18,7 @@ const inheritedXdg = Object.fromEntries(
   ]),
 );
 const privateXdg = createPrivateXdgRoots("pi-runtime-sdk-xdg-");
+delete process.env.XDG_RUNTIME_DIR;
 Object.assign(process.env, privateXdg.env);
 test.after(() => {
   for (const [key, value] of Object.entries(inheritedXdg)) {
@@ -53,6 +54,16 @@ test("Pi SDK suite replaces every inherited developer XDG root", () => {
     assert.equal(process.env[key], privatePath);
     if (inheritedXdg[key]) assert.notEqual(privatePath, inheritedXdg[key]);
     assert.ok(privatePath?.startsWith(privateXdg.root));
+  }
+  const inheritedRuntime = inheritedXdg.XDG_RUNTIME_DIR;
+  if (inheritedRuntime && isAbsolute(inheritedRuntime))
+    assert.ok(process.env.XDG_RUNTIME_DIR?.startsWith(privateXdg.root));
+  else {
+    assert.equal(process.env.XDG_RUNTIME_DIR, undefined);
+    assert.equal(
+      resolveStoragePaths(process.env).runtime,
+      join(privateXdg.root, "cache", "pi-tai", "run"),
+    );
   }
   for (const path of Object.values(resolveStoragePaths(process.env)))
     assert.ok(path.startsWith(privateXdg.root), `${path} escaped the private XDG root`);

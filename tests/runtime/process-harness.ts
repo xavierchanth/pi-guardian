@@ -27,13 +27,15 @@ export class RuntimeProcessHarness {
     const xdg = createPrivateXdgRoots();
     this.xdgEnv = xdg.env;
     this.xdgRoot = xdg.root;
+    const childEnv = { ...process.env, ...options.env, ...this.xdgEnv };
+    // Spreading process.env must not manufacture or retain an invalid runtime variable.
+    if (!this.xdgEnv.XDG_RUNTIME_DIR) delete childEnv.XDG_RUNTIME_DIR;
     this.child = spawn(
       options.executable ?? process.execPath,
       options.args ?? ["--experimental-strip-types", bootstrap],
       {
         cwd: options.cwd ?? root,
-        // Harness-owned roots deliberately replace inherited developer state.
-        env: { ...process.env, ...options.env, ...this.xdgEnv },
+        env: childEnv,
         stdio: ["pipe", "pipe", "pipe"],
       },
     );

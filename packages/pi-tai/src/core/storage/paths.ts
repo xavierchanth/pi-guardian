@@ -14,13 +14,6 @@ export interface XdgRoots {
   runtimeFromCache: boolean;
 }
 
-export type XdgEnvironment = {
-  XDG_STATE_HOME: string;
-  XDG_DATA_HOME: string;
-  XDG_CACHE_HOME: string;
-  XDG_RUNTIME_DIR: string;
-};
-
 export interface StoragePaths {
   state: string;
   data: string;
@@ -50,16 +43,6 @@ export function resolveXdgRoots(env: NodeJS.ProcessEnv = process.env, home = hom
     cache,
     runtime: explicitRuntime ? env.XDG_RUNTIME_DIR! : cache,
     runtimeFromCache: !explicitRuntime,
-  };
-}
-
-/** Converts private base roots into the exact environment inherited by test processes. */
-export function xdgEnvironment(roots: Omit<XdgRoots, "runtimeFromCache">): XdgEnvironment {
-  return {
-    XDG_STATE_HOME: roots.state,
-    XDG_DATA_HOME: roots.data,
-    XDG_CACHE_HOME: roots.cache,
-    XDG_RUNTIME_DIR: roots.runtime,
   };
 }
 

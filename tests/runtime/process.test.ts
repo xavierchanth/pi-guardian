@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { createPrivateXdgRoots } from "./private-xdg.ts";
 import { initializeParams, RuntimeProcessHarness } from "./process-harness.ts";
+
+test("private XDG roots preserve runtime-variable presence without inheriting its path", () => {
+  const absent = createPrivateXdgRoots("pi-runtime-no-runtime-", {});
+  const hostRuntime = join(absent.root, "host-runtime");
+  const present = createPrivateXdgRoots("pi-runtime-with-runtime-", {
+    XDG_RUNTIME_DIR: hostRuntime,
+  });
+  try {
+    assert.equal(absent.env.XDG_RUNTIME_DIR, undefined);
+    assert.equal(
+      resolveStoragePaths(absent.env).runtime,
+      join(absent.root, "cache", "pi-tai", "run"),
+    );
+    assert.notEqual(present.env.XDG_RUNTIME_DIR, hostRuntime);
+    assert.ok(present.env.XDG_RUNTIME_DIR?.startsWith(present.root));
+  } finally {
+    absent.remove();
+    present.remove();
+  }
+});
 
 test("process harness rejects every caller-supplied XDG override", () => {
   for (const key of ["XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"]) {
