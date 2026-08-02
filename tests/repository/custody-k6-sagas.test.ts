@@ -315,6 +315,39 @@ test("K6 two processes lease one duplicate operation and converge on one receipt
   db.close();
 });
 
+test("K6 content-bearing merge reuses its durable receipt after an after-JJ crash", async () => {
+  const f = await fixture();
+  writeFileSync(join(f.record.path, "agent.txt"), "agent\n");
+  sh(f.record.path, "status");
+  let fired = false;
+  const crashing = new SQLiteCustodyCoordinator(
+    f.db,
+    f.port,
+    f.cli,
+    "crasher",
+    () => now,
+    (at) => {
+      if (!fired && at === "after_jj") {
+        fired = true;
+        throw new Error("crash:after_jj");
+      }
+    },
+  );
+  await assert.rejects(crashing.run(await mergeRequest(f)), /crash:after_jj/);
+  const operationsAfterCrash = operationCount(f.root);
+  const recovered = await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).recover(
+    f.record.repoId,
+  );
+  assert.deepEqual(recovered.failed, []);
+  assert.equal((await f.port.get("worker"))?.disposition, "merged");
+  assert.equal(
+    operationCount(f.root),
+    operationsAfterCrash + 1,
+    "recovery performs only workspace cleanup, not a second merge rewrite",
+  );
+  f.db.close();
+});
+
 test("K6 auto merge-under preserves a dirty target", async () => {
   const f = await fixture();
   put(f.record.path, "agent\n");
@@ -386,6 +419,27 @@ test("K6 resolved conflict retry proves ancestry then safely detaches", async ()
   assert.equal(await f.cli.areAncestorsOf(f.root, [f.head], first.targetChangeId!), true);
   assert.equal(await f.cli.workspaceHead(f.root, f.record.name), undefined);
   assert.equal(existsSync(f.record.path), false);
+  f.db.close();
+});
+
+test("K6 conflict finalization fails closed when the retained source gains work", async () => {
+  const f = await fixture();
+  put(f.record.path, "agent\n");
+  put(f.root, "target\n");
+  const req = await mergeRequest(f);
+  const coordinator = new SQLiteCustodyCoordinator(f.db, f.port, f.cli);
+  assert.equal((await coordinator.run(req)).conflictRetained, true);
+  sh(f.record.path, "workspace", "update-stale");
+  sh(f.record.path, "new");
+  writeFileSync(join(f.record.path, "late.txt"), "late\n");
+  sh(f.record.path, "status");
+  put(f.root, "resolved\n");
+  await assert.rejects(
+    coordinator.run({ ...req, kind: "finalize_merge" }),
+    /merge_source_changed_after_conflict_receipt/,
+  );
+  assert.ok(await f.cli.workspaceHead(f.root, f.record.name));
+  assert.ok(existsSync(f.record.path));
   f.db.close();
 });
 

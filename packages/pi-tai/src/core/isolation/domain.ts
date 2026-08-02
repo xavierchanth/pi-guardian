@@ -72,6 +72,32 @@ export type ParentSimplificationReason =
   | "redundant-parents-removed"
   | `${"postcheck-failed" | "cosmetic-command-failed"}${"" | "-rolled-back" | "-rollback-failed" | "-rollback-skipped-intervening-operation"}`;
 
+export interface MergeClassification {
+  readonly opId: string;
+  readonly sourceAt: string;
+  readonly sourceUnique: readonly string[];
+  readonly sourceEmpty: readonly string[];
+  readonly sourceContent: readonly string[];
+  readonly incomingHeads: readonly string[];
+  readonly attachedHead?: string;
+  readonly linearInterior: readonly string[];
+  readonly emptyMerges: readonly string[];
+  readonly exceptional: readonly { readonly id: string; readonly reason: string }[];
+  readonly metadata: readonly {
+    readonly id: string;
+    readonly description: string;
+    readonly author: string;
+    readonly authoredAt: string;
+    readonly committedAt: string;
+  }[];
+}
+
+export interface MergePhaseReceipt {
+  readonly abandoned: readonly string[];
+  readonly preOperation?: string;
+  readonly operation?: string;
+}
+
 export interface MergeSummary {
   readonly strategy: MergeStrategy;
   /** Change ids folded into the source graph, oldest first. */
@@ -82,6 +108,9 @@ export interface MergeSummary {
   readonly parentSimplification?: "applied" | "skipped" | "failed";
   /** Stable, observable explanation for the cosmetic cleanup outcome. */
   readonly parentSimplificationReason?: ParentSimplificationReason;
+  readonly classification?: MergeClassification;
+  readonly phaseA?: MergePhaseReceipt;
+  readonly phaseB?: MergePhaseReceipt;
 }
 
 export type MergeResult =

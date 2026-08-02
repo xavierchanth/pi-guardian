@@ -161,7 +161,16 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
           reason: `${unnamed.length} change(s) in ${r.name} have no description; describe them before merging.`,
         };
       if (!content.length) {
-        const done = await this.coordinator.reclaimScaffold(this.request(r));
+        // More than one empty change is not a pristine scaffold, but it is still
+        // truthfully no work. Persist the complete owned set and use the normal
+        // receipted abandon saga so cleanup is crash-idempotent.
+        const exactOwned = [...new Set(entries.map((entry) => entry.changeId))].sort();
+        const refreshed = await this.refresh(r, { headChangeIds: exactOwned });
+        const done = await this.coordinator.run({
+          ...this.request(refreshed),
+          kind: "abandon",
+          requestedBy: "model_tool",
+        });
         return { kind: "no_changes", record: publicRecord(done) };
       }
       const parent = r.parent ? await this.owned(r.parent) : undefined;

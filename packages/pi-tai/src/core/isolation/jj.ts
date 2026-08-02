@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises";
 import type { AbsolutePath } from "../jj/domain.ts";
 import { type JjExecutor, renderJjExecutionFailure } from "../jj/executor.ts";
 import { updateStaleSafely } from "../jj/stale-update.ts";
-import type { ChangeEntry } from "./domain.ts";
+import type { ChangeEntry, MergeClassification } from "./domain.ts";
 
 /**
  * Typed, argv-only surface over the handful of jj commands this module needs.
@@ -352,25 +352,7 @@ export class JjCli {
     sourceName: string,
     targetChangeId: string,
     persistedHeads: readonly string[] = [],
-  ): Promise<{
-    opId: string;
-    sourceAt: string;
-    sourceUnique: string[];
-    sourceEmpty: string[];
-    sourceContent: string[];
-    incomingHeads: string[];
-    attachedHead?: string;
-    linearInterior: string[];
-    emptyMerges: string[];
-    exceptional: Array<{ id: string; reason: string }>;
-    metadata: Array<{
-      id: string;
-      description: string;
-      author: string;
-      authoredAt: string;
-      committedAt: string;
-    }>;
-  }> {
+  ): Promise<MergeClassification> {
     const before = await this.currentOperationId(repoRoot);
     const attached = await this.workspaceHead(repoRoot, sourceName);
     const sourceAt = attached ?? persistedHeads[0];

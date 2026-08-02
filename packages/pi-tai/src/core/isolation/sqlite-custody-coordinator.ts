@@ -3,7 +3,7 @@ import { rm, stat } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 import { type ProcessState, processState, withOperationLease } from "../storage/operation-lease.ts";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
-import type { MergeSummary } from "./domain.ts";
+import type { MergeClassification, MergePhaseReceipt, MergeSummary } from "./domain.ts";
 import { exact, JjCli } from "./jj.ts";
 
 export type CustodySagaKind = "create" | "merge" | "finalize_merge" | "forget" | "abandon";
@@ -20,6 +20,14 @@ export interface CustodySagaRequest {
   /** Durable destination checkout, including a parent managed workspace. */ targetPath?: string;
   /** Ordered content changes reported by the public merge result. */ mergeChangeIds?: readonly string[];
   /** Coordinator-written receipt; callers must never supply or predict it. */ actualMerge?: MergeSummary;
+  /** Durable in-progress evidence; callers must never supply or predict it. */
+  receipt?: MergeExecutionReceipt;
+}
+
+interface MergeExecutionReceipt {
+  classification: MergeClassification;
+  phaseA: MergePhaseReceipt;
+  phaseB: MergePhaseReceipt;
 }
 
 /** Stable across retries, including retries in another process. */
@@ -157,8 +165,10 @@ export class SQLiteCustodyCoordinator {
     );
   }
 
-  private operation(opId: string): any {
-    return this.db.prepare("SELECT * FROM custody_operation WHERE op_id=?").get(opId);
+  private operation(opId: string): CustodyOperationRow | undefined {
+    return this.db.prepare("SELECT * FROM custody_operation WHERE op_id=?").get(opId) as
+      | CustodyOperationRow
+      | undefined;
   }
 
   private async resume(opId: string): Promise<CustodyRecord> {
@@ -199,8 +209,11 @@ export class SQLiteCustodyCoordinator {
           if (!alreadyAncestor || !row.conflictRetained || !row.merge)
             throw new Error("Conflict finalization lacks durable merge ancestry receipt");
           await this.updateSourceStale(row, "custody conflict finalization");
-          const retained = (row.merge as any).classification;
+          const retained = row.merge.classification;
           if (!retained) throw new Error("Retained merge classification is missing");
+          const currentSource = await this.jj.workspaceHead(request.repoRoot, row.name);
+          if (currentSource !== retained.sourceAt)
+            throw new Error("merge_source_changed_after_conflict_receipt");
           // Finalization validates the persisted partition; resolving conflicts
           // legitimately changes classification predicates, so recomputing the
           // source-difference partition would reject honest retries.
@@ -214,28 +227,53 @@ export class SQLiteCustodyCoordinator {
         } else {
           if (alreadyAncestor) throw new Error("Fresh merge source is already in target ancestry");
           await this.updateSourceStale(row, "custody merge source");
-          const classification = await this.jj.classifyMergeSource(
-            request.repoRoot,
-            row.name,
-            request.targetChangeId,
-            heads,
-          );
-          if (classification.emptyMerges.length || classification.exceptional.length)
+          let classification =
+            request.receipt?.classification ??
+            (await this.jj.classifyMergeSource(
+              request.repoRoot,
+              row.name,
+              request.targetChangeId,
+              heads,
+            ));
+          // Ratified MG-0 policy: first ask JJ to remove genuinely redundant
+          // merge edges. Only the exact empty merge commits are eligible.
+          if (!request.receipt) {
+            for (const id of classification.emptyMerges)
+              await this.jj.simplifyParents(request.repoRoot, id);
+            if (classification.emptyMerges.length)
+              classification = await this.jj.classifyMergeSource(
+                request.repoRoot,
+                row.name,
+                request.targetChangeId,
+                heads,
+              );
+          }
+          if (classification.emptyMerges.length || classification.exceptional.length) {
+            const retainedReceipt = {
+              name: "merge_source_empty_revision_retained",
+              emptyMerges: classification.emptyMerges,
+              exceptional: classification.exceptional,
+            };
+            this.db
+              .prepare("UPDATE custody_operation SET evidence=? WHERE op_id=?")
+              .run(JSON.stringify({ ...request, retainedReceipt }), opId);
             throw new Error(
-              `Unsafe empty revisions: ${JSON.stringify({ emptyMerges: classification.emptyMerges, exceptional: classification.exceptional })}`,
+              `merge_source_empty_revision_retained: ${JSON.stringify(retainedReceipt)}`,
             );
-          const receipt: any = {
+          }
+          const receipt: MergeExecutionReceipt = request.receipt ?? {
             classification,
             phaseA: { abandoned: [] },
             phaseB: { abandoned: [] },
           };
-          (request as any).receipt = receipt;
+          request.receipt = receipt;
           if (classification.linearInterior.length) {
-            const prePhaseA = await this.jj.currentOperationId(request.repoRoot);
+            const prePhaseA =
+              receipt.phaseA.preOperation ?? (await this.jj.currentOperationId(request.repoRoot));
             // Persist the complete partition and exact pre-operation boundary
             // before the first abandon. Recovery must never infer this evidence
             // from a graph it has already changed.
-            receipt.phaseA.preOperation = prePhaseA;
+            receipt.phaseA = { ...receipt.phaseA, preOperation: prePhaseA };
             this.db
               .prepare("UPDATE custody_operation SET evidence=? WHERE op_id=?")
               .run(JSON.stringify(request), opId);
@@ -246,10 +284,22 @@ export class SQLiteCustodyCoordinator {
                 this.now(),
                 row.id,
               );
-            const phaseAOp = await this.jj.abandonExactSet(
-              request.repoRoot,
-              classification.linearInterior,
+            const phaseAVisibilities = await Promise.all(
+              classification.linearInterior.map((id) =>
+                this.jj.resolveChange(request.repoRoot, id),
+              ),
             );
+            const allHidden = phaseAVisibilities.every(
+              (visibility) => visibility.kind === "hidden",
+            );
+            const allUnique = phaseAVisibilities.every(
+              (visibility) => visibility.kind === "unique",
+            );
+            if (!allHidden && !allUnique)
+              throw new Error("Phase A recovery found mixed or ambiguous visibility");
+            const phaseAOp = allHidden
+              ? await this.jj.currentOperationId(request.repoRoot)
+              : await this.jj.abandonExactSet(request.repoRoot, classification.linearInterior);
             receipt.phaseA = {
               abandoned: classification.linearInterior,
               preOperation: prePhaseA,
@@ -287,22 +337,22 @@ export class SQLiteCustodyCoordinator {
                     throw new Error(`restored content absent: ${id}`);
                 if (!(await this.jj.workspaceHead(request.repoRoot, row.name)))
                   throw new Error("restored attachment absent");
-                const now = this.now();
+                // A fully proved restore is retryable. Keep the original intent
+                // and classification, but clear the applied-phase marker so the
+                // next attempt can perform Phase A again.
+                request.receipt = {
+                  classification,
+                  phaseA: { abandoned: [] },
+                  phaseB: receipt.phaseB,
+                };
                 this.db
                   .prepare(
-                    "UPDATE custody_operation SET state='failed',settled_at=?,heartbeat_at=?,evidence=? WHERE op_id=?",
+                    "UPDATE custody_operation SET state='intent',settled_at=NULL,heartbeat_at=?,evidence=? WHERE op_id=?",
                   )
-                  .run(
-                    now,
-                    now,
-                    JSON.stringify({
-                      rolledBack: true,
-                      failedProof: String(proofError),
-                      restoredOperation: prePhaseA,
-                    }),
-                    opId,
-                  );
-                throw new PhaseARolledBackError(String(proofError));
+                  .run(this.now(), JSON.stringify(request), opId);
+                throw new PhaseARolledBackError(
+                  `phase_a_rolled_back_retryable: ${String(proofError)}`,
+                );
               } catch (restoreError) {
                 if (restoreError instanceof PhaseARolledBackError) throw restoreError;
                 await this.port.commit(opId, {
@@ -391,6 +441,7 @@ export class SQLiteCustodyCoordinator {
         .run(before, after, this.now(), JSON.stringify(request), opId);
       this.fault?.("after_jj", opId);
       op = this.operation(opId);
+      if (!op) throw new Error("Custody operation disappeared after JJ mutation");
     }
 
     if (request.kind === "create") {
@@ -427,8 +478,7 @@ export class SQLiteCustodyCoordinator {
     if (request.kind === "merge" || request.kind === "finalize_merge") {
       const target = request.targetChangeId!;
       const targetPath = request.targetPath ?? request.repoRoot;
-      const proofHeads = ((request.actualMerge as any)?.classification?.incomingHeads ??
-        heads) as string[];
+      const proofHeads = request.actualMerge?.classification?.incomingHeads ?? heads;
       if (proofHeads.length && !(await this.jj.areAncestorsOf(targetPath, proofHeads, target)))
         throw new Error("Merge ancestry not proved");
       if (!request.actualMerge) throw new Error("Merge execution receipt is missing");
@@ -454,21 +504,30 @@ export class SQLiteCustodyCoordinator {
       if (await this.jj.workspaceHead(request.repoRoot, row.name))
         throw new Error("Merge detach not proved");
       await rm(row.path, { recursive: true, force: true });
-      const mergeReceipt = request.actualMerge as any;
-      const phaseBHead = mergeReceipt.classification?.attachedHead as string | undefined;
+      const mergeReceipt = request.actualMerge;
+      const phaseBHead = mergeReceipt.classification?.attachedHead;
       if (phaseBHead) {
         const visibility = await this.jj.resolveChange(request.repoRoot, phaseBHead);
         if (visibility.kind === "unique") {
           if (await this.jj.areAncestorsOf(targetPath, [phaseBHead], target))
             throw new Error("Phase B refused: empty source head is reachable from target");
+          // The head may have gained content while cleanup was in progress.
+          if (!(await this.jj.isEmpty(request.repoRoot, exact(phaseBHead))))
+            throw new Error("Phase B refused: source head gained content");
           const operation = await this.jj.abandonExactSet(request.repoRoot, [phaseBHead]);
           if ((await this.jj.resolveChange(request.repoRoot, phaseBHead)).kind !== "hidden")
             throw new Error("Phase B abandoned head absence not proved");
-          mergeReceipt.phaseB = { abandoned: [phaseBHead], operation };
+          request.actualMerge = {
+            ...mergeReceipt,
+            phaseB: { abandoned: [phaseBHead], operation },
+          };
         } else if (visibility.kind === "hidden") {
           // `workspace forget` may itself abandon the empty WC. That is the
           // same proved Phase-B outcome and is safe across crash retries.
-          mergeReceipt.phaseB = { abandoned: [phaseBHead], operation: "workspace-forget" };
+          request.actualMerge = {
+            ...mergeReceipt,
+            phaseB: { abandoned: [phaseBHead], operation: "workspace-forget" },
+          };
         } else throw new Error("Phase B head visibility is ambiguous");
       }
       for (const id of mergeReceipt.classification?.linearInterior ?? [])
@@ -592,6 +651,16 @@ export class SQLiteCustodyCoordinator {
       requestedBy: "scaffold_reclaim",
     });
   }
+}
+
+interface CustodyOperationRow {
+  op_id: string;
+  workspace_id: string;
+  state: string;
+  evidence: string;
+  change_ids: string | null;
+  jj_op_before: string | null;
+  jj_op_after: string | null;
 }
 
 class PhaseARolledBackError extends Error {}
