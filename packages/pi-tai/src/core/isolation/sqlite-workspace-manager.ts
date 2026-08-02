@@ -146,7 +146,7 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
 
   merge(id: string): Promise<MergeResult> {
     return this.serial(async () => {
-      let r = await this.refreshAuthority(await this.owned(id));
+      const r = await this.refreshAuthority(await this.owned(id));
       if (r.disposition !== "attached")
         return {
           kind: "blocked",
