@@ -241,7 +241,11 @@ export class SQLiteCustodyCoordinator {
               .run(JSON.stringify(request), opId);
             this.db
               .prepare("UPDATE workspace SET merge_json=?,updated_at=? WHERE id=?")
-              .run(JSON.stringify({ classification, phaseA: receipt.phaseA, phaseB: receipt.phaseB }), this.now(), row.id);
+              .run(
+                JSON.stringify({ classification, phaseA: receipt.phaseA, phaseB: receipt.phaseB }),
+                this.now(),
+                row.id,
+              );
             const phaseAOp = await this.jj.abandonExactSet(
               request.repoRoot,
               classification.linearInterior,
