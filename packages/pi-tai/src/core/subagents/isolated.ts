@@ -139,12 +139,47 @@ export class IsolatedSubagents {
     return result;
   }
 
+  /**
+   * Rebuilds ownership only from the durable workspace authority. Matching the
+   * display id is deliberately insufficient: it is branch-local and reusable.
+   */
+  async restoreCustody(): Promise<void> {
+    const records = await this.workspaces.list();
+    for (const claim of this.agents.unresolvedCustody()) {
+      const matches = records.filter(
+        (candidate) =>
+          candidate.id === claim.workspaceId &&
+          candidate.ownerId === claim.durableId &&
+          candidate.rootSessionId === claim.rootSessionId &&
+          candidate.path === claim.cwd,
+      );
+      // Duplicate or absent authority is ambiguous and remains unresolved.
+      if (matches.length !== 1) continue;
+      const [workspace] = matches;
+      if (workspace.phase === "active") {
+        this.owned.set(claim.id, workspace.id);
+        this.agents.resolveCustody(claim.id, false);
+      } else if (["detached", "merged", "abandoned", "missing"].includes(workspace.phase)) {
+        // Exact durable authority proves there is no active mutable checkout.
+        // This releases resident retention but deliberately does not clear a
+        // reload orphan's process-attention marker.
+        this.agents.resolveCustody(claim.id, true);
+      }
+      // Incidents remain unresolved: their mutability is not authoritative.
+    }
+  }
+
   /** Live owners, so a workspace sweep does not reclaim work in progress. */
   activeOwners(): string[] {
-    return this.agents
-      .list()
-      .filter((snapshot) => snapshot.status === "running")
-      .map((snapshot) => snapshot.durableId);
+    return (
+      this.agents
+        .list()
+        // Reload-orphaned runs carry attention: their process ownership cannot be
+        // disproved, so sweeping their workspace would mutate work that may still
+        // be live. Treat them as active owners until explicit reconciliation.
+        .filter((snapshot) => snapshot.status === "running" || snapshot.attention === true)
+        .map((snapshot) => snapshot.durableId)
+    );
   }
 
   /**

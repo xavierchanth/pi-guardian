@@ -664,10 +664,31 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     }),
   }));
 
+  const restoreCustodySafely = async (isolated: IsolatedSubagents) => {
+    try {
+      await isolated.restoreCustody();
+    } catch {
+      // A failed durable read is absence of proof, never proof of resolution.
+      // Keep orphan attention and sweep protection, and expose no backend detail.
+      if (typeof pi.sendMessage === "function")
+        pi.sendMessage(
+          {
+            customType: "pi-tai-workspace-custody",
+            content:
+              "Managed workspace custody could not be read. It remains protected; retry after durable storage recovers, then inspect workspace_status.",
+            display: true,
+          },
+          { deliverAs: "nextTurn", triggerTurn: false },
+        );
+    }
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     const { workspaces, isolated, agents } = await requireRuntime(ctx);
     if (!dependencies.workspaces)
       await agents.attachLifecycleStore(new PiBranchLifecycleStore(pi, ctx.sessionManager));
+    // Reconstitute custody from the durable workspace adapter before sweeping.
+    await restoreCustodySafely(isolated);
     // Reclaim what a crashed session left behind before the model can trip over it.
     const swept = await workspaces.sweep(isolated.activeOwners()).catch(() => []);
     const attention = swept.filter((entry) => entry.disposition === "needs_attention");
@@ -678,7 +699,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
           content:
             `${attention.length} managed workspace(s) from an earlier session still hold unmerged work: ` +
             `${attention.map((entry) => `${entry.name} (${entry.reason})`).join("; ")}. ` +
-            "Use workspace_status to inspect them.",
+            "Custody stays protected after reload; use workspace_status to inspect it. Unresolved or incident custody requires repair before mutation.",
           display: true,
           details: { swept },
         },
@@ -690,9 +711,10 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   // Pi can move between branches without starting a new process. Re-fold branch
   // facts while the manager safely carries its genuinely live handles forward.
   pi.on("session_tree", async (_event, ctx) => {
-    const { agents } = await requireRuntime(ctx);
+    const { agents, isolated } = await requireRuntime(ctx);
     if (!dependencies.workspaces)
       await agents.attachLifecycleStore(new PiBranchLifecycleStore(pi, ctx.sessionManager));
+    await restoreCustodySafely(isolated);
   });
 
   /**
