@@ -160,11 +160,6 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
           kind: "blocked",
           reason: `${unnamed.length} change(s) in ${r.name} have no description; describe them before merging.`,
         };
-      const heads = await this.jj.headsOf(
-        r.repoRoot,
-        content.map((x) => x.changeId),
-      );
-      r = await this.refresh(r, { headChangeIds: heads });
       const parent = r.parent ? await this.owned(r.parent) : undefined;
       const targetPath = parent?.path ?? this.sourcePath;
       const target = await this.jj.changeIdAt(targetPath, "@");
