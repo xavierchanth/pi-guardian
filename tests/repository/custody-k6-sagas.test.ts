@@ -332,6 +332,75 @@ test("K6 two processes lease one duplicate operation and converge on one receipt
   db.close();
 });
 
+test("K6 F1 resumes a receipted rewrite from intent and refuses fresh pre-applied ancestry", async () => {
+  const f = await fixture();
+  writeFileSync(join(f.record.path, "agent.txt"), "agent\n");
+  sh(f.record.path, "status");
+  let rewriteCalls = 0;
+  const originalRebase = f.cli.rebaseWorkingCopyOnto.bind(f.cli);
+  f.cli.rebaseWorkingCopyOnto = async (...args) => {
+    rewriteCalls++;
+    return originalRebase(...args);
+  };
+  f.db.exec(`CREATE TRIGGER crash_before_jj_applied
+    BEFORE UPDATE OF state ON custody_operation
+    WHEN NEW.state='jj_applied'
+    BEGIN SELECT RAISE(ABORT, 'crash:before_jj_applied'); END`);
+
+  await assert.rejects(
+    new SQLiteCustodyCoordinator(f.db, f.port, f.cli).run(await mergeRequest(f)),
+    /crash:before_jj_applied/,
+  );
+  const operation = f.db
+    .prepare("SELECT state,evidence FROM custody_operation WHERE kind='merge'")
+    .get() as { state: string; evidence: string };
+  const evidence = JSON.parse(operation.evidence) as CustodySagaRequest;
+  assert.equal(operation.state, "intent", "crash precedes the jj_applied transition");
+  assert.ok(evidence.receipt, "execution receipt is durable at the crash boundary");
+  assert.ok(evidence.actualMerge, "final merge receipt is durable at the crash boundary");
+  assert.equal(
+    await f.cli.areAncestorsOf(
+      f.root,
+      evidence.receipt.classification.incomingHeads,
+      await f.cli.changeIdAt(f.root, "@"),
+    ),
+    true,
+    "the target already contains the receipted content frontier",
+  );
+
+  f.db.exec("DROP TRIGGER crash_before_jj_applied");
+  const recovered = await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).recover(
+    f.record.repoId,
+  );
+  assert.deepEqual(recovered.failed, []);
+  assert.equal((await f.port.get("worker"))?.disposition, "merged");
+  assert.equal(rewriteCalls, 1, "recovery performs zero repeated graph rewrites");
+  assert.equal(existsSync(f.record.path), false, "recovery finalizes source custody");
+  f.db.close();
+
+  const fresh = await fixture();
+  writeFileSync(join(fresh.record.path, "agent.txt"), "agent\n");
+  sh(fresh.record.path, "status");
+  const classification = await fresh.cli.classifyMergeSource(
+    fresh.root,
+    fresh.record.name,
+    await fresh.cli.changeIdAt(fresh.root, "@"),
+    fresh.record.baseChangeIds,
+    fresh.record.headChangeIds,
+  );
+  const parents = await fresh.cli.parentsOfWorkingCopy(fresh.root);
+  await fresh.cli.rebaseWorkingCopyOnto(fresh.root, [...parents, ...classification.incomingHeads]);
+  // Hold the fresh operation's pre-rewrite classification stable while modeling
+  // a concurrent actor applying that exact frontier to the target.
+  fresh.cli.classifyMergeSource = async () => classification;
+  await assert.rejects(
+    new SQLiteCustodyCoordinator(fresh.db, fresh.port, fresh.cli).run(await mergeRequest(fresh)),
+    /Fresh merge content frontier is already in target ancestry/,
+    "an unreceipted operation must refuse pre-applied content-frontier ancestry",
+  );
+  fresh.db.close();
+});
+
 test("K6 content-bearing merge reuses its durable receipt after an after-JJ crash", async () => {
   const f = await fixture();
   writeFileSync(join(f.record.path, "agent.txt"), "agent\n");
