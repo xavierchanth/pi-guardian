@@ -221,8 +221,25 @@ test("K6 scaffold mutation after intent is retained and recovery continues after
   );
   await assert.rejects(c2.run(valid));
   // The same property is asserted in each database; the poisoned scaffold is refused.
+  const evidenceBefore = String(
+    (
+      f.db.prepare("SELECT evidence FROM custody_operation WHERE kind='abandon'").get() as {
+        evidence: string;
+      }
+    ).evidence,
+  );
   const result = await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).recover();
   assert.equal(result.failed.length, 1);
+  const refused = f.db
+    .prepare("SELECT state,evidence FROM custody_operation WHERE kind='abandon'")
+    .get() as { state: string; evidence: string };
+  assert.equal(refused.evidence, evidenceBefore, "recovery must not clobber request evidence");
+  assert.equal(refused.state, "unknown");
+  assert.equal(
+    (await new SQLiteCustodyCoordinator(f.db, f.port, f.cli).recover()).failed.length,
+    1,
+    "the preserved expected refusal remains retryable after restart",
+  );
   assert.equal((await f.port.get("worker"))!.disposition, "attached");
   assert.ok(existsSync(f.record.path));
   assert.equal(

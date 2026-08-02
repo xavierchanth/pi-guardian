@@ -58,7 +58,7 @@ test("stale update ignores divergent changes that already existed", async () => 
 
 test("stale update still rejects recovery history", async () => {
   await assert.rejects(
-    () => updateStaleSafely(harness([], [], "Created recovery commit for workspace\n")),
+    () => updateStaleSafely(harness([], [], "Created and checked out recovery commit abcdef\n")),
     /created recovery history/,
   );
 });

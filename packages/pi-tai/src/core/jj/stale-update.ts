@@ -62,7 +62,7 @@ export async function updateStaleSafely(options: {
   }
   // Ordinary jj output may include descriptions containing the word "recovery".
   // Only jj's explicit recovery-commit diagnostic is evidence of displacement.
-  if (/^Created recovery commit(?: for workspace)?\b/im.test(output))
+  if (/^Created and checked out recovery commit\b/im.test(output))
     throw new Error(`${options.context} created recovery history while updating stale metadata.`);
   return { output, displacedChangeIds: displaced };
 }

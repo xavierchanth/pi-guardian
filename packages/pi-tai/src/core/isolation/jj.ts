@@ -351,14 +351,19 @@ export class JjCli {
     repoRoot: string,
     sourceName: string,
     targetChangeId: string,
+    baseChangeIds: readonly string[],
     persistedHeads: readonly string[] = [],
   ): Promise<MergeClassification> {
     const before = await this.currentOperationId(repoRoot);
     const attached = await this.workspaceHead(repoRoot, sourceName);
     const sourceAt = attached ?? persistedHeads[0];
     if (!sourceAt) throw new Error("Merge source has neither attachment nor persisted heads");
+    if (!baseChangeIds.length) throw new Error("Merge classification needs custody bases");
     const authoritativeHeads = [...new Set([...(attached ? [attached] : []), ...persistedHeads])];
-    const uniqueRevset = `ancestors(${exactAny(authoritativeHeads)}) ~ ancestors(${exact(targetChangeId)})`;
+    // Both ends are custody evidence. The base exclusion prevents unrelated
+    // pre-base/user history from entering classification, abandonment, or merge.
+    const custodyRange = `(ancestors(${exactAny(authoritativeHeads)}) ~ ancestors(${exactAny(baseChangeIds)}))`;
+    const uniqueRevset = `${custodyRange} ~ ancestors(${exact(targetChangeId)})`;
     const ids = async (revision: string) =>
       splitLines(
         await this.read(repoRoot, [

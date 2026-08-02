@@ -57,10 +57,15 @@ test("MG-0 classifies attached, linear, content, and merge-frontier revisions de
   run(attached, "new");
   const attachedHead = await jj.changeIdAt(attached, "@");
 
-  const classified = await jj.classifyMergeSource(root, "pitai-classify", target);
+  const classified = await jj.classifyMergeSource(root, "pitai-classify", target, [target]);
   assert.equal(classified.attachedHead, attachedHead);
   assert.deepEqual(classified.linearInterior, [interiorEmpty]);
   assert.equal(classified.sourceContent.length, 2);
+  assert.equal(
+    classified.sourceUnique.includes(target),
+    false,
+    "custody base and all pre-base/user history are outside classification",
+  );
   assert.equal(classified.incomingHeads.length, 1);
   assert.deepEqual(classified.emptyMerges, []);
   assert.deepEqual(classified.exceptional, []);

@@ -132,14 +132,17 @@ export class SQLiteCustodyCoordinator {
       try {
         await this.leased(String(op.repoId), () => this.resume(op.opId));
         recovered.push(op.opId);
-      } catch (error) {
+      } catch {
         // Settle this failure without preventing examination of later intents.
         const now = this.now();
+        // Evidence is the durable request/receipt checkpoint. Never replace it
+        // with a diagnostic: expected refusals and rolled-back phases must be
+        // parseable and retryable after restart.
         this.db
           .prepare(
-            "UPDATE custody_operation SET state='unknown',settled_at=?,heartbeat_at=?,evidence=? WHERE op_id=? AND state<>'committed'",
+            "UPDATE custody_operation SET state='unknown',settled_at=?,heartbeat_at=? WHERE op_id=? AND state<>'committed'",
           )
-          .run(now, now, String(error).slice(0, 8192), op.opId);
+          .run(now, now, op.opId);
         failed.push(op.opId);
       }
     }
@@ -199,11 +202,18 @@ export class SQLiteCustodyCoordinator {
         if (target.kind !== "unique") throw new Error(`Merge target is ${target.kind}`);
         if ((await this.jj.changeIdAt(targetPath, "@")) !== request.targetChangeId)
           throw new Error("Merge target moved; exact target is not this working copy");
-        const alreadyAncestor = await this.jj.areAncestorsOf(
-          targetPath,
-          heads,
-          request.targetChangeId,
-        );
+        // The attached head is commonly an empty working-copy commit and is
+        // intentionally never merged. Idempotence is proved against the
+        // persisted content frontier, not that attachment.
+        const persistedFrontier =
+          request.receipt?.classification.incomingHeads ??
+          (request.kind === "finalize_merge"
+            ? row.merge?.classification?.incomingHeads
+            : undefined) ??
+          [];
+        const alreadyAncestor =
+          persistedFrontier.length > 0 &&
+          (await this.jj.areAncestorsOf(targetPath, persistedFrontier, request.targetChangeId));
         if (request.kind === "finalize_merge") {
           // Conflict retry is finalization only. It must never repeat the graph rewrite.
           if (!alreadyAncestor || !row.conflictRetained || !row.merge)
@@ -233,6 +243,7 @@ export class SQLiteCustodyCoordinator {
               request.repoRoot,
               row.name,
               request.targetChangeId,
+              row.baseChangeIds,
               heads,
             ));
           // Ratified MG-0 policy: first ask JJ to remove genuinely redundant
@@ -245,6 +256,7 @@ export class SQLiteCustodyCoordinator {
                 request.repoRoot,
                 row.name,
                 request.targetChangeId,
+                row.baseChangeIds,
                 heads,
               );
           }
@@ -261,6 +273,16 @@ export class SQLiteCustodyCoordinator {
               `merge_source_empty_revision_retained: ${JSON.stringify(retainedReceipt)}`,
             );
           }
+          if (
+            !request.receipt &&
+            classification.incomingHeads.length > 0 &&
+            (await this.jj.areAncestorsOf(
+              targetPath,
+              classification.incomingHeads,
+              request.targetChangeId,
+            ))
+          )
+            throw new Error("Fresh merge content frontier is already in target ancestry");
           const receipt: MergeExecutionReceipt = request.receipt ?? {
             classification,
             phaseA: { abandoned: [] },
@@ -373,7 +395,7 @@ export class SQLiteCustodyCoordinator {
             }
           }
           let simplificationApplied = false;
-          if (classification.incomingHeads.length) {
+          if (classification.incomingHeads.length && !alreadyAncestor) {
             // The target is the active checkout and rebase snapshots it itself.
             // update-stale belongs only to the source checkout; running it here
             // can displace the user's current working-copy state.
@@ -409,11 +431,19 @@ export class SQLiteCustodyCoordinator {
             parentSimplification: simplificationApplied ? "applied" : "skipped",
             parentSimplificationReason: simplificationApplied
               ? "redundant-parents-removed"
-              : "no-redundancy",
+              : alreadyAncestor
+                ? "recovered-after-merge-rewrite"
+                : "no-redundancy",
             classification,
             phaseA: receipt.phaseA,
             phaseB: receipt.phaseB,
           } as MergeSummary;
+          // A process may die after rebase but before jj_applied. Persist the
+          // receipt now so restart can prove the content frontier and continue
+          // without repeating the graph rewrite.
+          this.db
+            .prepare("UPDATE custody_operation SET evidence=? WHERE op_id=?")
+            .run(JSON.stringify(request), opId);
         }
       } else {
         if (!heads.length) throw new Error("Abandon requires owned heads");
