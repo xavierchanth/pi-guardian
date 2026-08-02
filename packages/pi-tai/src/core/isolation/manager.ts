@@ -376,7 +376,6 @@ export class WorkspaceManager {
       return summary;
     }
 
-    await this.jj.updateStale(target, "legacy merge target");
     const parents = await this.jj.parentsOfWorkingCopy(target);
     // User-authored redundant edges are intentional graph shape. A failed probe
     // is also a reason to leave topology alone, never a reason to fail merging.

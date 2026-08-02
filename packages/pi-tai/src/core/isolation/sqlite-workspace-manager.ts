@@ -160,6 +160,10 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
           kind: "blocked",
           reason: `${unnamed.length} change(s) in ${r.name} have no description; describe them before merging.`,
         };
+      if (!content.length) {
+        const done = await this.coordinator.reclaimScaffold(this.request(r));
+        return { kind: "no_changes", record: publicRecord(done) };
+      }
       const parent = r.parent ? await this.owned(r.parent) : undefined;
       const targetPath = parent?.path ?? this.sourcePath;
       const target = await this.jj.changeIdAt(targetPath, "@");
@@ -352,11 +356,14 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
   }
   /** Refresh graph authority at repository scope; paths are evidence only. */
   private async refreshAuthority(r: CustodyRecord): Promise<CustodyRecord> {
-    if (r.disposition === "attached") {
+    if (r.disposition === "attached" && (await this.jj.workspaceHead(r.repoRoot, r.name))) {
       const heads = await this.jj.ownedHeads(r.repoRoot, r.baseChangeIds, r.name, r.headChangeIds);
       if (!heads.length) throw new Error("Attached custody has no uniquely provable graph head");
       return this.refresh(r, { headChangeIds: heads });
     }
+    // A forgotten attachment or deleted checkout does not revoke SQLite's
+    // exact-ID authority. Validate the persisted IDs without reconstructing
+    // them from an attachment or path.
     for (const head of r.headChangeIds) {
       if ((await this.jj.resolveChange(r.repoRoot, head)).kind !== "unique")
         throw new Error("Detached custody head is not uniquely visible");

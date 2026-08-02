@@ -351,6 +351,7 @@ export class JjCli {
     repoRoot: string,
     sourceName: string,
     targetChangeId: string,
+    persistedHeads: readonly string[] = [],
   ): Promise<{
     opId: string;
     sourceAt: string;
@@ -371,8 +372,11 @@ export class JjCli {
     }>;
   }> {
     const before = await this.currentOperationId(repoRoot);
-    const sourceAt = await this.changeIdAt(repoRoot, `${sourceName}@`);
-    const uniqueRevset = `ancestors(${exact(sourceAt)}) ~ ancestors(${exact(targetChangeId)})`;
+    const attached = await this.workspaceHead(repoRoot, sourceName);
+    const sourceAt = attached ?? persistedHeads[0];
+    if (!sourceAt) throw new Error("Merge source has neither attachment nor persisted heads");
+    const authoritativeHeads = [...new Set([...(attached ? [attached] : []), ...persistedHeads])];
+    const uniqueRevset = `ancestors(${exactAny(authoritativeHeads)}) ~ ancestors(${exact(targetChangeId)})`;
     const ids = async (revision: string) =>
       splitLines(
         await this.read(repoRoot, [
