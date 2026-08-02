@@ -150,24 +150,14 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
     return this.patch(id, { parent }, "assign_parent", "system_spawn");
   }
 
-  merge(id: string, _strategy: MergeStrategy = "auto"): Promise<MergeResult> {
+  merge(id: string): Promise<MergeResult> {
     return this.serial(async () => {
-      let r = await this.owned(id);
+      let r = await this.refreshAuthority(await this.owned(id));
       if (r.disposition !== "attached")
         return {
           kind: "blocked",
           reason: `Workspace ${r.name} is ${r.disposition}, not active.`,
         };
-      const checkoutPresent = await exists(r.path);
-      if (checkoutPresent) {
-        const head = await this.jj.changeIdAt(r.path, "@");
-        const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, head);
-        const heads = await this.jj.headsOf(
-          r.repoRoot,
-          entries.map((x) => x.changeId),
-        );
-        r = await this.refresh(r, { headChangeIds: heads });
-      }
       const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, r.headChangeIds);
       const content = entries.filter((x) => !x.empty);
       if (!content.length) {
@@ -223,19 +213,9 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
 
   discard(id: string): Promise<{ discardedChangeIds: readonly string[] }> {
     return this.serial(async () => {
-      let r = await this.owned(id);
-      const ids = [...r.headChangeIds];
-      if (await exists(r.path)) {
-        const head = await this.jj.changeIdAt(r.path, "@");
-        const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, head);
-        const heads = await this.jj.headsOf(
-          r.repoRoot,
-          entries.map((x) => x.changeId),
-        );
-        r = await this.refresh(r, { headChangeIds: heads });
-        ids.splice(0, ids.length, ...entries.map((x) => x.changeId));
-      }
-      const exactOwned = [...new Set(ids)].sort();
+      let r = await this.refreshAuthority(await this.owned(id));
+      const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, r.headChangeIds);
+      const exactOwned = [...new Set(entries.map((x) => x.changeId))].sort();
       // Persist every owned change (including interior and empty changes), not
       // merely graph heads: the verified receipt and public result must agree.
       r = await this.refresh(r, { headChangeIds: exactOwned });
@@ -394,6 +374,24 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
       const r = await this.owned(id);
       await this.refresh(r, p, kind, requestedBy);
     });
+  }
+  /** Refresh graph authority at repository scope; paths are evidence only. */
+  private async refreshAuthority(r: CustodyRecord): Promise<CustodyRecord> {
+    if (r.disposition === "attached") {
+      const heads = await this.jj.ownedHeads(
+        r.repoRoot,
+        r.baseChangeIds,
+        r.name,
+        r.headChangeIds,
+      );
+      if (!heads.length) throw new Error("Attached custody has no uniquely provable graph head");
+      return this.refresh(r, { headChangeIds: heads });
+    }
+    for (const head of r.headChangeIds) {
+      if ((await this.jj.resolveChange(r.repoRoot, head)).kind !== "unique")
+        throw new Error("Detached custody head is not uniquely visible");
+    }
+    return r;
   }
   private async refresh(
     r: CustodyRecord,

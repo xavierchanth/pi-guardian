@@ -14,13 +14,8 @@
 export type WorkspaceId = string;
 
 /** How a workspace's changes are folded back into the source graph. */
-export type MergeStrategy =
-  /** Pick per the decision rule: linear when it is clean, merge-under otherwise. */
-  | "auto"
-  /** Insert the agent range directly below `@`, keeping history linear. */
-  | "linear"
-  /** Re-parent `@` onto its existing parents plus the agent head. */
-  | "merge-under";
+/** MG-0 has one graph operation: always merge the source under the target WC. */
+export type MergeStrategy = "merge-under";
 
 export type WorkspacePhase =
   /** Directory and jj workspace exist; an agent may be writing. */
@@ -78,7 +73,7 @@ export type ParentSimplificationReason =
   | `${"postcheck-failed" | "cosmetic-command-failed"}${"" | "-rolled-back" | "-rollback-failed" | "-rollback-skipped-intervening-operation"}`;
 
 export interface MergeSummary {
-  readonly strategy: Exclude<MergeStrategy, "auto">;
+  readonly strategy: MergeStrategy;
   /** Change ids folded into the source graph, oldest first. */
   readonly changeIds: readonly string[];
   /** Paths that came back conflicted, if any. Non-empty means user action. */

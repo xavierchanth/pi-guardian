@@ -4,13 +4,12 @@ import { join } from "node:path";
 import type {
   ChangeEntry,
   MergeResult,
-  MergeStrategy,
   MergeSummary,
   SweepEntry,
   WorkspaceId,
   WorkspaceRecord,
 } from "./domain.ts";
-import { exactAny, JjCli } from "./jj.ts";
+import { JjCli } from "./jj.ts";
 import type { WorkspaceRegistryPort } from "./registry.ts";
 
 /** Managed workspace names carry this prefix so a sweep can recognise its own. */
@@ -139,7 +138,7 @@ export class WorkspaceManager {
    * retried as a merge, because conflicts are tractable in a live working copy
    * and painful inside a rewritten range.
    */
-  merge(id: WorkspaceId, strategy: MergeStrategy = "auto"): Promise<MergeResult> {
+  merge(id: WorkspaceId): Promise<MergeResult> {
     return this.serialise(async () => {
       const record = await this.registry.get(id);
       if (!record) return { kind: "blocked", reason: `Unknown workspace ${id}.` } as const;
@@ -178,11 +177,7 @@ export class WorkspaceManager {
       }
 
       const target = await this.sourceFor(record.parent);
-      const chosen = strategy === "auto" ? await this.chooseStrategy(target) : strategy;
-      const summary =
-        chosen === "linear"
-          ? await this.mergeLinear(record, content, entries, target)
-          : await this.mergeUnder(record, content, entries, target);
+      const summary = await this.mergeUnder(record, content, entries, target);
       if (summary.conflictPaths.length) {
         return { kind: "retained_conflicts", record, summary } as const;
       }
@@ -352,40 +347,6 @@ export class WorkspaceManager {
     });
   }
 
-  /** Linear when the user's working copy is empty and single-parent; merge otherwise. */
-  private async chooseStrategy(target: string): Promise<Exclude<MergeStrategy, "auto">> {
-    const parents = await this.jj.parentsOfWorkingCopy(target);
-    if (parents.length !== 1) return "merge-under";
-    return (await this.jj.isEmpty(target, "@")) ? "linear" : "merge-under";
-  }
-
-  private async mergeLinear(
-    record: WorkspaceRecord,
-    content: readonly ChangeEntry[],
-    entries: readonly ChangeEntry[],
-    target: string,
-  ): Promise<MergeSummary> {
-    const changeIds = content.map((entry) => entry.changeId);
-    const parentsBefore = await this.jj.parentsOfWorkingCopy(target);
-    const operationBefore = await this.jj.currentOperationId(target);
-    await this.jj.rebaseInsertBefore(target, changeIds);
-    if (await this.jj.hasConflicts(target, `${exactAny(changeIds)} | @`)) {
-      // Unwind and let the merge strategy surface the same conflict in `@`,
-      // where it can be resolved with ordinary editing instead of surgery on a
-      // rewritten range.
-      await this.jj.restoreOperation(target, operationBefore);
-      const parentsAfter = await this.jj.parentsOfWorkingCopy(target);
-      if (parentsAfter.join() !== parentsBefore.join()) {
-        throw new Error(
-          `Linear merge of ${record.name} produced conflicts and the undo did not restore the source working copy; resolve manually.`,
-        );
-      }
-      return this.mergeUnder(record, content, entries, target);
-    }
-    await this.reclaim(record, entries, target);
-    return { strategy: "linear", changeIds, conflictPaths: [] };
-  }
-
   private async mergeUnder(
     record: WorkspaceRecord,
     content: readonly ChangeEntry[],
@@ -415,6 +376,7 @@ export class WorkspaceManager {
       return summary;
     }
 
+    await this.jj.updateStale(target, "legacy merge target");
     const parents = await this.jj.parentsOfWorkingCopy(target);
     // User-authored redundant edges are intentional graph shape. A failed probe
     // is also a reason to leave topology alone, never a reason to fail merging.
@@ -521,6 +483,7 @@ export class WorkspaceManager {
 
   private async detach(name: string, path: string, source: string): Promise<void> {
     try {
+      if (await pathExists(path)) await this.jj.updateStale(path, "legacy workspace detach");
       await this.jj.workspaceForget(source, name);
     } catch (error) {
       throw new Error(

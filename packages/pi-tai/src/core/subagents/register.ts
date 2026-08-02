@@ -11,7 +11,6 @@ import { Type } from "typebox";
 import type { SessionPolicyReader } from "../../core/config/register.ts";
 import {
   JjCli,
-  type MergeStrategy,
   SQLiteWorkspaceManager,
   type WorkspaceManagerPort,
   type WorkspaceRecord,
@@ -560,17 +559,12 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     promptGuidelines: [...WORKSPACE_GUIDELINES],
     parameters: Type.Object({
       id: Type.String({ description: "Subagent id whose workspace should be merged" }),
-      strategy: Type.Optional(
-        Type.Union([Type.Literal("auto"), Type.Literal("linear"), Type.Literal("merge-under")], {
-          description: "Defaults to auto, which is almost always right.",
-        }),
-      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { isolated } = await requireRuntime(ctx);
       let result;
       try {
-        result = await isolated.merge(params.id, (params.strategy ?? "auto") as MergeStrategy);
+        result = await isolated.merge(params.id);
       } catch (error) {
         return failure(describe(error));
       }

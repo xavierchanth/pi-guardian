@@ -15,7 +15,7 @@ export interface WorkspaceManagerPort {
   list(): Promise<WorkspaceRecord[]>;
   pendingChanges(id: WorkspaceId): Promise<ChangeEntry[] | undefined>;
   assignOwner(id: WorkspaceId, ownerId: string, ownerDisplayId?: string): Promise<void>;
-  merge(id: WorkspaceId, strategy?: MergeStrategy): Promise<MergeResult>;
+  merge(id: WorkspaceId): Promise<MergeResult>;
   discard(id: WorkspaceId): Promise<{ discardedChangeIds: readonly string[] }>;
   sweep(activeOwners?: readonly string[]): Promise<SweepEntry[]>;
 }

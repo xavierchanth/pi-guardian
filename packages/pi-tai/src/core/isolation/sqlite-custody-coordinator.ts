@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 import { type ProcessState, processState, withOperationLease } from "../storage/operation-lease.ts";
 import type { CustodyRecord, WorkspaceCustodyPort } from "./custody-port.ts";
@@ -177,6 +177,7 @@ export class SQLiteCustodyCoordinator {
         if (!attached)
           await this.jj.workspaceAdd(request.repoRoot, row.path, row.name, row.baseChangeIds);
       } else if (request.kind === "forget") {
+        if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody forget");
         await this.jj.workspaceForget(request.repoRoot, row.name);
       } else if (request.kind === "merge" || request.kind === "finalize_merge") {
         if (!request.targetChangeId || !heads.length)
@@ -186,41 +187,30 @@ export class SQLiteCustodyCoordinator {
         if (target.kind !== "unique") throw new Error(`Merge target is ${target.kind}`);
         if ((await this.jj.changeIdAt(targetPath, "@")) !== request.targetChangeId)
           throw new Error("Merge target moved; exact target is not this working copy");
-        const alreadyAncestor = await this.jj.areAncestorsOf(
-          targetPath,
-          heads,
-          request.targetChangeId,
-        );
-        let strategy: MergeSummary["strategy"] = "merge-under";
-        let simplification: Pick<
-          MergeSummary,
-          "parentSimplification" | "parentSimplificationReason"
-        > = {
-          parentSimplification: "skipped",
-          parentSimplificationReason: "no-redundancy",
-        };
-        if (!alreadyAncestor) {
+        const alreadyAncestor = await this.jj.areAncestorsOf(targetPath, heads, request.targetChangeId);
+        if (request.kind === "finalize_merge") {
+          // Conflict retry is finalization only. It must never repeat the graph rewrite.
+          if (!alreadyAncestor || !row.conflictRetained || !row.merge)
+            throw new Error("Conflict finalization lacks durable merge ancestry receipt");
+          request.actualMerge = row.merge;
+        } else {
+          if (alreadyAncestor) throw new Error("Fresh merge source is already in target ancestry");
+          await this.jj.updateStale(targetPath, "custody merge target");
           const parents = await this.jj.parentsOfWorkingCopy(targetPath);
-          const linear = parents.length === 1 && (await this.jj.isEmpty(targetPath, "@"));
-          if (linear) {
-            const operation = await this.jj.currentOperationId(targetPath);
-            await this.jj.rebaseInsertBefore(targetPath, heads);
-            if (await this.jj.hasConflicts(targetPath, `${heads.map(exact).join(" | ")} | @`)) {
-              await this.jj.restoreOperation(targetPath, operation);
-              await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
-              simplification = await this.simplifyMergedParents(targetPath, heads);
-            } else strategy = "linear";
-          } else {
-            await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
-            simplification = await this.simplifyMergedParents(targetPath, heads);
-          }
+          await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
+          // Ratified MG-0 protocol: simplify exactly the target WC, unconditionally.
+          await this.jj.simplifyParents(targetPath, await this.jj.changeIdAt(targetPath, "@"));
+          const rewrittenTarget = await this.jj.changeIdAt(targetPath, "@");
+          if (!(await this.jj.areAncestorsOf(targetPath, heads, rewrittenTarget)))
+            throw new Error("Merge ancestry proof failed after simplify-parents");
+          request.actualMerge = {
+            strategy: "merge-under",
+            changeIds: request.mergeChangeIds ?? heads,
+            conflictPaths: await this.jj.conflictedPaths(targetPath),
+            parentSimplification: "applied",
+            parentSimplificationReason: "redundant-parents-removed",
+          };
         }
-        request.actualMerge = {
-          strategy,
-          changeIds: request.mergeChangeIds ?? heads,
-          conflictPaths: await this.jj.conflictedPaths(targetPath),
-          ...simplification,
-        };
       } else {
         if (!heads.length) throw new Error("Abandon requires owned heads");
         for (const head of heads)
@@ -228,7 +218,9 @@ export class SQLiteCustodyCoordinator {
             throw new Error("Abandon refused: owned change has foreign descendants");
         if (request.requestedBy === "scaffold_reclaim")
           await this.proveScaffold(request, row, heads[0]!);
-        // JJ refuses to abandon a live working-copy commit.
+        // JJ refuses to abandon a live working-copy commit. Updating stale is
+        // mandatory before detachment; a present checkout failure fails closed.
+        if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody abandon");
         await this.jj.workspaceForget(request.repoRoot, row.name);
         for (const head of heads) {
           const evidence = await this.jj.resolveChange(request.repoRoot, head);
@@ -301,6 +293,7 @@ export class SQLiteCustodyCoordinator {
         this.fault?.("after_commit", opId);
         return result;
       }
+      if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody merge cleanup");
       await this.jj.workspaceForget(request.repoRoot, row.name);
       if (await this.jj.workspaceHead(request.repoRoot, row.name))
         throw new Error("Merge detach not proved");
@@ -455,5 +448,15 @@ export class SQLiteCustodyCoordinator {
       kind: "abandon",
       requestedBy: "scaffold_reclaim",
     });
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }

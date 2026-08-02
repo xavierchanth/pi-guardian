@@ -1,4 +1,4 @@
-import type { MergeResult, MergeStrategy, WorkspaceManagerPort } from "../isolation/index.ts";
+import type { MergeResult, WorkspaceManagerPort } from "../isolation/index.ts";
 import type { SubagentSnapshot } from "./domain.ts";
 import type { SpawnRequest, SubagentManager } from "./manager.ts";
 
@@ -114,7 +114,7 @@ export class IsolatedSubagents {
   }
 
   /** Folds a settled subagent's workspace into the source graph. */
-  async merge(subagentId: string, strategy: MergeStrategy = "auto"): Promise<MergeResult> {
+  async merge(subagentId: string): Promise<MergeResult> {
     const workspaceId = this.requireWorkspace(subagentId);
     const snapshot = this.agents.get(subagentId);
     if (snapshot?.status === "running") {
@@ -123,7 +123,7 @@ export class IsolatedSubagents {
         reason: `Subagent ${subagentId} is still running; wait or cancel it first.`,
       };
     }
-    const result = await this.workspaces.merge(workspaceId, strategy);
+    const result = await this.workspaces.merge(workspaceId);
     if (result.kind === "merged" || result.kind === "no_changes") {
       this.owned.delete(subagentId);
       this.agents.resolveCustody(subagentId);
