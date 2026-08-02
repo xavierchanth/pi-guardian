@@ -32,8 +32,7 @@ function fakeSdk(
           // The real SDK consumes streaming input concurrently with output.
           // Pulling before replaying result frames makes this double detect an
           // accidentally string-based prompt and exercises queue settlement.
-          const iterator =
-            typeof prompt === "string" ? undefined : prompt[Symbol.asyncIterator]();
+          const iterator = typeof prompt === "string" ? undefined : prompt[Symbol.asyncIterator]();
           await iterator?.next();
           for (const message of messages) yield message;
         },
