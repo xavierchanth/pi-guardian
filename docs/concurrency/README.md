@@ -54,26 +54,21 @@ whose commits are not descendants of its own root.
 
 ### Landing the work
 
-`merge` picks between two strategies:
+`merge` always uses **merge-under**: `jj rebase -r @ -d <existing parents>
+-d <each content head>`. There is no strategy parameter and no linear insertion
+fallback. The target keeps every existing parent and gains each source content
+frontier, preserving the source as a reviewable chain. The manager immediately runs
+`jj simplify-parents --revision @` against exactly the target working copy and proves
+all content heads remain reachable.
 
-- **linear** — `jj rebase --revisions <changes> --insert-before @`. Chosen only when
-  your `@` is empty and single-parent, where it is unambiguously safe. History stays
-  flat.
-- **merge-under** — `jj rebase -r @ -d <existing parents> -d <each head>`. Your `@`
-  keeps every parent it had and gains the agent's work. Afterwards, when this merge
-  introduced a parent that is already reachable through another parent, the manager
-  runs `jj simplify-parents` against exactly that working-copy change. It skips this
-  cosmetic step if redundancy predated the merge or the change has descendants,
-  verifies every agent head remains reachable, and restores the captured operation
-  if simplification or verification fails. That rollback is skipped if another
-  operation intervened, rather than risking the loss of unrelated work. Cosmetic
-  cleanup never fails the merge.
-
-`auto` tries linear when the preconditions hold, and if the insert produces
-conflicts it restores the pre-merge operation and retries as a merge. That fallback
-is deliberate: conflicts are tractable in a live working copy, where you resolve them
-by editing, and painful inside a rewritten range. Merge-under also keeps the agent's
-work reviewable as a discrete chain rather than flattening it into your history.
+Before graph mutation, the source always runs guarded `workspace update-stale` and
+classifies exact source-exclusive Change IDs. Safe linear interior empties are
+abandoned together in one bounded Phase-A operation; attached empty heads wait until
+after forget and checkout deletion (Phase B). Empty merges, conflicts, protected
+bookmarks, immutable changes, and externally shared revisions fail closed. A Phase-A
+proof failure restores and proves the exact recorded pre-operation state before
+returning a retryable refusal. Conflicted graph merges retain source custody; retry
+only finalizes and never reruns rebase or simplify.
 
 Note the plural in *each head*. A workspace that collected work from concurrent
 subagents holds several independent chains, and every one of them has to become a

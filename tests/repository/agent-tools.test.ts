@@ -5,11 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import {
-  FileWorkspaceRegistry,
-  JjCli,
-  WorkspaceManager,
-} from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { FileWorkspaceRegistry, JjCli } from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { WorkspaceManager } from "../../packages/pi-tai/src/core/isolation/manager.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
 import { registerAgents } from "../../packages/pi-tai/src/core/subagents/register.ts";

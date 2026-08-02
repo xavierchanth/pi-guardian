@@ -29,12 +29,9 @@ export {
   SQLiteWorkspaceManager,
   type SQLiteWorkspaceManagerOptions,
 } from "./sqlite-workspace-manager.ts";
-export {
-  type CreateWorkspaceInput,
-  MANAGED_WORKSPACE_PREFIX,
-  WorkspaceManager,
-  type WorkspaceManagerOptions,
-} from "./manager.ts";
+// The file-backed manager is retained only for direct compatibility tests. It is
+// deliberately not exported from the production isolation API.
+export { type CreateWorkspaceInput, MANAGED_WORKSPACE_PREFIX } from "./manager.ts";
 export {
   FileWorkspaceRegistry,
   InMemoryWorkspaceRegistry,

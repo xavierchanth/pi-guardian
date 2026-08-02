@@ -1,16 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { CustodyEvidenceCollector, repositoryStoreKey } from "./custody-evidence.ts";
 import type { CustodyRecord, RepositoryIdentity, WorkspaceCustodyPort } from "./custody-port.ts";
 import { CustodyReconciler } from "./custody-reconciler.ts";
-import type {
-  ChangeEntry,
-  MergeResult,
-  MergeStrategy,
-  SweepEntry,
-  WorkspaceRecord,
-} from "./domain.ts";
+import type { ChangeEntry, MergeResult, SweepEntry, WorkspaceRecord } from "./domain.ts";
 import { JjCli } from "./jj.ts";
 import { type CreateWorkspaceInput, MANAGED_WORKSPACE_PREFIX } from "./manager.ts";
 import { SQLiteCustodyCoordinator } from "./sqlite-custody-coordinator.ts";
@@ -160,20 +154,6 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
         };
       const entries = await this.jj.range(r.repoRoot, r.baseChangeIds, r.headChangeIds);
       const content = entries.filter((x) => !x.empty);
-      if (!content.length) {
-        // There can be several independent empty heads after concurrent work.
-        // They are all exact owned changes, so settle them together rather than
-        // feeding a multi-head row to the one-head scaffold fast path.
-        const reclaimed =
-          r.headChangeIds.length === 1
-            ? await this.coordinator.reclaimScaffold(this.request(r))
-            : await this.coordinator.run({
-                ...this.request(r),
-                kind: "abandon",
-                requestedBy: "model_tool",
-              });
-        return { kind: "no_changes", record: publicRecord(reclaimed) };
-      }
       const unnamed = content.filter((x) => !x.description.trim());
       if (unnamed.length)
         return {
@@ -378,12 +358,7 @@ export class SQLiteWorkspaceManager implements WorkspaceManagerPort {
   /** Refresh graph authority at repository scope; paths are evidence only. */
   private async refreshAuthority(r: CustodyRecord): Promise<CustodyRecord> {
     if (r.disposition === "attached") {
-      const heads = await this.jj.ownedHeads(
-        r.repoRoot,
-        r.baseChangeIds,
-        r.name,
-        r.headChangeIds,
-      );
+      const heads = await this.jj.ownedHeads(r.repoRoot, r.baseChangeIds, r.name, r.headChangeIds);
       if (!heads.length) throw new Error("Attached custody has no uniquely provable graph head");
       return this.refresh(r, { headChangeIds: heads });
     }
@@ -481,13 +456,4 @@ function slug(s?: string) {
       .replace(/^-+|-+$/g, "")
       .slice(0, 24) || "agent"
   );
-}
-async function exists(p: string) {
-  try {
-    await stat(p);
-    return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw e;
-  }
 }

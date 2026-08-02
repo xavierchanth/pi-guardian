@@ -1,7 +1,6 @@
 import type {
   ChangeEntry,
   MergeResult,
-  MergeStrategy,
   SweepEntry,
   WorkspaceId,
   WorkspaceRecord,

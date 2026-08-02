@@ -41,6 +41,31 @@ test("K1 real JJ 0.43 workspaceHead and ownedHeads use repository-scoped evidenc
   assert.notEqual(await jj.workspaceHead(second, "pitai-same"), head);
 });
 
+test("MG-0 classifies attached, linear, content, and merge-frontier revisions deterministically", async () => {
+  const root = repo();
+  const jj = cli();
+  const target = await jj.changeIdAt(root, "@");
+  const attached = join(tmpdir(), `pitai-classify-${process.pid}-${Date.now()}`);
+  await jj.workspaceAdd(root, attached, "pitai-classify", [target]);
+  run(attached, "describe", "-m", "content one");
+  execFileSync("sh", ["-c", "printf one > one.txt"], { cwd: attached });
+  run(attached, "new");
+  const interiorEmpty = await jj.changeIdAt(attached, "@");
+  run(attached, "new");
+  run(attached, "describe", "-m", "content two");
+  execFileSync("sh", ["-c", "printf two > two.txt"], { cwd: attached });
+  run(attached, "new");
+  const attachedHead = await jj.changeIdAt(attached, "@");
+
+  const classified = await jj.classifyMergeSource(root, "pitai-classify", target);
+  assert.equal(classified.attachedHead, attachedHead);
+  assert.deepEqual(classified.linearInterior, [interiorEmpty]);
+  assert.equal(classified.sourceContent.length, 2);
+  assert.equal(classified.incomingHeads.length, 1);
+  assert.deepEqual(classified.emptyMerges, []);
+  assert.deepEqual(classified.exceptional, []);
+});
+
 test("K2 real JJ evidence distinguishes unique, hidden, unknown and divergent Change IDs", async () => {
   const root = repo();
   const jj = cli();

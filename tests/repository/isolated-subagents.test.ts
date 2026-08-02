@@ -14,8 +14,8 @@ import type { SubagentSnapshot } from "../../packages/pi-tai/src/core/subagents/
 import {
   InMemoryWorkspaceRegistry,
   JjCli,
-  WorkspaceManager,
 } from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { WorkspaceManager } from "../../packages/pi-tai/src/core/isolation/manager.ts";
 import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 const run = promisify(execFile);

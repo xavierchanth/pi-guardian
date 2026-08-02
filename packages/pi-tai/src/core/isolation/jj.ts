@@ -336,7 +336,134 @@ export class JjCli {
   }
 
   async abandon(cwd: string, changeId: string): Promise<void> {
-    await this.run(cwd, ["--ignore-working-copy", "abandon", exact(changeId)]);
+    await this.abandonExactSet(cwd, [changeId]);
+  }
+
+  /** Abandon an already validated exact set in one JJ operation. */
+  async abandonExactSet(cwd: string, changeIds: readonly string[]): Promise<string> {
+    if (!changeIds.length) return this.currentOperationId(cwd);
+    await this.run(cwd, ["--ignore-working-copy", "abandon", ...changeIds.map(exact)]);
+    return this.currentOperationId(cwd);
+  }
+
+  /** Deterministic merge-source classification, bounded by one operation snapshot. */
+  async classifyMergeSource(
+    repoRoot: string,
+    sourceName: string,
+    targetChangeId: string,
+  ): Promise<{
+    opId: string;
+    sourceAt: string;
+    sourceUnique: string[];
+    sourceEmpty: string[];
+    sourceContent: string[];
+    incomingHeads: string[];
+    attachedHead?: string;
+    linearInterior: string[];
+    emptyMerges: string[];
+    exceptional: Array<{ id: string; reason: string }>;
+    metadata: Array<{
+      id: string;
+      description: string;
+      author: string;
+      authoredAt: string;
+      committedAt: string;
+    }>;
+  }> {
+    const before = await this.currentOperationId(repoRoot);
+    const sourceAt = await this.changeIdAt(repoRoot, `${sourceName}@`);
+    const uniqueRevset = `ancestors(${exact(sourceAt)}) ~ ancestors(${exact(targetChangeId)})`;
+    const ids = async (revision: string) =>
+      splitLines(
+        await this.read(repoRoot, [
+          "--ignore-working-copy",
+          "log",
+          "-r",
+          revision,
+          "--no-graph",
+          "-T",
+          'change_id ++ "\\n"',
+        ]),
+      ).sort();
+    const sourceUnique = await ids(uniqueRevset);
+    const sourceEmpty = await ids(`(${uniqueRevset}) & empty()`);
+    const sourceContent = await ids(`(${uniqueRevset}) ~ empty()`);
+    const incomingHeads = sourceContent.length ? await this.headsOf(repoRoot, sourceContent) : [];
+    const working = new Set(await ids(`(${uniqueRevset}) & working_copies()`));
+    const immutable = new Set(await ids(`(${uniqueRevset}) & immutable()`));
+    const conflicted = new Set(await ids(`(${uniqueRevset}) & conflicts()`));
+    const outside = new Set<string>();
+    for (const id of sourceEmpty)
+      if (await this.hasDescendantsOutside(repoRoot, id, sourceUnique)) outside.add(id);
+    const metadata: Array<{
+      id: string;
+      description: string;
+      author: string;
+      authoredAt: string;
+      committedAt: string;
+    }> = [];
+    const linearInterior: string[] = [],
+      emptyMerges: string[] = [];
+    const exceptional: Array<{ id: string; reason: string }> = [];
+    for (const id of sourceEmpty) {
+      const raw = await this.read(repoRoot, [
+        "--ignore-working-copy",
+        "log",
+        "-r",
+        exact(id),
+        "--no-graph",
+        "-T",
+        'parents.len() ++ "\\x1f" ++ bookmarks ++ "\\x1f" ++ description ++ "\\x1f" ++ author.email() ++ "\\x1f" ++ author.timestamp() ++ "\\x1f" ++ committer.timestamp()',
+      ]);
+      const [countText, bookmarks, description, author, authoredAt, committedAt] = raw
+        .trim()
+        .split(UNIT);
+      const parentCount = Number(countText);
+      metadata.push({
+        id,
+        description: description ?? "",
+        author: author ?? "",
+        authoredAt: authoredAt ?? "",
+        committedAt: committedAt ?? "",
+      });
+      const reason = conflicted.has(id)
+        ? "conflicted"
+        : immutable.has(id)
+          ? "immutable"
+          : bookmarks?.trim()
+            ? "bookmarked"
+            : outside.has(id)
+              ? "outside_descendant"
+              : working.has(id) && id !== sourceAt
+                ? "externally_shared"
+                : undefined;
+      if (reason) exceptional.push({ id, reason });
+      else if (id === sourceAt && working.has(id)) {
+        /* Phase B */
+      } else if (parentCount > 1) emptyMerges.push(id);
+      else if (parentCount === 1 && !working.has(id)) linearInterior.push(id);
+      else exceptional.push({ id, reason: "externally_shared" });
+    }
+    const after = await this.currentOperationId(repoRoot);
+    if (before !== after) throw new Error("Merge classification crossed JJ operation snapshots");
+    for (const id of sourceUnique)
+      if ((await this.resolveChange(repoRoot, id)).kind !== "unique")
+        throw new Error(`Merge classification is not unique: ${id}`);
+    return {
+      opId: before,
+      sourceAt,
+      sourceUnique,
+      sourceEmpty,
+      sourceContent,
+      incomingHeads,
+      ...(sourceEmpty.includes(sourceAt) && working.has(sourceAt)
+        ? { attachedHead: sourceAt }
+        : {}),
+      linearInterior,
+      emptyMerges,
+      exceptional,
+      metadata,
+    };
   }
 
   /** Re-parents `@` onto `destinationChangeIds`. The workspace at `cwd` keeps its content. */

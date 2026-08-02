@@ -74,6 +74,8 @@ export class SQLiteCustodyCoordinator {
       if (!row) throw new Error("Committed custody operation has no row");
       return row;
     }
+    if (existing?.state === "failed")
+      throw new Error(`Custody operation previously refused: ${String(existing.evidence)}`);
     if (!existing) {
       if (
         request.kind === "abandon" &&
@@ -177,7 +179,7 @@ export class SQLiteCustodyCoordinator {
         if (!attached)
           await this.jj.workspaceAdd(request.repoRoot, row.path, row.name, row.baseChangeIds);
       } else if (request.kind === "forget") {
-        if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody forget");
+        await this.updateSourceStale(row, "custody forget");
         await this.jj.workspaceForget(request.repoRoot, row.name);
       } else if (request.kind === "merge" || request.kind === "finalize_merge") {
         if (!request.targetChangeId || !heads.length)
@@ -187,29 +189,157 @@ export class SQLiteCustodyCoordinator {
         if (target.kind !== "unique") throw new Error(`Merge target is ${target.kind}`);
         if ((await this.jj.changeIdAt(targetPath, "@")) !== request.targetChangeId)
           throw new Error("Merge target moved; exact target is not this working copy");
-        const alreadyAncestor = await this.jj.areAncestorsOf(targetPath, heads, request.targetChangeId);
+        const alreadyAncestor = await this.jj.areAncestorsOf(
+          targetPath,
+          heads,
+          request.targetChangeId,
+        );
         if (request.kind === "finalize_merge") {
           // Conflict retry is finalization only. It must never repeat the graph rewrite.
           if (!alreadyAncestor || !row.conflictRetained || !row.merge)
             throw new Error("Conflict finalization lacks durable merge ancestry receipt");
+          await this.updateSourceStale(row, "custody conflict finalization");
+          const retained = (row.merge as any).classification;
+          const current = await this.jj.classifyMergeSource(
+            request.repoRoot,
+            row.name,
+            request.targetChangeId,
+          );
+          if (
+            !retained ||
+            JSON.stringify(classificationIdentity(current)) !==
+              JSON.stringify(classificationIdentity(retained))
+          )
+            throw new Error("Retained merge classification changed; finalization refused");
           request.actualMerge = row.merge;
         } else {
           if (alreadyAncestor) throw new Error("Fresh merge source is already in target ancestry");
-          await this.jj.updateStale(targetPath, "custody merge target");
-          const parents = await this.jj.parentsOfWorkingCopy(targetPath);
-          await this.jj.rebaseWorkingCopyOnto(targetPath, [...parents, ...heads]);
-          // Ratified MG-0 protocol: simplify exactly the target WC, unconditionally.
-          await this.jj.simplifyParents(targetPath, await this.jj.changeIdAt(targetPath, "@"));
-          const rewrittenTarget = await this.jj.changeIdAt(targetPath, "@");
-          if (!(await this.jj.areAncestorsOf(targetPath, heads, rewrittenTarget)))
-            throw new Error("Merge ancestry proof failed after simplify-parents");
+          await this.updateSourceStale(row, "custody merge source");
+          const classification = await this.jj.classifyMergeSource(
+            request.repoRoot,
+            row.name,
+            request.targetChangeId,
+          );
+          if (classification.emptyMerges.length || classification.exceptional.length)
+            throw new Error(
+              `Unsafe empty revisions: ${JSON.stringify({ emptyMerges: classification.emptyMerges, exceptional: classification.exceptional })}`,
+            );
+          const receipt: any = {
+            classification,
+            phaseA: { abandoned: [] },
+            phaseB: { abandoned: [] },
+          };
+          this.db
+            .prepare("UPDATE custody_operation SET evidence=? WHERE op_id=?")
+            .run(JSON.stringify({ ...request, receipt }), opId);
+          if (classification.linearInterior.length) {
+            const prePhaseA = await this.jj.currentOperationId(request.repoRoot);
+            const phaseAOp = await this.jj.abandonExactSet(
+              request.repoRoot,
+              classification.linearInterior,
+            );
+            receipt.phaseA = {
+              abandoned: classification.linearInterior,
+              preOperation: prePhaseA,
+              operation: phaseAOp,
+            };
+            try {
+              for (const id of classification.linearInterior)
+                if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "hidden")
+                  throw new Error(`Phase A id remains visible: ${id}`);
+              for (const id of classification.sourceContent)
+                if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "unique")
+                  throw new Error(`Phase A content missing: ${id}`);
+              if (!(await this.jj.workspaceHead(request.repoRoot, row.name)))
+                throw new Error("Phase A detached source attachment");
+              if (
+                await this.jj.hasConflicts(
+                  request.repoRoot,
+                  classification.sourceContent.map(exact).join(" | "),
+                )
+              )
+                throw new Error("Phase A introduced conflicts");
+            } catch (proofError) {
+              try {
+                if ((await this.jj.currentOperationId(request.repoRoot)) !== phaseAOp)
+                  throw new Error("foreign operation intervened");
+                await this.jj.restoreOperation(request.repoRoot, prePhaseA);
+                for (const id of classification.linearInterior)
+                  if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "unique")
+                    throw new Error(`restored candidate absent: ${id}`);
+                for (const id of classification.sourceContent)
+                  if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "unique")
+                    throw new Error(`restored content absent: ${id}`);
+                if (!(await this.jj.workspaceHead(request.repoRoot, row.name)))
+                  throw new Error("restored attachment absent");
+                const now = this.now();
+                this.db
+                  .prepare(
+                    "UPDATE custody_operation SET state='failed',settled_at=?,heartbeat_at=?,evidence=? WHERE op_id=?",
+                  )
+                  .run(
+                    now,
+                    now,
+                    JSON.stringify({
+                      rolledBack: true,
+                      failedProof: String(proofError),
+                      restoredOperation: prePhaseA,
+                    }),
+                    opId,
+                  );
+                throw new PhaseARolledBackError(String(proofError));
+              } catch (restoreError) {
+                if (restoreError instanceof PhaseARolledBackError) throw restoreError;
+                await this.port.commit(opId, {
+                  workspaceId: row.id,
+                  ownRootSessionId: request.rootSessionId,
+                  cause: "ambiguity",
+                  disposition: "incident",
+                  patch: {
+                    incident: {
+                      stage: "phase_a_unrestorable",
+                      reason: `${String(proofError)}; restore: ${String(restoreError)}`,
+                    },
+                  },
+                  now: this.now(),
+                });
+                throw new Error(`Phase A unrestorable: ${String(restoreError)}`);
+              }
+            }
+          }
+          if (classification.incomingHeads.length) {
+            await this.jj.updateStale(targetPath, "custody merge target");
+            const parents = await this.jj.parentsOfWorkingCopy(targetPath);
+            await this.jj.rebaseWorkingCopyOnto(targetPath, [
+              ...parents,
+              ...classification.incomingHeads,
+            ]);
+            // Ratified MG-0 protocol: simplify exactly the target WC, unconditionally.
+            await this.jj.simplifyParents(targetPath, await this.jj.changeIdAt(targetPath, "@"));
+            const rewrittenTarget = await this.jj.changeIdAt(targetPath, "@");
+            if (
+              !(await this.jj.areAncestorsOf(
+                targetPath,
+                classification.incomingHeads,
+                rewrittenTarget,
+              ))
+            )
+              throw new Error("Merge ancestry proof failed after simplify-parents");
+          }
           request.actualMerge = {
             strategy: "merge-under",
-            changeIds: request.mergeChangeIds ?? heads,
-            conflictPaths: await this.jj.conflictedPaths(targetPath),
-            parentSimplification: "applied",
-            parentSimplificationReason: "redundant-parents-removed",
-          };
+            changeIds: request.mergeChangeIds ?? classification.sourceContent,
+            conflictPaths: classification.incomingHeads.length
+              ? await this.jj.conflictedPaths(targetPath)
+              : [],
+            parentSimplification: classification.incomingHeads.length ? "applied" : "skipped",
+            parentSimplificationReason: classification.incomingHeads.length
+              ? "redundant-parents-removed"
+              : "no-redundancy",
+            classification,
+            phaseA: receipt.phaseA,
+            phaseB: receipt.phaseB,
+          } as MergeSummary;
         }
       } else {
         if (!heads.length) throw new Error("Abandon requires owned heads");
@@ -220,7 +350,7 @@ export class SQLiteCustodyCoordinator {
           await this.proveScaffold(request, row, heads[0]!);
         // JJ refuses to abandon a live working-copy commit. Updating stale is
         // mandatory before detachment; a present checkout failure fails closed.
-        if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody abandon");
+        await this.updateSourceStale(row, "custody abandon");
         await this.jj.workspaceForget(request.repoRoot, row.name);
         for (const head of heads) {
           const evidence = await this.jj.resolveChange(request.repoRoot, head);
@@ -273,8 +403,10 @@ export class SQLiteCustodyCoordinator {
     if (request.kind === "merge" || request.kind === "finalize_merge") {
       const target = request.targetChangeId!;
       const targetPath = request.targetPath ?? request.repoRoot;
-      const ancestor = await this.jj.areAncestorsOf(targetPath, heads, target);
-      if (!ancestor) throw new Error("Merge ancestry not proved");
+      const proofHeads = ((request.actualMerge as any)?.classification?.incomingHeads ??
+        heads) as string[];
+      if (proofHeads.length && !(await this.jj.areAncestorsOf(targetPath, proofHeads, target)))
+        throw new Error("Merge ancestry not proved");
       if (!request.actualMerge) throw new Error("Merge execution receipt is missing");
       if (await this.jj.hasConflicts(targetPath, exact(target))) {
         this.fault?.("after_receipt", opId);
@@ -293,11 +425,32 @@ export class SQLiteCustodyCoordinator {
         this.fault?.("after_commit", opId);
         return result;
       }
-      if (await pathExists(row.path)) await this.jj.updateStale(row.path, "custody merge cleanup");
+      await this.updateSourceStale(row, "custody merge cleanup");
       await this.jj.workspaceForget(request.repoRoot, row.name);
       if (await this.jj.workspaceHead(request.repoRoot, row.name))
         throw new Error("Merge detach not proved");
       await rm(row.path, { recursive: true, force: true });
+      const mergeReceipt = request.actualMerge as any;
+      const phaseBHead = mergeReceipt.classification?.attachedHead as string | undefined;
+      if (phaseBHead) {
+        if ((await this.jj.resolveChange(request.repoRoot, phaseBHead)).kind !== "unique")
+          throw new Error("Phase B head is not uniquely visible");
+        if (await this.jj.areAncestorsOf(targetPath, [phaseBHead], target))
+          throw new Error("Phase B refused: empty source head is reachable from target");
+        const operation = await this.jj.abandonExactSet(request.repoRoot, [phaseBHead]);
+        if ((await this.jj.resolveChange(request.repoRoot, phaseBHead)).kind !== "hidden")
+          throw new Error("Phase B abandoned head absence not proved");
+        mergeReceipt.phaseB = { abandoned: [phaseBHead], operation };
+      }
+      for (const id of mergeReceipt.classification?.linearInterior ?? [])
+        if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "hidden")
+          throw new Error(`Final Phase A absence not proved: ${id}`);
+      for (const id of mergeReceipt.classification?.sourceContent ?? []) {
+        if ((await this.jj.resolveChange(request.repoRoot, id)).kind !== "unique")
+          throw new Error(`Final content visibility not proved: ${id}`);
+        if (!(await this.jj.areAncestorsOf(targetPath, [id], target)))
+          throw new Error(`Final content ancestry not proved: ${id}`);
+      }
       this.fault?.("after_receipt", opId);
       const result = await this.port.commit(opId, {
         workspaceId: row.id,
@@ -348,52 +501,14 @@ export class SQLiteCustodyCoordinator {
     return result;
   }
 
-  private async simplifyMergedParents(
-    targetPath: string,
-    heads: readonly string[],
-  ): Promise<Pick<MergeSummary, "parentSimplification" | "parentSimplificationReason">> {
-    try {
-      const target = await this.jj.changeIdAt(targetPath, "@");
-      if (!(await this.jj.hasRedundantParents(targetPath, target)))
-        return {
-          parentSimplification: "skipped",
-          parentSimplificationReason: "no-redundancy",
-        };
-      if (await this.jj.hasDescendants(targetPath, target))
-        return {
-          parentSimplification: "skipped",
-          parentSimplificationReason: "has-descendants",
-        };
-      const before = await this.jj.currentOperationId(targetPath);
-      try {
-        await this.jj.simplifyParents(targetPath, target);
-        const simplified = await this.jj.changeIdAt(targetPath, "@");
-        if (
-          (await this.jj.hasRedundantParents(targetPath, simplified)) ||
-          !(await this.jj.areAncestorsOf(targetPath, heads, simplified))
-        ) {
-          await this.jj.restoreOperation(targetPath, before);
-          return {
-            parentSimplification: "failed",
-            parentSimplificationReason: "postcheck-failed-rolled-back",
-          };
-        }
-        return {
-          parentSimplification: "applied",
-          parentSimplificationReason: "redundant-parents-removed",
-        };
-      } catch {
-        return {
-          parentSimplification: "failed",
-          parentSimplificationReason: "cosmetic-command-failed",
-        };
-      }
-    } catch {
-      return {
-        parentSimplification: "skipped",
-        parentSimplificationReason: "precheck-failed",
-      };
-    }
+  private async updateSourceStale(row: CustodyRecord, context: string): Promise<void> {
+    if (!(await pathExists(row.path)))
+      throw new Error(
+        `${context} refused: attached checkout is absent; update-stale cannot be proved`,
+      );
+    if (!(await this.jj.workspaceHead(row.repoRoot, row.name)))
+      throw new Error(`${context} refused: workspace attachment is absent`);
+    await this.jj.updateStale(row.path, context);
   }
 
   private async insertCreated(row: CustodyRecord, opId: string): Promise<CustodyRecord> {
@@ -449,6 +564,22 @@ export class SQLiteCustodyCoordinator {
       requestedBy: "scaffold_reclaim",
     });
   }
+}
+
+class PhaseARolledBackError extends Error {}
+
+function classificationIdentity(value: any) {
+  return {
+    sourceAt: value.sourceAt,
+    sourceUnique: value.sourceUnique,
+    sourceEmpty: value.sourceEmpty,
+    sourceContent: value.sourceContent,
+    incomingHeads: value.incomingHeads,
+    attachedHead: value.attachedHead,
+    linearInterior: value.linearInterior,
+    emptyMerges: value.emptyMerges,
+    exceptional: value.exceptional,
+  };
 }
 
 async function pathExists(path: string): Promise<boolean> {

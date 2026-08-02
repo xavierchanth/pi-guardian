@@ -9,8 +9,8 @@ import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts
 import {
   InMemoryWorkspaceRegistry,
   JjCli,
-  WorkspaceManager,
 } from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { WorkspaceManager } from "../../packages/pi-tai/src/core/isolation/manager.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -181,7 +181,7 @@ describe("managed jj workspaces", () => {
     await commitInWorkspace(record.path, "cosmetic.txt", "kept\n", "cosmetic failure work");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
@@ -207,7 +207,7 @@ describe("managed jj workspaces", () => {
     await commitInWorkspace(record.path, "rollback.txt", "kept\n", "rollback work");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged", "cosmetic verification never fails the merge");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "failed");
@@ -237,7 +237,7 @@ describe("managed jj workspaces", () => {
     const record = await manager.create();
     await commitInWorkspace(record.path, "agent.txt", "agent\n", "agent change");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
@@ -284,7 +284,7 @@ describe("managed jj workspaces", () => {
       await jj(descendantWorkspace, "log", "-r", "@", "--no-graph", "-T", "change_id")
     ).trim();
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
@@ -310,7 +310,7 @@ describe("managed jj workspaces", () => {
     await commitInWorkspace(record.path, "b.txt", "two\n", "second agent change");
     await writeFile(join(source, "wip.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     const summary = result.kind === "merged" ? result.summary : undefined;
@@ -580,7 +580,7 @@ describe("trunk stack hygiene", () => {
     for (const name of ["one", "two"]) {
       const child = await manager.create({ label: name, parent: trunk.id });
       await commitInWorkspace(child.path, `${name}.txt`, `${name}\n`, `agent: add ${name}`);
-      assert.equal((await manager.merge(child.id, "merge-under")).kind, "merged");
+      assert.equal((await manager.merge(child.id)).kind, "merged");
     }
 
     const result = await manager.merge(trunk.id);
@@ -609,7 +609,7 @@ describe("multi-head trunk delivered under a dirty working copy", () => {
     }
     for (const { name, workspace } of children) {
       await commitInWorkspace(workspace.path, `${name}.txt`, `${name}\n`, `agent: add ${name}`);
-      await manager.merge(workspace.id, "merge-under");
+      await manager.merge(workspace.id);
     }
     // A dirty working copy forces merge-under on the close, which is the path
     // that has to pick destinations for a multi-headed range.
