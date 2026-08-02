@@ -1,4 +1,4 @@
-import type { CapabilityName } from "./capabilities.ts";
+import { CAPABILITY_NAMES, type CapabilityName } from "./capabilities.ts";
 import type { BackendName } from "./domain.ts";
 
 export const SUBAGENT_LIFECYCLE_ENTRY = "pi-tai-subagent-lifecycle";
@@ -15,6 +15,12 @@ interface Fact {
   generation: number;
   at: string;
 }
+export type LifecycleAudience = "manager" | "user" | "system";
+export interface LifecycleAttachment {
+  readonly kind: "artifact";
+  readonly ref: string;
+}
+
 export type LifecycleEvent =
   | (Fact & {
       version: 1;
@@ -44,12 +50,31 @@ export type LifecycleEvent =
       };
       workspace: { cwd: string; workspaceId?: string };
       capability?: CapabilityName;
-      charterRef: { kind: "manager_task"; value: string };
+      audience?: LifecycleAudience;
+      attachments?: readonly LifecycleAttachment[];
+    })
+  | (Fact & {
+      version: 2;
+      type: "charter";
+      charter: string;
+      audience: LifecycleAudience;
+      attachments?: readonly LifecycleAttachment[];
     })
   | (Fact & { version: 2; type: "running" })
   | (Fact & { version: 2; type: "resume_handle_discovered"; resumeHandle: ResumeHandle })
   | (Fact & { version: 2; type: "generation_advanced"; previousGeneration: number })
-  | (Fact & { version: 2; type: "terminal"; disposition: "done" | "failed" | "interrupted" });
+  | (Fact & {
+      version: 2;
+      type: "terminal";
+      disposition: "done" | "failed" | "interrupted" | "cancelled";
+      report?: string;
+      delivery?: "pending" | "delivered" | "dropped";
+      audience?: LifecycleAudience;
+      attachments?: readonly LifecycleAttachment[];
+    })
+  | (Fact & { version: 2; type: "archived"; reason?: string })
+  | (Fact & { version: 2; type: "result_consumed"; audience: LifecycleAudience })
+  | (Fact & { version: 2; type: "result_dropped"; reason: string });
 
 export interface LifecycleRecord {
   readonly durableId: string;
@@ -60,7 +85,14 @@ export interface LifecycleRecord {
   readonly title: string;
   readonly cwd: string;
   readonly rootSessionId?: string;
-  readonly disposition: "intent" | "running" | "done" | "failed" | "interrupted";
+  readonly disposition:
+    | "intent"
+    | "running"
+    | "done"
+    | "failed"
+    | "interrupted"
+    | "cancelled"
+    | "archived";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly resumeHandle?: ResumeHandle;
@@ -73,7 +105,14 @@ export interface LifecycleRecord {
   };
   readonly workspaceId?: string;
   readonly capability?: CapabilityName;
-  readonly charterRef?: { kind: "manager_task"; value: string };
+  readonly charter?: string;
+  readonly audience?: LifecycleAudience;
+  readonly attachments?: readonly LifecycleAttachment[];
+  readonly report?: string;
+  readonly delivery?: "pending" | "delivered" | "dropped";
+  readonly consumed?: boolean;
+  readonly dropReason?: string;
+  readonly archivedAt?: string;
 }
 export interface LifecycleProjection {
   readonly records: ReadonlyMap<string, LifecycleRecord>;
@@ -119,7 +158,8 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
               backendConfig: e.backendConfig,
               ...(e.workspace.workspaceId ? { workspaceId: e.workspace.workspaceId } : {}),
               ...(e.capability ? { capability: e.capability } : {}),
-              charterRef: e.charterRef,
+              ...(e.audience ? { audience: e.audience } : {}),
+              ...(e.attachments ? { attachments: e.attachments } : {}),
             }
           : {}),
       });
@@ -129,6 +169,33 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
     const prior = records.get(e.durableId);
     if (!prior) {
       rejected.push(raw);
+      continue;
+    }
+    if (e.type === "charter") {
+      records.set(e.durableId, {
+        ...prior,
+        charter: e.charter,
+        audience: e.audience,
+        ...(e.attachments ? { attachments: e.attachments } : {}),
+        updatedAt: e.at,
+      });
+      continue;
+    }
+    if (e.type === "archived") {
+      records.set(e.durableId, { ...prior, disposition: "archived", updatedAt: e.at });
+      continue;
+    }
+    if (e.type === "result_consumed") {
+      records.set(e.durableId, { ...prior, consumed: true, audience: e.audience, updatedAt: e.at });
+      continue;
+    }
+    if (e.type === "result_dropped") {
+      records.set(e.durableId, {
+        ...prior,
+        delivery: "dropped",
+        dropReason: e.reason,
+        updatedAt: e.at,
+      });
       continue;
     }
     if (e.type === "generation_advanced") {
@@ -194,7 +261,15 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
       rejected.push(raw);
       continue;
     }
-    records.set(e.durableId, { ...prior, disposition: e.disposition, updatedAt: e.at });
+    records.set(e.durableId, {
+      ...prior,
+      disposition: e.disposition,
+      ...(e.version === 2 && e.report !== undefined ? { report: e.report } : {}),
+      ...(e.version === 2 && e.delivery !== undefined ? { delivery: e.delivery } : {}),
+      ...(e.version === 2 && e.audience !== undefined ? { audience: e.audience } : {}),
+      ...(e.version === 2 && e.attachments !== undefined ? { attachments: e.attachments } : {}),
+      updatedAt: e.at,
+    });
   }
   return { records, maxSequence, rejected };
 }
@@ -206,40 +281,72 @@ function handleMatches(b: BackendName, h: ResumeHandle): boolean {
   );
 }
 function isEvent(v: unknown): v is LifecycleEvent {
-  if (!v || typeof v !== "object") return false;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
   const e = v as Record<string, unknown>;
+  if ((e.version !== 1 && e.version !== 2) || typeof e.type !== "string") return false;
+  const common = ["version", "type", "durableId", "generation", "at"];
+  const variants: Record<string, readonly string[]> =
+    e.version === 1
+      ? {
+          spawn_intent: ["displayId", "sequence", "backend", "title", "cwd", "rootSessionId"],
+          running: ["resumeHandle"],
+          terminal: ["disposition"],
+        }
+      : {
+          spawn_intent: [
+            "displayId",
+            "sequence",
+            "backend",
+            "title",
+            "rootSessionId",
+            "backendConfig",
+            "workspace",
+            "capability",
+            "audience",
+            "attachments",
+          ],
+          charter: ["charter", "audience", "attachments"],
+          running: [],
+          resume_handle_discovered: ["resumeHandle"],
+          generation_advanced: ["previousGeneration"],
+          terminal: ["disposition", "report", "delivery", "audience", "attachments"],
+          archived: ["reason"],
+          result_consumed: ["audience"],
+          result_dropped: ["reason"],
+        };
+  const fields = variants[e.type];
+  if (!fields || !exactKeys(e, [...common, ...fields])) return false;
   if (
-    (e.version !== 1 && e.version !== 2) ||
-    typeof e.type !== "string" ||
     typeof e.durableId !== "string" ||
     !Number.isInteger(e.generation) ||
     typeof e.at !== "string"
   )
     return false;
   if (e.type === "spawn_intent") {
-    const common =
-      typeof e.displayId === "string" &&
-      Number.isInteger(e.sequence) &&
-      (e.backend === "pi" || e.backend === "claude" || e.backend === "codex") &&
-      typeof e.title === "string" &&
-      (e.rootSessionId === undefined || typeof e.rootSessionId === "string");
-    if (!common) return false;
+    if (
+      typeof e.displayId !== "string" ||
+      !Number.isInteger(e.sequence) ||
+      !["pi", "claude", "codex"].includes(e.backend as string) ||
+      typeof e.title !== "string" ||
+      (e.rootSessionId !== undefined && typeof e.rootSessionId !== "string")
+    )
+      return false;
     if (e.version === 1) return typeof e.cwd === "string";
-    const w = e.workspace as Record<string, unknown> | undefined,
-      c = e.backendConfig as Record<string, unknown> | undefined,
-      r = e.charterRef as Record<string, unknown> | undefined;
+    const w = record(e.workspace),
+      c = record(e.backendConfig);
     return (
       !!w &&
+      exactKeys(w, ["cwd", "workspaceId"]) &&
       typeof w.cwd === "string" &&
       (w.workspaceId === undefined || typeof w.workspaceId === "string") &&
       !!c &&
+      exactKeys(c, ["model", "provider", "effort", "tools"]) &&
       optionalStrings(c, ["model", "provider", "effort"]) &&
       (c.tools === undefined ||
         (Array.isArray(c.tools) && c.tools.every((x) => typeof x === "string"))) &&
-      (e.capability === undefined || typeof e.capability === "string") &&
-      !!r &&
-      r.kind === "manager_task" &&
-      typeof r.value === "string"
+      (e.capability === undefined || CAPABILITY_NAMES.includes(e.capability as CapabilityName)) &&
+      (e.audience === undefined || isAudience(e.audience)) &&
+      (e.attachments === undefined || isAttachments(e.attachments))
     );
   }
   if (e.type === "running")
@@ -247,9 +354,55 @@ function isEvent(v: unknown): v is LifecycleEvent {
   if (e.type === "resume_handle_discovered") return e.version === 2 && isHandle(e.resumeHandle);
   if (e.type === "generation_advanced")
     return e.version === 2 && Number.isInteger(e.previousGeneration);
+  if (e.type === "charter")
+    return (
+      e.version === 2 &&
+      typeof e.charter === "string" &&
+      isAudience(e.audience) &&
+      (e.attachments === undefined || isAttachments(e.attachments))
+    );
+  if (e.type === "archived")
+    return e.version === 2 && (e.reason === undefined || typeof e.reason === "string");
+  if (e.type === "result_consumed") return e.version === 2 && isAudience(e.audience);
+  if (e.type === "result_dropped") return e.version === 2 && typeof e.reason === "string";
+  const dispositions =
+    e.version === 1
+      ? ["done", "failed", "interrupted"]
+      : ["done", "failed", "interrupted", "cancelled"];
   return (
     e.type === "terminal" &&
-    (e.disposition === "done" || e.disposition === "failed" || e.disposition === "interrupted")
+    dispositions.includes(e.disposition as string) &&
+    (e.report === undefined || typeof e.report === "string") &&
+    (e.delivery === undefined ||
+      ["pending", "delivered", "dropped"].includes(e.delivery as string)) &&
+    (e.audience === undefined || isAudience(e.audience)) &&
+    (e.attachments === undefined || isAttachments(e.attachments))
+  );
+}
+function record(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+function exactKeys(o: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(o).every((key) => allowed.includes(key));
+}
+function isAudience(v: unknown): v is LifecycleAudience {
+  return v === "manager" || v === "user" || v === "system";
+}
+function isAttachments(v: unknown): v is readonly LifecycleAttachment[] {
+  return (
+    Array.isArray(v) &&
+    v.every((x) => {
+      const a = record(x);
+      return (
+        !!a &&
+        exactKeys(a, ["kind", "ref"]) &&
+        a.kind === "artifact" &&
+        typeof a.ref === "string" &&
+        a.ref.length > 0
+      );
+    })
   );
 }
 function optionalStrings(o: Record<string, unknown>, ks: string[]): boolean {
@@ -261,7 +414,9 @@ function isHandle(v: unknown): v is ResumeHandle {
   return (
     (h.kind === "pi_session_file" || h.kind === "claude_session" || h.kind === "codex_thread") &&
     typeof h.value === "string" &&
-    h.value.length > 0
+    h.value.length > 0 &&
+    h.value.trim() === h.value &&
+    exactKeys(h, ["kind", "value"])
   );
 }
 

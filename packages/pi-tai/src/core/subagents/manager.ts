@@ -16,7 +16,7 @@ import {
   type SubagentEvent,
   type SubagentSnapshot,
 } from "./domain.ts";
-import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
+import { foldLifecycle, type LifecycleEvent, type SubagentLifecycleStore } from "./lifecycle.ts";
 import { InMemoryRecordStore } from "./records.ts";
 import { DeferredResultDelivery } from "./result-delivery.ts";
 
@@ -105,6 +105,8 @@ interface Entry {
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
   generation: number;
+  /** Advancement persisted but its running fact has not yet succeeded. */
+  generationAwaitingRunning?: boolean;
   readonly sequence: number;
   /** Serializes messages without blocking messages to other children. */
   sendChain: Promise<void>;
@@ -116,6 +118,8 @@ interface Entry {
   restored: boolean;
   /** Workspace custody is independent of the historical workspace identifier. */
   custodyResolved: boolean;
+  /** Unsubscribes private resume-handle discovery from the current session. */
+  resumeHandleDispose?: () => void;
 }
 
 export type RequestedSendMode = SendMode | "auto";
@@ -155,6 +159,8 @@ export class SubagentManager {
   private lifecycleStore?: SubagentLifecycleStore;
   private generation = 1;
   private readonly persistenceErrors: string[] = [];
+  /** Lifecycle facts have one writer; a rejected write must not poison later writes. */
+  private lifecycleAppendChain: Promise<void> = Promise.resolve();
   private readonly requireLifecycleStore: boolean;
 
   constructor(options: SubagentManagerOptions) {
@@ -300,7 +306,7 @@ export class SubagentManager {
         throw new Error(
           "Subagent lifecycle persistence is unavailable; refusing to start an unowned child.",
         );
-      await this.lifecycleStore?.append({
+      await this.appendLifecycle({
         version: 2,
         type: "spawn_intent",
         durableId,
@@ -320,7 +326,6 @@ export class SubagentManager {
           ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
         },
         ...(request.capability ? { capability: request.capability } : {}),
-        charterRef: { kind: "manager_task", value: durableId },
         ...(this.rootSessionId ? { rootSessionId: this.rootSessionId } : {}),
         at: this.clock(),
       });
@@ -388,7 +393,7 @@ export class SubagentManager {
       entry.task = task;
       try {
         // Running is durable before the backend receives control.
-        await this.lifecycleStore?.append({
+        await this.appendLifecycle({
           version: 2,
           type: "running",
           durableId,
@@ -591,23 +596,31 @@ export class SubagentManager {
       // Persist the reservation before exposing it. Unlike a respawn, the
       // retained Pi handle can begin producing events synchronously, so all
       // manager state and the single-writer token must be installed first.
-      await this.lifecycleStore?.append({
-        version: 2,
-        type: "generation_advanced",
-        durableId: entry.snapshot.durableId,
-        previousGeneration: entry.generation,
-        generation: entry.generation + 1,
-        at: this.clock(),
-      });
-      const nextGeneration = entry.generation + 1;
-      await this.lifecycleStore?.append({
+      const nextGeneration = entry.generationAwaitingRunning
+        ? entry.generation
+        : entry.generation + 1;
+      if (!entry.generationAwaitingRunning) {
+        await this.appendLifecycle({
+          version: 2,
+          type: "generation_advanced",
+          durableId: entry.snapshot.durableId,
+          previousGeneration: entry.generation,
+          generation: nextGeneration,
+          at: this.clock(),
+        });
+        // Commit locally as soon as advancement is durable. A retry then emits
+        // only the missing running fact.
+        entry.generation = nextGeneration;
+        entry.generationAwaitingRunning = true;
+      }
+      await this.appendLifecycle({
         version: 2,
         type: "running",
         durableId: entry.snapshot.durableId,
         generation: nextGeneration,
         at: this.clock(),
       });
-      entry.generation = nextGeneration;
+      entry.generationAwaitingRunning = false;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while continuing.`);
       let resolveSettled: (snapshot: SubagentSnapshot) => void = () => {};
       const settled = new Promise<SubagentSnapshot>((resolve) => {
@@ -651,23 +664,29 @@ export class SubagentManager {
     try {
       session = await entry.backend.spawn(task);
       // Advance exactly once before exposing the successor generation.
-      await this.lifecycleStore?.append({
-        version: 2,
-        type: "generation_advanced",
-        durableId: entry.snapshot.durableId,
-        previousGeneration: entry.generation,
-        generation: entry.generation + 1,
-        at: this.clock(),
-      });
-      const nextGeneration = entry.generation + 1;
-      await this.lifecycleStore?.append({
+      const nextGeneration = entry.generationAwaitingRunning
+        ? entry.generation
+        : entry.generation + 1;
+      if (!entry.generationAwaitingRunning) {
+        await this.appendLifecycle({
+          version: 2,
+          type: "generation_advanced",
+          durableId: entry.snapshot.durableId,
+          previousGeneration: entry.generation,
+          generation: nextGeneration,
+          at: this.clock(),
+        });
+        entry.generation = nextGeneration;
+        entry.generationAwaitingRunning = true;
+      }
+      await this.appendLifecycle({
         version: 2,
         type: "running",
         durableId: entry.snapshot.durableId,
         generation: nextGeneration,
         at: this.clock(),
       });
-      entry.generation = nextGeneration;
+      entry.generationAwaitingRunning = false;
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
       session?.dispose();
@@ -675,6 +694,7 @@ export class SubagentManager {
       throw error;
     }
     entry.task = task;
+    entry.resumeHandleDispose?.();
     entry.session?.dispose();
     entry.session = session;
     this.watchResumeHandle(entry, session);
@@ -707,6 +727,8 @@ export class SubagentManager {
       // Settled entries may still be continued; only an active cancellation
       // tombstones the entry against future sends.
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.abort.abort();
       try {
         await entry.session?.interrupt();
@@ -727,6 +749,8 @@ export class SubagentManager {
     if (running.length) await this.cancel(running);
     for (const entry of this.entries.values()) {
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.session?.dispose();
     }
     this.entries.clear();
@@ -834,22 +858,37 @@ export class SubagentManager {
         : entry.snapshot.backend === "claude"
           ? "claude_session"
           : "codex_thread";
+    // Normalized last-write semantics: duplicate notifications are suppressed;
+    // a backend may replace its opaque handle, and the final fact wins in fold.
+    let lastValue: string | undefined;
     const persist = (value: string) => {
-      if (!value) return;
-      void this.lifecycleStore
-        ?.append({
-          version: 2,
-          type: "resume_handle_discovered",
-          durableId: entry.snapshot.durableId,
-          generation: entry.generation,
-          resumeHandle: { kind, value } as never,
-          at: this.clock(),
-        })
-        .catch((error) => this.recordPersistenceError(error));
+      if (typeof value !== "string" || value.trim() !== value || value.length === 0) return;
+      if (value === lastValue) return;
+      lastValue = value;
+      void this.appendLifecycle({
+        version: 2,
+        type: "resume_handle_discovered",
+        durableId: entry.snapshot.durableId,
+        generation: entry.generation,
+        resumeHandle: { kind, value } as never,
+        at: this.clock(),
+      }).catch((error) => this.recordPersistenceError(error));
     };
-    if (session.onResumeHandle) session.onResumeHandle(persist);
+    entry.resumeHandleDispose?.();
+    entry.resumeHandleDispose = undefined;
+    if (session.onResumeHandle) entry.resumeHandleDispose = session.onResumeHandle(persist);
     else if (session.sessionFile) persist(session.sessionFile);
     else if (session.resumeToken) persist(session.resumeToken);
+  }
+
+  private appendLifecycle(event: LifecycleEvent): Promise<void> {
+    if (!this.lifecycleStore) return Promise.resolve();
+    const write = this.lifecycleAppendChain.then(() => this.lifecycleStore?.append(event));
+    this.lifecycleAppendChain = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
   }
 
   private recordPersistenceError(error: unknown): void {
@@ -913,6 +952,8 @@ export class SubagentManager {
     for (const [id, entry] of candidates) {
       if (this.entries.size <= this.maxResident) break;
       entry.closed = true;
+      entry.resumeHandleDispose?.();
+      entry.resumeHandleDispose = undefined;
       entry.session?.dispose();
       this.entries.delete(id);
     }

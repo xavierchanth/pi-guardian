@@ -440,13 +440,17 @@ describe("subagent manager", () => {
     assert.equal(backend.spawned.length, 1);
   });
 
-  it("fails a continuation closed when its running lifecycle write fails", async () => {
-    let appends = 0;
+  it("retries a failed continuation running append without duplicating advancement", async () => {
+    const facts: LifecycleEvent[] = [];
+    let failRunning = true;
     const store: SubagentLifecycleStore = {
       load: async () => [],
-      append: async () => {
-        appends += 1;
-        if (appends === 6) throw new Error("disk full");
+      append: async (event) => {
+        facts.push(event);
+        if (event.type === "running" && event.generation === 2 && failRunning) {
+          failRunning = false;
+          throw new Error("disk full");
+        }
       },
     };
     const backend = new StubBackend();
@@ -455,6 +459,13 @@ describe("subagent manager", () => {
     await manager.wait([spawned.id]);
     await assert.rejects(manager.send(spawned.id, "next"), /disk full/);
     assert.notEqual(manager.get(spawned.id)?.status, "running");
+
+    await manager.send(spawned.id, "retry");
+    assert.equal(facts.filter((event) => event.type === "generation_advanced").length, 1);
+    assert.equal(
+      facts.filter((event) => event.type === "running" && event.generation === 2).length,
+      2,
+    );
   });
 
   it("frees the concurrency slot again after a resumed run settles", async () => {

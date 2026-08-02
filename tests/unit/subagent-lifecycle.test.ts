@@ -97,7 +97,7 @@ test("v2 advances generations exactly once and binds handles to their backend", 
     backendConfig: { model: "sonnet" },
     workspace: { cwd: "/work", workspaceId: "ws" },
     capability: "researcher" as const,
-    charterRef: { kind: "manager_task" as const, value: "v2-id" },
+    audience: "manager" as const,
     at: "a",
   };
   const folded = foldLifecycle([
@@ -150,6 +150,72 @@ test("v2 advances generations exactly once and binds handles to their backend", 
   assert.equal(record?.disposition, "running");
   assert.deepEqual(record?.resumeHandle, { kind: "claude_session", value: "session" });
   assert.equal(record?.workspaceId, "ws");
+  assert.equal(folded.rejected.length, 2);
+});
+
+test("v2 future facts preserve charter, report, delivery, attachments, and archival state", () => {
+  const base = {
+    version: 2 as const,
+    type: "spawn_intent" as const,
+    durableId: "future",
+    displayId: "sa-9",
+    sequence: 9,
+    generation: 1,
+    backend: "pi" as const,
+    title: "future",
+    backendConfig: {},
+    workspace: { cwd: "/work" },
+    at: "a",
+  };
+  const folded = foldLifecycle([
+    base,
+    {
+      version: 2,
+      type: "charter",
+      durableId: "future",
+      generation: 1,
+      charter: "do work",
+      audience: "manager",
+      at: "b",
+    },
+    { version: 2, type: "running", durableId: "future", generation: 1, at: "c" },
+    {
+      version: 2,
+      type: "terminal",
+      durableId: "future",
+      generation: 1,
+      disposition: "cancelled",
+      report: "stopped",
+      delivery: "pending",
+      audience: "user",
+      attachments: [{ kind: "artifact", ref: "sha256:abc" }],
+      at: "d",
+    },
+    {
+      version: 2,
+      type: "result_consumed",
+      durableId: "future",
+      generation: 1,
+      audience: "user",
+      at: "e",
+    },
+    { version: 2, type: "archived", durableId: "future", generation: 1, at: "f" },
+  ]);
+  const record = folded.records.get("future");
+  assert.equal(folded.rejected.length, 0);
+  assert.equal(record?.charter, "do work");
+  assert.equal(record?.report, "stopped");
+  assert.equal(record?.consumed, true);
+  assert.equal(record?.disposition, "archived");
+  assert.deepEqual(record?.attachments, [{ kind: "artifact", ref: "sha256:abc" }]);
+});
+
+test("unknown and malformed fields are quarantined rather than dropped", () => {
+  const folded = foldLifecycle([
+    { ...intent, surprise: true },
+    { ...intent, type: "running", resumeHandle: { kind: "pi_session_file", value: " padded " } },
+  ]);
+  assert.equal(folded.records.size, 0);
   assert.equal(folded.rejected.length, 2);
 });
 
