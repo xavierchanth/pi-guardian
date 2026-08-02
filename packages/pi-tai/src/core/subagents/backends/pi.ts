@@ -44,7 +44,7 @@ export interface PiBackendOptions {
 export class PiBackend implements SubagentBackend {
   readonly name: BackendName = "pi";
   readonly capabilities = {
-    liveInput: ["steer"] as const,
+    liveInput: ["steer", "followUp"] as const,
     settledContinuation: "none" as const,
     modelSelection: true,
     reasoningEffort: true,
