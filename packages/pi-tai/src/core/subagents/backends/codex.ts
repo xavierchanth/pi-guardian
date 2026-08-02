@@ -1,8 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createInterface, type Interface } from "node:readline";
 import {
   EventChannel,
   type AvailabilityResult,
+  SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
 } from "../backend.ts";
@@ -44,7 +46,7 @@ export class CodexBackend implements SubagentBackend {
   // A settled thread is continued with `thread/resume`, which is what a
   // follow-up turn needs. Live steering mid-turn is not wired up.
   readonly capabilities = {
-    liveInput: [] as const,
+    liveInput: ["steer"] as const,
     settledContinuation: "respawn" as const,
     modelSelection: true,
     reasoningEffort: true,
@@ -96,6 +98,28 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
+class CodexRpcError extends Error {
+  readonly code?: number;
+  readonly data?: unknown;
+  constructor(message: string, code?: number, data?: unknown) {
+    super(message);
+    this.code = code;
+    this.data = data;
+  }
+}
+
+export function codexVersionAtLeast(userAgent: unknown, minimum = [0, 145, 0]): boolean {
+  if (typeof userAgent !== "string") return false;
+  const match = /^[A-Za-z0-9_-]+\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent);
+  if (!match) return false;
+  const version = match.slice(1).map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (version[i]! > minimum[i]!) return true;
+    if (version[i]! < minimum[i]!) return false;
+  }
+  return true;
+}
+
 class CodexSubagentSession implements SubagentSession {
   readonly events: AsyncIterable<SubagentEvent>;
   private readonly child: ChildProcessWithoutNullStreams;
@@ -111,6 +135,10 @@ class CodexSubagentSession implements SubagentSession {
     return this.threadId;
   }
   private turnId?: string;
+  private steerEnabled = false;
+  get liveInput(): readonly "steer"[] | readonly [] {
+    return this.steerEnabled ? ["steer"] : [];
+  }
   private lastAssistantText = "";
   private disposed = false;
 
@@ -136,12 +164,13 @@ class CodexSubagentSession implements SubagentSession {
   /** Runs the handshake and starts the first turn. Rejects if codex never comes up. */
   async start(): Promise<void> {
     try {
-      await this.request("initialize", {
+      const initialized = await this.request("initialize", {
         clientInfo: {
           name: this.options.clientName ?? "pi-tai",
           version: this.options.clientVersion ?? "0.1.0",
         },
       });
+      this.steerEnabled = codexVersionAtLeast(initialized.userAgent);
       this.notify("initialized", {});
       if (this.task.capability === "researcher") {
         const [capabilities, requirements] = await Promise.all([
@@ -199,8 +228,11 @@ class CodexSubagentSession implements SubagentSession {
     if (typeof id === "number" && this.pending.has(id)) {
       const waiter = this.pending.get(id)!;
       this.pending.delete(id);
-      const error = frame.error as { message?: string } | undefined;
-      if (error) waiter.reject(new Error(error.message ?? "codex returned an error."));
+      const error = frame.error as { message?: string; code?: number; data?: unknown } | undefined;
+      if (error)
+        waiter.reject(
+          new CodexRpcError(error.message ?? "codex returned an error.", error.code, error.data),
+        );
       else waiter.resolve((frame.result ?? {}) as Record<string, unknown>);
       return;
     }
@@ -295,6 +327,7 @@ class CodexSubagentSession implements SubagentSession {
         return;
       }
       case "turn/completed": {
+        this.turnId = undefined;
         const turn = params.turn as Record<string, unknown> | undefined;
         const status = turn?.status;
         const error = turn?.error as { message?: string } | undefined;
@@ -329,9 +362,35 @@ class CodexSubagentSession implements SubagentSession {
     }
   }
 
-  /** Live Codex steering is not implemented yet; never start a concurrent turn. */
-  async send(_text: string): Promise<void> {
-    throw new Error("Codex does not support steering a running subagent.");
+  async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
+    if (mode !== "steer" || !this.steerEnabled)
+      throw new SendNotDeliveredError("Codex steering is unavailable for this session.", "precondition");
+    if (!this.threadId || !this.turnId)
+      throw new SendNotDeliveredError("Codex has no active turn to steer.", "precondition");
+    try {
+      await this.request("turn/steer", {
+        threadId: this.threadId,
+        expectedTurnId: this.turnId,
+        input: [{ type: "text", text }],
+        clientUserMessageId: randomUUID(),
+      });
+    } catch (error) {
+      if (!(error instanceof CodexRpcError)) throw error;
+      if (error.code === -32601) {
+        this.steerEnabled = false;
+        throw new SendNotDeliveredError("Codex app-server does not support turn/steer.", "precondition");
+      }
+      if (error.code === -32600) {
+        const info = (error.data as { codex_error_info?: Record<string, unknown> } | undefined)
+          ?.codex_error_info;
+        if (info?.ActiveTurnNotSteerable !== undefined) {
+          this.steerEnabled = false;
+          throw new SendNotDeliveredError("The active Codex turn is not steerable.", "precondition");
+        }
+        throw new SendNotDeliveredError("The Codex turn settled before steering.", "settled");
+      }
+      throw error;
+    }
   }
 
   async interrupt(): Promise<void> {

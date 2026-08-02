@@ -2,7 +2,7 @@
 export interface CodexRequests {
   initialize: {
     params: { clientInfo: { name: string; version: string } };
-    result: Record<string, unknown>;
+    result: { userAgent?: string; [key: string]: unknown };
   };
   "modelProvider/capabilities/read": {
     params: Record<string, never>;
@@ -15,6 +15,15 @@ export interface CodexRequests {
   "thread/start": { params: Record<string, unknown>; result: Record<string, unknown> };
   "thread/resume": { params: { threadId: string }; result: Record<string, unknown> };
   "turn/start": { params: Record<string, unknown>; result: Record<string, unknown> };
+  "turn/steer": {
+    params: {
+      threadId: string;
+      expectedTurnId: string;
+      input: readonly { type: "text"; text: string }[];
+      clientUserMessageId?: string;
+    };
+    result: { turnId: string };
+  };
   "turn/interrupt": {
     params: { threadId: string; turnId: string };
     result: Record<string, unknown>;
