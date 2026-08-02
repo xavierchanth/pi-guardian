@@ -202,7 +202,7 @@ export function foldLifecycle(entries: readonly unknown[]): LifecycleProjection 
       if (
         e.generation !== prior.generation + 1 ||
         e.previousGeneration !== prior.generation ||
-        !["done", "failed", "interrupted"].includes(prior.disposition)
+        !["done", "failed", "interrupted", "cancelled"].includes(prior.disposition)
       ) {
         rejected.push(raw);
         continue;

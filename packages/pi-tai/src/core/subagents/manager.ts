@@ -102,6 +102,8 @@ interface Entry {
   task: SpawnTask;
   settled: Promise<SubagentSnapshot>;
   resolveSettled: (snapshot: SubagentSnapshot) => void;
+  /** Current generation's terminal durability barrier, when settlement began. */
+  terminalPersistence?: Promise<void>;
   readonly abort: AbortController;
   /** Branch generation captured for this run; navigation must not change it. */
   generation: number;
@@ -181,6 +183,10 @@ export class SubagentManager {
   async attachLifecycleStore(store: SubagentLifecycleStore): Promise<void> {
     this.lifecycleStore = store;
     const folded = foldLifecycle(await store.load());
+    if (folded.rejected.length > 0)
+      this.recordPersistenceError(
+        `Lifecycle fold rejected ${folded.rejected.length} persisted fact${folded.rejected.length === 1 ? "" : "s"}.`,
+      );
     this.sequence = Math.max(this.sequence, folded.maxSequence);
     this.records.ingest(folded.records.values());
     for (const record of folded.records.values()) {
@@ -563,9 +569,16 @@ export class SubagentManager {
   }
 
   private async continueSettled(entry: Entry, text: string, settlementRace = false): Promise<void> {
-    // A settled refusal proves the old run no longer needs its slot even while
-    // its terminal frame remains queued. Release is idempotent across races.
-    if (settlementRace) this.release(entry.runToken);
+    // A settled refusal proves the old run no longer needs its slot, but not its
+    // outcome. Wait for the backend's queued settlement frame: finish records
+    // that truthful terminal through the lifecycle writer before resolving.
+    if (settlementRace) {
+      this.release(entry.runToken);
+      await entry.settled;
+    }
+    // This also covers ordinary continuation immediately after wait: a failed
+    // terminal append must never be followed by generation_advanced.
+    await entry.terminalPersistence;
     const how = entry.backend.capabilities.settledContinuation;
     if (how === "in-place" && entry.session?.continueInPlace) {
       await this.continueInPlace(entry, text);
@@ -813,16 +826,16 @@ export class SubagentManager {
         : event.type === "run_settled" && event.outcome === "interrupted"
           ? "interrupted"
           : "failed";
-    void this.lifecycleStore
-      ?.append({
-        version: 2,
-        type: "terminal",
-        durableId: entry.snapshot.durableId,
-        generation: entry.generation,
-        disposition,
-        at: this.clock(),
-      })
-      .catch((error) => this.recordPersistenceError(error));
+    const terminalWrite = this.appendLifecycle({
+      version: 2,
+      type: "terminal",
+      durableId: entry.snapshot.durableId,
+      generation: entry.generation,
+      disposition,
+      at: this.clock(),
+    });
+    entry.terminalPersistence = terminalWrite;
+    const terminalSettled = terminalWrite.catch((error) => this.recordPersistenceError(error));
     this.release(token);
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
@@ -845,9 +858,12 @@ export class SubagentManager {
       },
       true,
     );
-    entry.resolveSettled(entry.snapshot);
-    // The hook runs after settlement so a slow or broken workspace reclaim
-    // cannot stall the parent's `wait`.
+    // Settlement is not observable to continuation until its terminal fact has
+    // passed through the same append chain as handle discovery. This gives the
+    // next generation a durable, foldable predecessor even in settlement races.
+    void terminalSettled.then(() => entry.resolveSettled(entry.snapshot));
+    // The hook runs after in-memory settlement so a slow or broken workspace
+    // reclaim cannot stall lifecycle persistence.
     void Promise.resolve(this.onSettled?.(snapshot)).catch(() => {});
   }
 

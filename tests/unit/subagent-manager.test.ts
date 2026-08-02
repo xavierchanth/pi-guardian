@@ -341,7 +341,17 @@ describe("subagent manager", () => {
     });
   });
 
-  it("returns the typed auto settlement-race continuation receipt", async () => {
+  it("serializes truthful terminals before advancement across repeated settlement races", async () => {
+    const events: LifecycleEvent[] = [];
+    const store: SubagentLifecycleStore = {
+      load: async () => events,
+      append: async (event) => {
+        // Reproduce the reviewed poison race: terminal durability yields while
+        // continuation is already trying to advance the generation.
+        if (event.type === "terminal") await settleQueue();
+        events.push(event);
+      },
+    };
     const backend = new StubBackend();
     const spawn = backend.spawn.bind(backend);
     backend.spawn = async (task) => {
@@ -353,7 +363,7 @@ describe("subagent manager", () => {
       };
       return session;
     };
-    const manager = managerWith([backend], { maxRunning: 1 });
+    const manager = managerWith([backend], { maxRunning: 1, lifecycleStore: store });
     const spawned = await manager.spawn(request({ prompt: "HANG: race" }));
 
     for (let generation = 0; generation < 3; generation += 1) {
@@ -362,6 +372,13 @@ describe("subagent manager", () => {
         settlementRace: true,
       });
       await manager.wait([spawned.id]);
+      const reloadedFold = foldLifecycle(events);
+      assert.equal(reloadedFold.rejected.length, 0, "every reload fold remains unpoisoned");
+      assert.equal(
+        reloadedFold.records.get(spawned.durableId)?.generation,
+        generation * 2 + 2,
+        "the successor terminal projects at generation 2 on the first race and stays foldable",
+      );
       assert.equal(
         manager.capacity().running,
         0,
