@@ -44,7 +44,7 @@ test("superseded dashboard and retired command/bindings are absent", () => {
   );
   const source = readFileSync(join(root, "packages/pi-tai/src/terminal/dashboard/view.ts"), "utf8");
   assert.doesNotMatch(source, /register\(["']dashboard["']/);
-  assert.doesNotMatch(source, /matchesKey\(data, ["'][\[\]]["']\)/);
+  assert.doesNotMatch(source, /matchesKey\(data, ["'][[\]]["']\)/);
 });
 
 test("terminal budget is read only by the terminal adapter with a documented fallback", () => {

@@ -427,7 +427,7 @@ export function registerDashboardShell(
     pi.registerCommand(name, {
       ...command,
       description: `Open the shared dashboard focused on ${name}`,
-      handler: async (args, ctx) => {
+      handler: async (_args, ctx) => {
         if (ctx.mode !== "tui") {
           ctx.ui.notify(`/${name} requires interactive TUI mode.`, "error");
           return;
