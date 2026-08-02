@@ -29,8 +29,10 @@ export interface DashboardInput {
   readonly start?: number;
   readonly primaryTab?: "tasks" | "subagents" | "workspaces";
   readonly stateTab?: "current" | "archived";
-  /** Transient feedback, such as why an abort failed. */
+  /** Transient action feedback, rendered separately from empty-state truth. */
   readonly notice?: string;
+  readonly emptyMessage?: string;
+  readonly hint?: string;
 }
 
 export const DASHBOARD_TITLE = "Subagents";
@@ -87,7 +89,12 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
         };
       })
     : capacity > 0
-      ? [{ text: truncateToWidth(DASHBOARD_EMPTY, inner, "..."), tone: "muted" }]
+      ? [
+          {
+            text: truncateToWidth(input.emptyMessage ?? DASHBOARD_EMPTY, inner, "..."),
+            tone: "muted",
+          },
+        ]
       : [];
 
   const primary = input.primaryTab ?? "subagents";
@@ -106,7 +113,10 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
           },
         ]
       : []),
-    { text: frame(truncateToWidth(DASHBOARD_HINT, inner, "..."), inner), tone: "muted" },
+    {
+      text: frame(truncateToWidth(input.hint ?? DASHBOARD_HINT, inner, "..."), inner),
+      tone: "muted",
+    },
     { text: bottomBorder(input.width), tone: "border" },
   ];
 }

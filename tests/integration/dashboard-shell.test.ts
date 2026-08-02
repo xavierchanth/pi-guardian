@@ -24,11 +24,12 @@ function snapshot(id: string): SubagentSnapshot {
   });
 }
 
-function harness(initial: SubagentSnapshot[] = []) {
+function harness(initial: SubagentSnapshot[] = [], terminalRows = 10) {
   let rows = initial;
   let listener: ((snapshot: SubagentSnapshot) => void) | undefined;
   let renders = 0;
   let resolveCancel: (() => void) | undefined;
+  let cancelCalls = 0;
   const agents: DashboardAgents = {
     list: () => rows,
     subscribe: (next) => {
@@ -37,10 +38,12 @@ function harness(initial: SubagentSnapshot[] = []) {
         listener = undefined;
       };
     },
-    cancel: () =>
-      new Promise<void>((resolve) => {
+    cancel: () => {
+      cancelCalls++;
+      return new Promise<void>((resolve) => {
         resolveCancel = resolve;
-      }),
+      });
+    },
   };
   const tui = {
     requestRender: () => {
@@ -48,7 +51,13 @@ function harness(initial: SubagentSnapshot[] = []) {
     },
   } as unknown as TUI;
   const theme = { fg: (_tone: string, text: string) => text } as unknown as Theme;
-  const view = new SubagentDashboard({ agents, tui, theme, close: () => {}, readRows: () => 10 });
+  const view = new SubagentDashboard({
+    agents,
+    tui,
+    theme,
+    close: () => {},
+    readRows: () => terminalRows,
+  });
   return {
     view,
     lines: () => view.render(80),
@@ -59,6 +68,7 @@ function harness(initial: SubagentSnapshot[] = []) {
     },
     resolveCancel: () => resolveCancel?.(),
     subscribed: () => Boolean(listener),
+    cancelCalls: () => cancelCalls,
   };
 }
 
@@ -83,22 +93,88 @@ test("subagents are synchronous and unpaged while rendering within overlay margi
   assert.ok(h.lines().some((line) => line.includes("three")));
   h.view.handleInput("\t");
   const archived = h.lines().join("\n");
-  assert.match(archived, /Archived subagents are not available yet/);
+  assert.match(archived, /Archived subagent data is not available/);
   assert.doesNotMatch(archived, /three/);
 });
 
-test("unified action map enforces axes, active bindings, and input precedence", () => {
-  assert.equal(resolveAction("l", "normal", "workspaces"), "primaryNext");
-  assert.equal(resolveAction("h", "normal", "tasks"), "primaryPrevious");
-  assert.equal(resolveAction("\t", "normal", "subagents"), "stateNext");
-  assert.equal(resolveAction("[", "normal", "subagents"), undefined);
-  assert.equal(resolveAction("]", "normal", "subagents"), undefined);
-  assert.equal(resolveAction("/", "normal", "tasks"), "search");
-  assert.equal(resolveAction("i", "normal", "subagents"), "inspectMode");
-  assert.equal(resolveAction("p", "normal", "workspaces"), "marks");
-  assert.equal(resolveAction("w", "normal", "tasks"), "workspace");
-  assert.equal(resolveAction("x", "search", "subagents"), undefined);
-  assert.equal(resolveAction("\x1b", "search", "subagents"), "close");
+test("§4.8 dispatch table is exhaustive, contextual, and mode-first", () => {
+  const expected = {
+    tasks: {
+      a: "actionMenu",
+      x: "cancel",
+      p: "taskImportRevision",
+      e: "archiveRestore",
+      v: "mark",
+      V: "markAll",
+      s: "jumpSubagent",
+      w: "jumpWorkspace",
+      i: "taskEdit",
+      "\r": "taskEdit",
+    },
+    subagents: {
+      a: "actionMenu",
+      x: "cancel",
+      p: undefined,
+      e: "archiveRestore",
+      v: "mark",
+      V: "markAll",
+      s: undefined,
+      w: "jumpWorkspace",
+      i: "subagentDetail",
+      "\r": "subagentDetail",
+    },
+    workspaces: {
+      a: "actionMenu",
+      x: "cancel",
+      p: undefined,
+      e: undefined,
+      v: "mark",
+      V: "markAll",
+      s: "jumpSubagent",
+      w: undefined,
+      i: "workspaceCustodyDetail",
+      "\r": "workspaceCustodyDetail",
+    },
+  } as const;
+  for (const [tab, bindings] of Object.entries(expected))
+    for (const [key, action] of Object.entries(bindings))
+      assert.equal(
+        resolveAction(key, "normal", tab as keyof typeof expected),
+        action,
+        `${tab}:${key}`,
+      );
+  for (const tab of ["tasks", "subagents", "workspaces"] as const) {
+    assert.equal(resolveAction("/", "normal", tab), "search");
+    assert.equal(resolveAction("[", "normal", tab), undefined);
+    assert.equal(resolveAction("]", "normal", tab), undefined);
+    assert.equal(resolveAction("x", "search", tab), undefined);
+    assert.equal(resolveAction("\x1b", "search", tab), "close");
+    assert.equal(resolveAction("h", "detail", tab), undefined);
+    assert.equal(resolveAction("l", "detail", tab), undefined);
+    assert.equal(resolveAction("\x1b[6~", "normal", tab), "pageDown");
+  }
+});
+
+test("row budget holds for list, notice, and detail at every terminal height", () => {
+  for (let rows = 0; rows <= 60; rows++) {
+    const limit = Math.max(0, rows - OVERLAY_MARGIN * 2);
+    const list = harness([snapshot("one"), snapshot("two")], rows);
+    assert.ok(list.lines().length <= limit, `list at ${rows}`);
+    list.view.handleInput("a");
+    assert.ok(list.lines().length <= limit, `notice at ${rows}`);
+    const detail = harness([snapshot("one")], rows);
+    detail.view.handleInput("\r");
+    assert.ok(detail.lines().length <= limit, `detail at ${rows}`);
+  }
+});
+
+test("action menu never invokes subagent cancellation and unavailable actions are named", () => {
+  const h = harness([{ ...snapshot("run"), status: "running" as const }]);
+  h.view.handleInput("a");
+  assert.equal(h.cancelCalls(), 0);
+  assert.match(h.lines().join("\n"), /Action menu is not available on Subagents yet/);
+  h.view.handleInput("x");
+  assert.equal(h.cancelCalls(), 1);
 });
 
 test("primary tab navigation never wraps at either boundary", () => {

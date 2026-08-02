@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -35,6 +35,16 @@ test("thin terminal shell receives rows through the composition facade", () => {
   const facade = readFileSync(join(root, "packages/pi-tai/pi-tai.ts"), "utf8");
   assert.match(facade, /registerDashboardShell\(api, resolveAgents, terminalRows\)/);
   assert.match(facade, /registerAgents/);
+});
+
+test("superseded dashboard and retired command/bindings are absent", () => {
+  assert.equal(
+    existsSync(join(root, "packages/pi-tai/src/core/subagents/dashboard-view.ts")),
+    false,
+  );
+  const source = readFileSync(join(root, "packages/pi-tai/src/terminal/dashboard/view.ts"), "utf8");
+  assert.doesNotMatch(source, /register\(["']dashboard["']/);
+  assert.doesNotMatch(source, /matchesKey\(data, ["'][\[\]]["']\)/);
 });
 
 test("terminal budget is read only by the terminal adapter with a documented fallback", () => {

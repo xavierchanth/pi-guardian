@@ -49,14 +49,19 @@ export type DashboardAction =
   | "primaryPrevious"
   | "stateNext"
   | "statePrevious"
-  | "inspect"
-  | "abort"
-  | "edit"
+  | "taskEdit"
+  | "subagentDetail"
+  | "workspaceCustodyDetail"
+  | "actionMenu"
+  | "cancel"
+  | "taskImportRevision"
+  | "archiveRestore"
+  | "mark"
+  | "markAll"
+  | "jumpSubagent"
+  | "jumpWorkspace"
   | "search"
-  | "inspectMode"
-  | "marks"
   | "help"
-  | "workspace"
   | "down"
   | "up"
   | "pageDown"
@@ -64,11 +69,11 @@ export type DashboardAction =
   | "top"
   | "bottom";
 
-/** Pure unified binding table. Input modes consume text before global bindings. */
+/** Pure §4.8 contextual dispatch table. Input modes consume text first. */
 export function resolveAction(
   data: string,
   mode: DashboardInputMode,
-  _tab: DashboardPrimaryTab,
+  tab: DashboardPrimaryTab,
 ): DashboardAction | undefined {
   if (mode === "search" || mode === "marks")
     return matchesKey(data, "escape") ? "close" : undefined;
@@ -76,26 +81,57 @@ export function resolveAction(
   if (matchesKey(data, "q") || matchesKey(data, "ctrl+c")) return "quit";
   if (matchesKey(data, "j") || matchesKey(data, "down")) return "down";
   if (matchesKey(data, "k") || matchesKey(data, "up")) return "up";
-  if (mode === "detail") {
-    if (matchesKey(data, "ctrl+d")) return "pageDown";
-    if (matchesKey(data, "ctrl+u")) return "pageUp";
-    if (matchesKey(data, "g")) return "top";
-    if (matchesKey(data, "shift+g") || data === "G") return "bottom";
-  }
-  if (matchesKey(data, "l") || matchesKey(data, "right")) return "primaryNext";
-  if (matchesKey(data, "h") || matchesKey(data, "left")) return "primaryPrevious";
+  if (matchesKey(data, "ctrl+d") || data === "\x1b[6~") return "pageDown";
+  if (matchesKey(data, "ctrl+u") || data === "\x1b[5~") return "pageUp";
+  if (matchesKey(data, "g")) return "top";
+  if (matchesKey(data, "shift+g") || data === "G") return "bottom";
+  if (mode !== "detail" && (matchesKey(data, "l") || matchesKey(data, "right")))
+    return "primaryNext";
+  if (mode !== "detail" && (matchesKey(data, "h") || matchesKey(data, "left")))
+    return "primaryPrevious";
   if (matchesKey(data, "tab")) return "stateNext";
   if (matchesKey(data, "shift+tab")) return "statePrevious";
-  if (matchesKey(data, "enter")) return "inspect";
-  if (matchesKey(data, "x")) return "abort";
-  if (matchesKey(data, "a")) return "abort";
-  if (matchesKey(data, "e")) return "edit";
+  if (matchesKey(data, "enter") || matchesKey(data, "i"))
+    return tab === "tasks"
+      ? "taskEdit"
+      : tab === "subagents"
+        ? "subagentDetail"
+        : "workspaceCustodyDetail";
+  if (matchesKey(data, "a")) return "actionMenu";
+  if (matchesKey(data, "x")) return "cancel";
+  if (matchesKey(data, "p")) return tab === "tasks" ? "taskImportRevision" : undefined;
+  if (matchesKey(data, "e")) return tab === "workspaces" ? undefined : "archiveRestore";
+  if (matchesKey(data, "v")) return "mark";
+  if (data === "V") return "markAll";
+  if (matchesKey(data, "s")) return tab === "subagents" ? undefined : "jumpSubagent";
+  if (matchesKey(data, "w")) return tab === "workspaces" ? undefined : "jumpWorkspace";
   if (matchesKey(data, "/")) return "search";
-  if (matchesKey(data, "i")) return "inspectMode";
-  if (matchesKey(data, "p")) return "marks";
   if (matchesKey(data, "?")) return "help";
-  if (matchesKey(data, "w")) return "workspace";
   return undefined;
+}
+
+function title(tab: DashboardPrimaryTab): string {
+  return tab[0]!.toUpperCase() + tab.slice(1);
+}
+
+function footerHint(tab: DashboardPrimaryTab): string {
+  const contextual = tab === "subagents" ? " · Enter inspect · x cancel" : "";
+  return `h/l tabs · Tab current/archived · j/k move${contextual} · Esc close`;
+}
+
+function unavailableNotice(action: DashboardAction, tab: DashboardPrimaryTab): string {
+  const names: Partial<Record<DashboardAction, string>> = {
+    actionMenu: "Action menu",
+    taskImportRevision: "Fixed task revision import",
+    archiveRestore: "Archive/restore",
+    mark: "Mark",
+    markAll: "Mark all",
+    jumpSubagent: "Jump to subagent",
+    jumpWorkspace: "Jump to workspace",
+    search: "Search",
+    help: "Help",
+  };
+  return `${names[action] ?? action} is not available on ${title(tab)} yet.`;
 }
 
 const TONE_COLOR: Record<DashboardTone, "border" | "accent" | "text" | "muted" | "error"> = {
@@ -145,6 +181,12 @@ export class SubagentDashboard {
 
   focus(tab: DashboardPrimaryTab): void {
     this.primaryTab = tab;
+    this.detailId = undefined;
+    this.notice = undefined;
+    this.viewportStart = 0;
+    this.selectedId = undefined;
+    this.selectedIndex = 0;
+    this.reload();
   }
 
   handleInput(data: string): void {
@@ -157,39 +199,40 @@ export class SubagentDashboard {
         this.requestRender();
       } else this.close();
     } else if (action === "quit") this.close();
-    else if (action === "abort") {
+    else if (action === "cancel") {
       if (this.primaryTab === "subagents") this.abort();
+      else this.setNotice(`Cancel is not available on ${title(this.primaryTab)} yet.`);
     } else if (action === "primaryNext" || action === "primaryPrevious") {
       const index = PRIMARY_TAB_ORDER.indexOf(this.primaryTab);
       const next = index + (action === "primaryNext" ? 1 : -1);
-      if (next >= 0 && next < PRIMARY_TAB_ORDER.length) {
-        this.primaryTab = PRIMARY_TAB_ORDER[next]!;
-        this.reload();
-      }
+      if (next >= 0 && next < PRIMARY_TAB_ORDER.length) this.focus(PRIMARY_TAB_ORDER[next]!);
     } else if (action === "stateNext" || action === "statePrevious") {
       const index = STATE_TAB_ORDER.indexOf(this.stateTab);
       this.stateTab = STATE_TAB_ORDER[(index + (action === "stateNext" ? 1 : -1) + 2) % 2]!;
-      this.notice =
-        this.stateTab === "archived" ? "Archived subagents are not available yet." : undefined;
+      this.notice = undefined;
+      this.viewportStart = 0;
       this.reload();
-    } else if (action === "inspect") {
-      const target = this.snapshots.find((snapshot) => snapshot.id === this.selectedId);
-      if (target && this.primaryTab === "subagents") {
+    } else if (action === "subagentDetail") {
+      const target = this.snapshots.find((row) => row.id === this.selectedId);
+      if (target) {
         this.detailId = target.id;
         this.detailScroll = 0;
         this.notice = undefined;
         this.requestRender();
-      }
-    } else if (action === "down") this.detailId ? this.scroll("down") : this.move(1);
+      } else this.setNotice("Subagent detail is unavailable because no subagent is selected.");
+    } else if (action === "taskEdit")
+      this.setNotice("Task editing is unavailable until the Tasks adapter is connected.");
+    else if (action === "workspaceCustodyDetail")
+      this.setNotice(
+        "Workspace custody detail is unavailable until the Workspaces adapter is connected.",
+      );
+    else if (action === "down") this.detailId ? this.scroll("down") : this.move(1);
     else if (action === "up") this.detailId ? this.scroll("up") : this.move(-1);
-    else if (action === "pageDown") this.scroll("pageDown");
-    else if (action === "pageUp") this.scroll("pageUp");
-    else if (action === "top") this.scroll("top");
-    else if (action === "bottom") this.scroll("bottom");
-    else if (action === "workspace")
-      this.setNotice(`Workspace jump is not available for ${this.primaryTab} yet.`);
-    else if (["search", "inspectMode", "marks", "help"].includes(action))
-      this.setNotice(`${action} is not available yet.`);
+    else if (["pageDown", "pageUp", "top", "bottom"].includes(action))
+      this.detailId
+        ? this.scroll(action as "pageDown" | "pageUp" | "top" | "bottom")
+        : this.navigateList(action as "pageDown" | "pageUp" | "top" | "bottom");
+    else this.setNotice(unavailableNotice(action, this.primaryTab));
   }
 
   render(width: number): string[] {
@@ -216,14 +259,16 @@ export class SubagentDashboard {
         .slice(0, rowBudget)
         .map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
     const ids = this.snapshots.map((snapshot) => snapshot.id);
-    const placeholder =
+    const emptyMessage =
       this.primaryTab === "subagents"
-        ? this.notice
-        : `${this.primaryTab === "tasks" ? "Tasks" : "Workspaces"} are not available yet.`;
+        ? this.stateTab === "archived"
+          ? "Archived subagent data is not available from the synchronous session source."
+          : undefined
+        : `${title(this.primaryTab)} data is unavailable until its adapter is connected.`;
     const viewport = ensureVisible(
       ids,
       this.selectedId,
-      dashboardBodyCapacity(rowBudget, Boolean(placeholder)),
+      dashboardBodyCapacity(rowBudget, Boolean(this.notice)),
       this.viewportStart,
     );
     this.viewportStart = viewport.start;
@@ -236,8 +281,12 @@ export class SubagentDashboard {
       start: viewport.start,
       primaryTab: this.primaryTab,
       stateTab: this.stateTab,
-      ...(placeholder ? { notice: placeholder } : {}),
-    }).map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+      ...(this.notice ? { notice: this.notice } : {}),
+      ...(emptyMessage ? { emptyMessage } : {}),
+      hint: footerHint(this.primaryTab),
+    })
+      .slice(0, rowBudget)
+      .map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
   }
 
   invalidate(): void {}
@@ -253,6 +302,31 @@ export class SubagentDashboard {
     const ids = this.snapshots.map((snapshot) => snapshot.id);
     this.selectedId = moveSelection(ids, this.selectedId, delta);
     this.selectedIndex = Math.max(0, ids.indexOf(this.selectedId ?? ""));
+    this.requestRender();
+  }
+
+  private navigateList(command: "pageDown" | "pageUp" | "top" | "bottom"): void {
+    const ids = this.snapshots.map((row) => row.id);
+    if (!ids.length) return;
+    const capacity = Math.max(
+      1,
+      dashboardBodyCapacity(
+        Math.max(0, this.readRows(this.tui) - OVERLAY_MARGIN * 2),
+        Boolean(this.notice),
+      ),
+    );
+    const current = Math.max(0, ids.indexOf(this.selectedId ?? ""));
+    const next =
+      command === "top"
+        ? 0
+        : command === "bottom"
+          ? ids.length - 1
+          : Math.min(
+              ids.length - 1,
+              Math.max(0, current + (command === "pageDown" ? capacity : -capacity)),
+            );
+    this.selectedId = ids[next];
+    this.selectedIndex = next;
     this.requestRender();
   }
 
@@ -354,7 +428,10 @@ export function registerDashboardShell(
       ...command,
       description: `Open the shared dashboard focused on ${name}`,
       handler: async (args, ctx) => {
-        if (ctx.mode !== "tui") return command.handler(args, ctx);
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify(`/${name} requires interactive TUI mode.`, "error");
+          return;
+        }
         const agents = resolveAgents();
         await ctx.ui.custom<void>(
           (tui, theme, _keybindings, done) => {
