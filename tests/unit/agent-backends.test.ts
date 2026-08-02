@@ -137,6 +137,56 @@ describe("pi backend", () => {
     child.dispose();
   });
 
+  it("isolates subscriptions and settlement across in-place generations", async () => {
+    const subscribers: Array<(event: unknown) => void> = [];
+    const unsubscribed: number[] = [];
+    const idleResolvers: Array<() => void> = [];
+    let prompts = 0;
+    const session = {
+      isStreaming: false,
+      prompt: async () => void prompts++,
+      waitForIdle: () =>
+        new Promise<void>((resolve) => {
+          idleResolvers.push(resolve);
+        }),
+      subscribe: (subscriber: (event: unknown) => void) => {
+        const index = subscribers.push(subscriber) - 1;
+        return () => void unsubscribed.push(index);
+      },
+    };
+    const backend = new PiBackend({
+      config: {} as never,
+      modelRegistry: {} as never,
+      stateRoot: "/tmp/state",
+      factory: {
+        create: async () =>
+          ({ session, sessionFile: "/tmp/session.jsonl", async abort() {}, dispose() {} }) as never,
+      },
+    });
+
+    const child = await backend.spawn(task());
+    const oldEvents = child.events;
+    await child.continueInPlace?.("second");
+    const newEvents = child.events;
+    assert.notEqual(oldEvents, newEvents);
+
+    idleResolvers[0]?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    subscribers[0]?.({ type: "message_end", message: { role: "assistant", content: "old" } });
+    subscribers[1]?.({ type: "message_end", message: { role: "assistant", content: "new" } });
+    idleResolvers[1]?.();
+    const continuation = await collect(newEvents);
+
+    assert.equal(prompts, 2);
+    assert.ok(unsubscribed.includes(0), "the old completion only unsubscribes its own generation");
+    assert.deepEqual(
+      continuation.filter((event) => event.type === "assistant_message"),
+      [{ type: "assistant_message", text: "new" }],
+    );
+    assert.equal(continuation.at(-1)?.type, "run_settled");
+    child.dispose();
+  });
+
   it("rejects an idle send as not delivered without prompting", async () => {
     const prompts: unknown[][] = [];
     const session = {

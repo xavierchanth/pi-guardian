@@ -13,6 +13,7 @@ import {
   type CapabilityName,
   emptySnapshot,
   type SpawnTask,
+  type SubagentEvent,
   type SubagentSnapshot,
 } from "./domain.ts";
 import { foldLifecycle, type SubagentLifecycleStore } from "./lifecycle.ts";
@@ -149,6 +150,7 @@ export class SubagentManager {
    * cannot both observe a free slot and race past the cap.
    */
   private reserved = 0;
+  private readonly reservations = new Set<object>();
   private sequence = 0;
   private lifecycleStore?: SubagentLifecycleStore;
   private generation = 1;
@@ -286,7 +288,8 @@ export class SubagentManager {
 
   async spawn(request: SpawnRequest): Promise<SubagentSnapshot> {
     this.assertAdmission();
-    this.reserved += 1;
+    const runToken = {};
+    this.reserve(runToken);
     this.pendingDurable += 1;
     let durableCommitted = false;
     const id = `sa-${++this.sequence}`;
@@ -349,7 +352,7 @@ export class SubagentManager {
         generation,
         sequence: this.sequence,
         sendChain: Promise.resolve(),
-        runToken: {},
+        runToken,
         closed: false,
         restored: false,
         custodyResolved: request.workspaceId === undefined,
@@ -398,14 +401,14 @@ export class SubagentManager {
             .catch((error) => this.recordPersistenceError(error));
         }
       } catch (error) {
-        this.finish(entry, { type: "backend_error", message: describe(error) });
+        this.finish(entry, { type: "backend_error", message: describe(error) }, entry.runToken);
         throw error;
       }
-      void this.pump(entry, entry.session, entry.runToken);
+      void this.pump(entry, entry.session, entry.runToken, entry.session.events);
       return entry.snapshot;
     } catch (error) {
       // Once an entry exists, finish() owns release of the running reservation.
-      if (!this.entries.has(id)) this.reserved = Math.max(0, this.reserved - 1);
+      if (!this.entries.has(id)) this.release(runToken);
       if (!durableCommitted) this.pendingDurable = Math.max(0, this.pendingDurable - 1);
       throw error;
     }
@@ -545,7 +548,7 @@ export class SubagentManager {
           throw new Error(
             `Subagent ${id} settled before ${operation} could be delivered; it was not continued.`,
           );
-        await this.continueSettled(entry, text);
+        await this.continueSettled(entry, text, true);
         return { operation: "continue", settlementRace: true };
       }
     }
@@ -557,7 +560,10 @@ export class SubagentManager {
     return { operation: "continue", settlementRace: false };
   }
 
-  private async continueSettled(entry: Entry, text: string): Promise<void> {
+  private async continueSettled(entry: Entry, text: string, settlementRace = false): Promise<void> {
+    // A settled refusal proves the old run no longer needs its slot even while
+    // its terminal frame remains queued. Release is idempotent across races.
+    if (settlementRace) this.release(entry.runToken);
     const how = entry.backend.capabilities.settledContinuation;
     if (how === "in-place" && entry.session?.continueInPlace) {
       await this.continueInPlace(entry, text);
@@ -581,7 +587,8 @@ export class SubagentManager {
         "running",
         `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
       );
-    this.reserved += 1;
+    const runToken = {};
+    this.reserve(runToken);
     const previous = entry.snapshot;
     try {
       // Persist the reservation before exposing it. Unlike a respawn, the
@@ -602,7 +609,6 @@ export class SubagentManager {
       const settled = new Promise<SubagentSnapshot>((resolve) => {
         resolveSettled = resolve;
       });
-      const runToken = {};
       Object.assign(entry, { settled, resolveSettled, runToken });
       this.delivery.consume(entry.snapshot.id);
       this.update(entry, {
@@ -617,11 +623,11 @@ export class SubagentManager {
       // Attach the consumer before yielding to completion. EventChannel buffers
       // synchronous run_started frames, while runToken prevents an old pump
       // from settling this new generation.
-      void this.pump(entry, entry.session, runToken);
+      void this.pump(entry, entry.session, runToken, entry.session.events);
       await accepted;
     } catch (error) {
       if (entry.snapshot.status === "running") this.update(entry, previous);
-      this.reserved = Math.max(0, this.reserved - 1);
+      this.release(runToken);
       throw error;
     }
   }
@@ -634,7 +640,8 @@ export class SubagentManager {
         "running",
         `At most ${this.maxRunning} subagents may run at once (${this.reserved} running); wait for one to finish, or abort one from /subagents.`,
       );
-    this.reserved += 1;
+    const runToken = {};
+    this.reserve(runToken);
     const task: SpawnTask = { ...entry.task, prompt: text, resumeToken };
     let session: SubagentSession | undefined;
     try {
@@ -659,7 +666,7 @@ export class SubagentManager {
       if (entry.closed) throw new Error(`Subagent ${entry.snapshot.id} closed while resuming.`);
     } catch (error) {
       session?.dispose();
-      this.reserved = Math.max(0, this.reserved - 1);
+      this.release(runToken);
       throw error;
     }
     entry.task = task;
@@ -670,7 +677,7 @@ export class SubagentManager {
     const settled = new Promise<SubagentSnapshot>((resolve) => {
       resolveSettled = resolve;
     });
-    Object.assign(entry, { settled, resolveSettled, runToken: {} });
+    Object.assign(entry, { settled, resolveSettled, runToken });
     this.delivery.consume(entry.snapshot.id);
     this.update(entry, {
       ...entry.snapshot,
@@ -679,7 +686,7 @@ export class SubagentManager {
       liveTools: [],
       deliveryPending: false,
     });
-    void this.pump(entry, session, entry.runToken);
+    void this.pump(entry, session, runToken, session.events);
   }
 
   async cancel(ids: readonly string[]): Promise<SubagentSnapshot[]> {
@@ -700,7 +707,7 @@ export class SubagentManager {
       } catch {
         // A backend that cannot interrupt cleanly still settles below.
       }
-      this.finish(entry, { type: "run_settled", outcome: "interrupted" });
+      this.finish(entry, { type: "run_settled", outcome: "interrupted" }, entry.runToken);
       cancelled.push(entry.snapshot);
     }
     return cancelled;
@@ -718,15 +725,21 @@ export class SubagentManager {
     }
     this.entries.clear();
     this.delivery.clear();
+    this.reservations.clear();
     this.reserved = 0;
   }
 
-  private async pump(entry: Entry, session: SubagentSession, token: object): Promise<void> {
+  private async pump(
+    entry: Entry,
+    session: SubagentSession,
+    token: object,
+    events: AsyncIterable<SubagentEvent>,
+  ): Promise<void> {
     try {
-      for await (const event of session.events) {
+      for await (const event of events) {
         if (entry.closed || entry.session !== session || entry.runToken !== token) return;
         if (event.type === "run_settled" || event.type === "backend_error") {
-          this.finish(entry, event);
+          this.finish(entry, event, token);
           return;
         }
         this.update(entry, applyEvent(entry.snapshot, event, this.clock()));
@@ -734,18 +747,35 @@ export class SubagentManager {
       // The stream ended without a terminal event; treat that as a backend fault
       // rather than leaving the entry running forever.
       if (!entry.closed && entry.session === session && entry.snapshot.status === "running") {
-        this.finish(entry, {
-          type: "backend_error",
-          message: "Backend closed the event stream without settling.",
-        });
+        this.finish(
+          entry,
+          {
+            type: "backend_error",
+            message: "Backend closed the event stream without settling.",
+          },
+          token,
+        );
       }
     } catch (error) {
-      this.finish(entry, { type: "backend_error", message: describe(error) });
+      this.finish(entry, { type: "backend_error", message: describe(error) }, token);
     }
   }
 
-  private finish(entry: Entry, event: Parameters<typeof applyEvent>[1]): void {
-    if (entry.snapshot.status !== "running") return;
+  private reserve(token: object): void {
+    this.reservations.add(token);
+    this.reserved = this.reservations.size;
+  }
+
+  private release(token: object): void {
+    this.reservations.delete(token);
+    this.reserved = this.reservations.size;
+  }
+
+  private finish(entry: Entry, event: Parameters<typeof applyEvent>[1], token: object): void {
+    if (entry.runToken !== token || entry.snapshot.status !== "running") {
+      this.release(token);
+      return;
+    }
     this.update(entry, applyEvent(entry.snapshot, event, this.clock()));
     const disposition =
       event.type === "run_settled" && event.outcome === "completed"
@@ -763,7 +793,7 @@ export class SubagentManager {
         at: this.clock(),
       })
       .catch((error) => this.recordPersistenceError(error));
-    this.reserved = Math.max(0, this.reserved - 1);
+    this.release(token);
     const snapshot = entry.snapshot;
     // Defer before resolving: a `wait` that is already pending must be able to
     // consume this result, which it can only do once it exists.

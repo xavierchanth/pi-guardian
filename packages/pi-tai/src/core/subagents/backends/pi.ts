@@ -89,50 +89,60 @@ export class PiBackend implements SubagentBackend {
 
 class PiSubagentSession implements SubagentSession {
   get events(): AsyncIterable<SubagentEvent> {
-    return this.channel.events;
+    return this.active.channel.events;
   }
   readonly sessionFile: string;
   private readonly handle: PrivateChildSessionHandle;
-  private channel = new EventChannel();
-  private unsubscribe: () => void = () => {};
-  /** Length of the streaming text already emitted, so deltas stay incremental. */
-  private streamed = 0;
-  private lastAssistantText = "";
+  private active: PiRun;
   private disposed = false;
 
   constructor(handle: PrivateChildSessionHandle, task: SpawnTask) {
     this.handle = handle;
     this.sessionFile = handle.sessionFile;
-    this.unsubscribe = handle.session.subscribe((event) => this.translate(event));
-    this.channel.push({ type: "run_started" });
-    this.channel.push({
-      type: "meta",
-      ...(task.model ? { model: task.model } : {}),
-    });
-    void this.run(task);
+    this.active = this.startRun(task.model, true);
+    void this.run(this.active, task.prompt, task.signal);
   }
 
-  private async run(task: SpawnTask): Promise<void> {
+  private startRun(model?: string, emitMeta = false): PiRun {
+    const run: PiRun = {
+      channel: new EventChannel(),
+      unsubscribe: () => {},
+      streamed: 0,
+      lastAssistantText: "",
+      active: true,
+    };
+    run.unsubscribe = this.handle.session.subscribe((event) => this.translate(run, event));
+    run.channel.push({ type: "run_started" });
+    if (emitMeta) run.channel.push({ type: "meta", ...(model ? { model } : {}) });
+    return run;
+  }
+
+  private async run(run: PiRun, text: string, signal?: AbortSignal): Promise<void> {
     try {
-      await this.handle.session.prompt(task.prompt);
+      await this.handle.session.prompt(text);
       await this.handle.session.waitForIdle();
-      this.channel.push({
+      if (!run.active) return;
+      run.channel.push({
         type: "run_settled",
-        outcome: task.signal?.aborted ? "interrupted" : "completed",
-        text: this.lastAssistantText,
+        outcome: signal?.aborted || this.disposed ? "interrupted" : "completed",
+        text: run.lastAssistantText,
       });
     } catch (error) {
-      this.channel.push({
+      if (!run.active) return;
+      run.channel.push({
         type: "run_settled",
-        outcome: "failed",
+        outcome: this.disposed ? "interrupted" : "failed",
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      this.unsubscribe();
+      // A completion may belong to an obsolete generation. It may only tear
+      // down its own immutable subscription, never a successor's.
+      run.unsubscribe();
     }
   }
 
-  private translate(event: unknown): void {
+  private translate(run: PiRun, event: unknown): void {
+    if (!run.active) return;
     const frame = event as {
       type?: string;
       message?: { role?: string; usage?: Record<string, number> };
@@ -143,41 +153,40 @@ class PiSubagentSession implements SubagentSession {
     switch (frame.type) {
       case "message_update": {
         const partial = assistantText(frame);
-        if (partial === undefined || partial.length <= this.streamed) return;
-        this.channel.push({ type: "assistant_delta", text: partial.slice(this.streamed) });
-        this.streamed = partial.length;
+        if (partial === undefined || partial.length <= run.streamed) return;
+        run.channel.push({ type: "assistant_delta", text: partial.slice(run.streamed) });
+        run.streamed = partial.length;
         return;
       }
       case "message_end":
       case "turn_end": {
         if (frame.message?.role !== "assistant") return;
         const text = assistantText(frame);
-        this.streamed = 0;
+        run.streamed = 0;
         if (text) {
-          this.lastAssistantText = text;
-          this.channel.push({ type: "assistant_message", text });
+          run.lastAssistantText = text;
+          run.channel.push({ type: "assistant_message", text });
         }
         const usage = frame.message.usage;
-        if (usage) {
-          this.channel.push({
+        if (usage)
+          run.channel.push({
             type: "usage",
             inputTokens:
               numeric(usage.input) + numeric(usage.cacheRead) + numeric(usage.cacheWrite),
             outputTokens: numeric(usage.output),
             ...(usage.contextWindow ? { contextWindow: usage.contextWindow } : {}),
           });
-        }
         return;
       }
       case "tool_execution_start":
-        this.channel.push({
+        run.channel.push({
           type: "tool_start",
           toolId: frame.toolCallId ?? frame.toolName ?? "tool",
           name: frame.toolName ?? "tool",
         });
         return;
       case "tool_execution_end":
-        this.channel.push({
+        run.channel.push({
           type: "tool_end",
           toolId: frame.toolCallId ?? frame.toolName ?? "tool",
           ok: !frame.isError,
@@ -195,43 +204,17 @@ class PiSubagentSession implements SubagentSession {
       return Promise.reject(
         new SendNotDeliveredError("Pi child is still streaming.", "precondition"),
       );
-    this.unsubscribe();
-    this.channel = new EventChannel();
-    this.streamed = 0;
-    this.lastAssistantText = "";
-    this.unsubscribe = this.handle.session.subscribe((event) => this.translate(event));
-    this.channel.push({ type: "run_started" });
-    // Acceptance and completion are deliberately separate. The manager must be
-    // able to expose and pump the new run before prompt() eventually settles.
-    void this.runContinuation(text);
+    const previous = this.active;
+    previous.active = false;
+    previous.unsubscribe();
+    const run = this.startRun();
+    this.active = run;
+    void this.run(run, text);
     return Promise.resolve();
-  }
-
-  private async runContinuation(text: string): Promise<void> {
-    try {
-      await this.handle.session.prompt(text);
-      await this.handle.session.waitForIdle();
-      this.channel.push({
-        type: "run_settled",
-        outcome: "completed",
-        text: this.lastAssistantText,
-      });
-    } catch (error) {
-      this.channel.push({
-        type: "run_settled",
-        outcome: this.disposed ? "interrupted" : "failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      this.unsubscribe();
-    }
   }
 
   async send(text: string, mode: "steer" | "followUp" | "continue"): Promise<void> {
     if (mode === "continue") throw new Error("Pi does not support continuing a settled subagent.");
-    // AgentSession starts a new, invisible turn when prompt() is called idle.
-    // Refuse before handing it the text, so callers may safely decide whether
-    // an explicit continuation is appropriate.
     if (!this.handle.session.isStreaming)
       throw new SendNotDeliveredError(
         `Pi child is no longer streaming; ${mode} was not delivered.`,
@@ -247,10 +230,19 @@ class PiSubagentSession implements SubagentSession {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.unsubscribe();
-    this.channel.close();
+    this.active.active = false;
+    this.active.unsubscribe();
+    this.active.channel.close();
     this.handle.dispose();
   }
+}
+
+interface PiRun {
+  readonly channel: EventChannel;
+  unsubscribe: () => void;
+  streamed: number;
+  lastAssistantText: string;
+  active: boolean;
 }
 
 function assistantText(frame: unknown): string | undefined {
