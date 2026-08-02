@@ -22,7 +22,7 @@ let turnId = "turn-1";
 let started = false;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const frame = JSON.parse(line);
-  if (frame.method === "initialize") return send({ id: frame.id, result: { userAgent: "fake" } });
+  if (frame.method === "initialize") return send({ id: frame.id, result: { userAgent: "codex/0.145.0" } });
   if (frame.method === "modelProvider/capabilities/read") return send({ id: frame.id, result: {
     webSearch: scenario !== "no-web", imageGeneration: false, namespaceTools: false,
   } });
@@ -67,7 +67,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     notify("item/completed", { completedAtMs: 2, threadId: "thread-1", turnId, item: { id: "i2", type: "agentMessage", text: "finished the task" } });
     if (scenario === "failure") {
       notify("turn/completed", { threadId: "thread-1", turn: { id: turnId, status: "failed", items: [], error: { message: "model unavailable" } } });
-    } else if (scenario !== "hang") {
+    } else if (scenario !== "hang" && !scenario.startsWith("steer-")) {
       notify("turn/completed", { threadId: "thread-1", turn: { id: turnId, status: "completed", items: [] } });
     }
     return;
@@ -78,7 +78,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (frame.method === "turn/steer") {
-    return send({ id: frame.id, result: {} });
+    process.stderr.write("steer=" + JSON.stringify(frame.params) + "\n");
+    if (scenario === "steer-missing") return send({ id: frame.id, error: { code: -32601, message: "secret turn-1" } });
+    if (scenario === "steer-settled") return send({ id: frame.id, error: { code: -32600, message: "secret turn-1", data: { codex_error_info: { NoActiveTurn: {} } } } });
+    if (scenario === "steer-invalid") return send({ id: frame.id, error: { code: -32600, message: "secret turn-1" } });
+    turnId = "turn-2";
+    return send({ id: frame.id, result: { turnId } });
   }
 });
 `;
@@ -285,23 +290,41 @@ describe("codex backend", () => {
     assert.equal(last?.type === "run_settled" && last.outcome, "interrupted");
   });
 
-  it("rejects a running send without starting a concurrent turn", async () => {
+  it("sends exact steer frames, consumes the returned turn id, and starts no second turn", async () => {
     process.env.FAKE_CODEX_SCENARIO = "hang";
-    const backend = new CodexBackend({ binary });
-
-    const session = await backend.spawn(task());
+    const session = await new CodexBackend({ binary }).spawn(task());
     const stderr = captureStderr(session);
-    await waitFor(() => true);
-    await assert.rejects(
-      session.send("also update the docs", "steer"),
-      /does not support steering/,
-    );
+    await session.send("first guidance", "steer");
+    await session.send("second guidance", "steer");
     await session.interrupt();
     await collect(session.events);
 
     const text = await stderr;
+    assert.match(
+      text,
+      /steer=.*"expectedTurnId":"turn-1".*"text":"first guidance".*"clientUserMessageId":"[0-9a-f-]{36}"/,
+    );
+    assert.match(text, /steer=.*"expectedTurnId":"turn-2".*"text":"second guidance"/);
     assert.doesNotMatch(text, /turn on thread-1:/);
   });
+
+  for (const [scenario, expected] of [
+    ["steer-missing", /does not support turn\/steer/],
+    ["steer-settled", /settled before steering/],
+    ["steer-invalid", /rejected the steering request/],
+  ] as const) {
+    it(`classifies and sanitizes ${scenario}`, async () => {
+      process.env.FAKE_CODEX_SCENARIO = scenario;
+      const session = await new CodexBackend({ binary }).spawn(task());
+      await assert.rejects(session.send("guidance", "steer"), (error: Error) => {
+        assert.match(error.message, expected);
+        assert.doesNotMatch(error.message, /secret|turn-1/);
+        return true;
+      });
+      await session.interrupt();
+      await collect(session.events);
+    });
+  }
 });
 
 /** Collects the fake server's stderr, which is how it reports what it received. */

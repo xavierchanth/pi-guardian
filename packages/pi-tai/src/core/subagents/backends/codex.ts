@@ -203,7 +203,7 @@ class CodexSubagentSession implements SubagentSession {
       if (this.task.model ?? this.options.defaultModel) {
         this.channel.push({ type: "meta", model: (this.task.model ?? this.options.defaultModel)! });
       }
-      await this.request("turn/start", {
+      const turn = await this.request("turn/start", {
         threadId: this.threadId,
         input: [{ type: "text", text: this.task.prompt }],
         ...(this.task.effort ? { effort: this.task.effort } : {}),
@@ -211,6 +211,8 @@ class CodexSubagentSession implements SubagentSession {
           ? { model: this.task.model ?? this.options.defaultModel }
           : {}),
       });
+      this.turnId = turnIdOf(turn) ?? this.turnId;
+      if (!this.turnId) throw new Error("codex turn/start returned no turn id.");
     } catch (error) {
       this.dispose();
       throw error;
@@ -373,12 +375,13 @@ class CodexSubagentSession implements SubagentSession {
     if (!this.turnId)
       throw new SendNotDeliveredError("The Codex turn already settled before steering.", "settled");
     try {
-      await this.request("turn/steer", {
+      const response = await this.request("turn/steer", {
         threadId: this.threadId,
         expectedTurnId: this.turnId,
         input: [{ type: "text", text }],
         clientUserMessageId: randomUUID(),
       });
+      this.turnId = turnIdOf(response) ?? this.turnId;
     } catch (error) {
       if (!(error instanceof CodexRpcError)) throw error;
       if (error.code === -32601) {
@@ -403,7 +406,8 @@ class CodexSubagentSession implements SubagentSession {
         // unknown wire shape means settlement could silently redeliver input as
         // a continuation, so preserve the protocol error and fail closed.
       }
-      throw error;
+      // Raw RPC prose can contain internal turn/thread identifiers.
+      throw new SendNotDeliveredError("Codex rejected the steering request.", "precondition");
     }
   }
 
@@ -485,6 +489,10 @@ function isCodexErrorVariant(value: unknown, variant: string): boolean {
     typeof value === "object" &&
     Object.hasOwn(value as Record<string, unknown>, variant)
   );
+}
+
+function turnIdOf(result: Record<string, unknown>): string | undefined {
+  return typeof result.turnId === "string" && result.turnId ? result.turnId : idOf(result.turn);
 }
 
 function threadIdOf(result: Record<string, unknown>): string | undefined {
