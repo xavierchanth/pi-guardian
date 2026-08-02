@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { BackendRegistry } from "../../packages/pi-tai/src/core/subagents/backend.ts";
 import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
 import { IsolatedSubagents } from "../../packages/pi-tai/src/core/subagents/isolated.ts";
+import type { LifecycleEvent } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
 import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
 import type { SubagentSnapshot } from "../../packages/pi-tai/src/core/subagents/domain.ts";
 import {
@@ -224,6 +225,38 @@ describe("isolated subagents", () => {
 
     assert.deepEqual(await workspaces.list(), []);
     await assert.rejects(readFile(join(source, "scratch.txt"), "utf8"));
+  });
+
+  it("protects a reload-attention workspace in the real startup sweep", async () => {
+    const { source, workspaces } = await harness(new StubBackend());
+    const workspace = await workspaces.create({ label: "orphan" });
+    const durableId = "550e8400-e29b-41d4-a716-446655440077";
+    await workspaces.assignOwner(workspace.id, durableId, "sa-77");
+    const facts: LifecycleEvent[] = [
+      {
+        version: 2,
+        type: "spawn_intent",
+        durableId,
+        displayId: "sa-77",
+        sequence: 77,
+        generation: 1,
+        backend: "pi",
+        title: "orphan",
+        backendConfig: {},
+        workspace: { cwd: workspace.path, workspaceId: workspace.id },
+        at: "2026-01-01T00:00:00.000Z",
+      },
+      { version: 2, type: "running", durableId, generation: 1, at: "2026-01-01T00:00:00.000Z" },
+    ];
+    const agents = new SubagentManager({ registry: new BackendRegistry([new StubBackend()]) });
+    await agents.attachLifecycleStore({ load: async () => facts, append: async () => {} });
+    const isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: source });
+
+    const swept = await workspaces.sweep(isolated.activeOwners());
+
+    assert.equal(agents.get("sa-77")?.attention, true);
+    assert.equal(swept[0]?.disposition, "kept");
+    assert.equal((await workspaces.list())[0]?.phase, "active");
   });
 
   it("protects a running child's workspace from the startup sweep", async () => {
