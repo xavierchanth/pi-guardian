@@ -1,6 +1,9 @@
 import {
   EventChannel,
   type AvailabilityResult,
+  type LiveInputMode,
+  type NotDeliveredReason,
+  SendNotDeliveredError,
   type SubagentBackend,
   type SubagentSession,
 } from "../backend.ts";
@@ -18,25 +21,38 @@ export interface StubBackendOptions {
   readonly available?: AvailabilityResult;
   /** Overrides the default script entirely. */
   readonly script?: (task: SpawnTask) => readonly SubagentEvent[];
+  readonly liveInput?: readonly LiveInputMode[];
+  readonly settledContinuation?: "in-place" | "respawn" | "none";
+  readonly sendBehaviour?: (
+    text: string,
+    mode: "steer" | "followUp" | "continue",
+  ) => "accept" | NotDeliveredReason;
 }
 
 export class StubBackend implements SubagentBackend {
   readonly name: BackendName;
-  readonly capabilities = {
-    liveInput: ["steer", "followUp"] as const,
-    settledContinuation: "respawn" as const,
-    modelSelection: true,
-    reasoningEffort: true,
-  };
+  readonly capabilities;
   readonly spawned: SpawnTask[] = [];
-  readonly sends: { text: string; mode: "steer" | "followUp" | "continue" }[] = [];
+  readonly sends: {
+    text: string;
+    mode: "steer" | "followUp" | "continue";
+    phase: "live" | "settled";
+  }[] = [];
   private readonly availability: AvailabilityResult;
   private readonly script?: (task: SpawnTask) => readonly SubagentEvent[];
+  private readonly sendBehaviour?: StubBackendOptions["sendBehaviour"];
 
   constructor(options: StubBackendOptions = {}) {
     this.name = options.name ?? "pi";
     this.availability = options.available ?? { ok: true };
+    this.capabilities = {
+      liveInput: options.liveInput ?? (["steer", "followUp"] as const),
+      settledContinuation: options.settledContinuation ?? "respawn",
+      modelSelection: true,
+      reasoningEffort: true,
+    } as const;
     if (options.script) this.script = options.script;
+    this.sendBehaviour = options.sendBehaviour;
   }
 
   async available(): Promise<AvailabilityResult> {
@@ -47,12 +63,29 @@ export class StubBackend implements SubagentBackend {
     this.spawned.push(task);
     const channel = new EventChannel();
     const sends = this.sends;
+    const behaviour = this.sendBehaviour;
+    let settled = false;
+    const transcript = this.spawned
+      .filter((spawned) => spawned.id === task.id)
+      .map((spawned) => spawned.prompt);
     const session: SubagentSession = {
       events: channel.events,
       resumeToken: `stub-session-${task.id}`,
       async send(text, mode) {
-        sends.push({ text, mode });
-        channel.push({ type: "assistant_message", text: `${mode}: ${text}` });
+        const reason = behaviour?.(text, mode);
+        if (reason && reason !== "accept")
+          throw new SendNotDeliveredError(`Stub refused ${mode}: ${reason}.`, reason);
+        sends.push({ text, mode, phase: settled ? "settled" : "live" });
+        if (mode === "steer") {
+          channel.push({ type: "assistant_message", text: `steer: ${text}` });
+        } else if (mode === "followUp") {
+          queueMicrotask(() => channel.push({ type: "assistant_message", text: `followUp: ${text}` }));
+        } else {
+          channel.push({
+            type: "assistant_message",
+            text: `continue: ${text} (prior: ${transcript.slice(0, -1).join(" | ")})`,
+          });
+        }
       },
       async interrupt() {
         channel.push({ type: "run_settled", outcome: "interrupted" });
@@ -61,7 +94,10 @@ export class StubBackend implements SubagentBackend {
         channel.close();
       },
     };
-    for (const event of this.script?.(task) ?? defaultScript(task)) channel.push(event);
+    for (const event of this.script?.(task) ?? defaultScript(task)) {
+      channel.push(event);
+      if (event.type === "run_settled" || event.type === "backend_error") settled = true;
+    }
     return session;
   }
 }
