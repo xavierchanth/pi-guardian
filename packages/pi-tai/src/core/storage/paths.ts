@@ -27,8 +27,8 @@ export function resolveStoragePaths(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
 ): StoragePaths {
-  // These Linux-style fallbacks are the cross-platform storage contract. On Windows
-  // `home` is Node's os.homedir() (the user profile), never AppData or OSDRIVE.
+  // These Linux-style fallbacks are the cross-platform storage contract. By default,
+  // `home` is Node's os.homedir() (typically C:\\Users\\<username> on Windows).
   const state = join(xdg(env.XDG_STATE_HOME, join(home, ".local", "state")), "pi-tai");
   const data = join(xdg(env.XDG_DATA_HOME, join(home, ".local", "share")), "pi-tai");
   const cache = join(xdg(env.XDG_CACHE_HOME, join(home, ".cache")), "pi-tai");

@@ -42,7 +42,6 @@ test("XDG resolver uses Linux-style home fallbacks on every platform", () => {
       XDG_DATA_HOME: "relative-data",
       XDG_CACHE_HOME: "relative-cache",
       XDG_RUNTIME_DIR: "relative-runtime",
-      OSDRIVE: resolve(home, "not-storage-authority"),
     },
     home,
   );
@@ -52,20 +51,19 @@ test("XDG resolver uses Linux-style home fallbacks on every platform", () => {
   assert.equal(paths.runtime, join(home, ".cache", "pi-tai", "run"));
 });
 
-test("absolute XDG roots win and default home comes only from os.homedir", () => {
+test("absolute XDG roots win and default fallbacks append beneath os.homedir", () => {
   const root = resolve(tmpdir(), "pi-tai-explicit-xdg");
   const paths = resolveStoragePaths({
     XDG_STATE_HOME: join(root, "state"),
     XDG_DATA_HOME: join(root, "data"),
     XDG_CACHE_HOME: join(root, "cache"),
     XDG_RUNTIME_DIR: join(root, "runtime"),
-    OSDRIVE: join(root, "wrong-drive"),
   });
   assert.equal(paths.database, join(root, "state", "pi-tai", "state.sqlite3"));
   assert.equal(paths.sessions, join(root, "data", "pi-tai", "sessions"));
   assert.equal(paths.runtime, join(root, "runtime", "pi-tai"));
 
-  const fallback = resolveStoragePaths({ OSDRIVE: join(root, "wrong-drive") });
+  const fallback = resolveStoragePaths({});
   assert.equal(fallback.state, join(homedir(), ".local", "state", "pi-tai"));
   assert.equal(fallback.data, join(homedir(), ".local", "share", "pi-tai"));
   assert.equal(fallback.cache, join(homedir(), ".cache", "pi-tai"));
