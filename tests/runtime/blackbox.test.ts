@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { RuntimeProcessHarness, initializeParams, pinnedPolicyParams } from "./process-harness.ts";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { initializeParams, pinnedPolicyParams, RuntimeProcessHarness } from "./process-harness.ts";
 
 async function isolatedRoot() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-blackbox-"));
@@ -22,14 +23,10 @@ test("spawned Pi SDK worker cannot observe or mutate caller XDG state", async ()
   await writeFile(sentinel, "must remain untouched");
 
   const worker = new RuntimeProcessHarness({
-    env: {
-      XDG_STATE_HOME: developerState,
-      XDG_DATA_HOME: join(paths.root, "synthetic-developer-data"),
-      XDG_CACHE_HOME: join(paths.root, "synthetic-developer-cache"),
-      XDG_RUNTIME_DIR: join(paths.root, "synthetic-developer-runtime"),
-      PI_OFFLINE: "1",
-    },
+    env: { PI_OFFLINE: "1" },
   });
+  for (const path of Object.values(resolveStoragePaths(worker.xdgEnv)))
+    assert.ok(path.startsWith(worker.xdgRoot), `${path} escaped the harness XDG root`);
   await worker.command("init", "runtime.initialize", initializeParams(1));
   assert.equal(
     (

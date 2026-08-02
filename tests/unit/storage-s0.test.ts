@@ -9,8 +9,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import {
   executeLegacyMigration,
@@ -34,15 +34,41 @@ function fixture() {
   const paths = resolveStoragePaths({}, home);
   return { home, paths };
 }
-test("XDG resolver ignores relative roots and uses private macOS runtime fallback", () => {
+test("XDG resolver uses Linux-style home fallbacks on every platform", () => {
   const { home } = fixture();
   const paths = resolveStoragePaths(
-    { XDG_STATE_HOME: "relative", XDG_DATA_HOME: "/data", XDG_CACHE_HOME: "/cache" },
+    {
+      XDG_STATE_HOME: "relative-state",
+      XDG_DATA_HOME: "relative-data",
+      XDG_CACHE_HOME: "relative-cache",
+      XDG_RUNTIME_DIR: "relative-runtime",
+      OSDRIVE: resolve(home, "not-storage-authority"),
+    },
     home,
   );
-  assert.equal(paths.state, join(home, ".local/state/pi-tai"));
-  assert.equal(paths.data, "/data/pi-tai");
-  assert.equal(paths.runtime, "/cache/pi-tai/run");
+  assert.equal(paths.state, join(home, ".local", "state", "pi-tai"));
+  assert.equal(paths.data, join(home, ".local", "share", "pi-tai"));
+  assert.equal(paths.cache, join(home, ".cache", "pi-tai"));
+  assert.equal(paths.runtime, join(home, ".cache", "pi-tai", "run"));
+});
+
+test("absolute XDG roots win and default home comes only from os.homedir", () => {
+  const root = resolve(tmpdir(), "pi-tai-explicit-xdg");
+  const paths = resolveStoragePaths({
+    XDG_STATE_HOME: join(root, "state"),
+    XDG_DATA_HOME: join(root, "data"),
+    XDG_CACHE_HOME: join(root, "cache"),
+    XDG_RUNTIME_DIR: join(root, "runtime"),
+    OSDRIVE: join(root, "wrong-drive"),
+  });
+  assert.equal(paths.database, join(root, "state", "pi-tai", "state.sqlite3"));
+  assert.equal(paths.sessions, join(root, "data", "pi-tai", "sessions"));
+  assert.equal(paths.runtime, join(root, "runtime", "pi-tai"));
+
+  const fallback = resolveStoragePaths({ OSDRIVE: join(root, "wrong-drive") });
+  assert.equal(fallback.state, join(homedir(), ".local", "state", "pi-tai"));
+  assert.equal(fallback.data, join(homedir(), ".local", "share", "pi-tai"));
+  assert.equal(fallback.cache, join(homedir(), ".cache", "pi-tai"));
 });
 test("storage roots are private and unsafe roots/keys are refused", () => {
   const { home, paths } = fixture();

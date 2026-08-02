@@ -27,10 +27,12 @@ export function resolveStoragePaths(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
 ): StoragePaths {
+  // These Linux-style fallbacks are the cross-platform storage contract. On Windows
+  // `home` is Node's os.homedir() (the user profile), never AppData or OSDRIVE.
   const state = join(xdg(env.XDG_STATE_HOME, join(home, ".local", "state")), "pi-tai");
   const data = join(xdg(env.XDG_DATA_HOME, join(home, ".local", "share")), "pi-tai");
   const cache = join(xdg(env.XDG_CACHE_HOME, join(home, ".cache")), "pi-tai");
-  // macOS normally has no XDG_RUNTIME_DIR. A private cache child is safer than /tmp.
+  // XDG_RUNTIME_DIR is commonly absent outside Linux; a private cache child is safer than /tmp.
   const runtime =
     env.XDG_RUNTIME_DIR && isAbsolute(env.XDG_RUNTIME_DIR)
       ? join(env.XDG_RUNTIME_DIR, "pi-tai")
