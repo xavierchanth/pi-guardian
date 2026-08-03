@@ -96,6 +96,10 @@ Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are 
 
 Pi already provides reserve-token-based automatic compaction. Pi-Tai adds a model-independent percentage threshold: after an agent run fully settles, known context usage at or above 90% is compacted before later settled handlers run. If Pi's native policy already compacted the session, post-compaction usage is unknown and Pi-Tai does not compact again. Configure or disable this policy with `compaction` in `pi-tai.json`.
 
+### By-the-way queries
+
+`/btw <question>` asks a one-off, tool-free question using a bounded, coherent snapshot of the active session context. Bare `/btw` opens a “by the way” input dialog. The persisted result is visible in the transcript but its question and answer are excluded from subsequent model context.
+
 ### Native notifications and cmux presence
 
 In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications identify the session; completion notifications summarize the assistant's response, and Guardian failures name the affected tool and reason.
