@@ -59,6 +59,18 @@ test("task dashboard reads current and archived rows and restores with attribute
   );
 });
 
+test("dashboard refuses archived edits before launching an editor", async () => {
+  const { paths, db, authority } = fixture();
+  const made = authority.create("create-archived-edit", "Archived", "body");
+  authority.transition("ready-archived-edit", made.task.taskId, "open", 1, "ready");
+  authority.archive(made.task.taskId);
+  const adapter = new TaskDashboardAdapter(db, "repo", authority, paths);
+  await assert.rejects(
+    () => adapter.edit(adapter.list(true)[0]!),
+    /Archived tasks cannot be edited/,
+  );
+});
+
 test("dashboard import prompts for and delivers the selected immutable revision", async () => {
   const { paths, db, authority } = fixture();
   const made = authority.create("create-ui-import", null, "Derived title\nbody");

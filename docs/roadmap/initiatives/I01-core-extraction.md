@@ -41,7 +41,7 @@ The worker now imports extension composition from `packages/pi-tai/pi-tai.ts` an
 
 ### `subagents/register.ts` must be dismantled
 
-The registrar has been reduced from its historical size to roughly 700 lines, and dashboard rendering, lifecycle management, backend logic, catalogs, and workspace isolation now have explicit modules under `src/core/subagents`. It still combines nine-tool declarations with registration wiring. Splitting those remaining concerns is honestly deferred until shared ACP declarations require it; doing so mechanically in this bounded structural slice would risk the preserved public tool contract.
+The registrar has been reduced from its historical size to roughly 700 lines, and dashboard rendering, lifecycle management, backend logic, catalogs, and workspace isolation now have explicit modules under `src/core/subagents`. It still combines twelve-tool declarations with registration wiring. Splitting those remaining concerns is honestly deferred until shared ACP declarations require it; doing so mechanically in this bounded structural slice would risk the preserved public tool contract.
 
 Split along the seams already present: wiring, tool declarations, host projection, UI. Declare tools as data — a `tools/` module exporting `{ name, schema, handler }` — with `pi.registerTool` as one thin adapter over it. The ACP and Host surfaces then reuse the same declarations instead of reimplementing them, and client productization becomes adapter isolation rather than a rewrite.
 

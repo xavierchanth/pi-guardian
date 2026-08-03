@@ -14,6 +14,7 @@ import {
 } from "../../packages/pi-tai/src/core/tasks/host-authority.ts";
 import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
 import { openDurableDatabase } from "../../packages/pi-tai/src/core/storage/sqlite.ts";
+import { TaskDashboardAdapter } from "../../packages/pi-tai/src/core/tasks/dashboard.ts";
 
 function fixture() {
   const paths = resolveStoragePaths({}, mkdtempSync(join(tmpdir(), "tasks-v7-")));
@@ -95,6 +96,20 @@ test("MG-3 exact agent transitions, actionable validation, privacy, replay, and 
     await rejects(TaskUnavailableError, () => agent.read(id));
     await rejects(TaskUnavailableError, () => agent.update(id, null as never));
   }
+});
+
+test("human dashboard sees and promotes an open draft while agent APIs remain blind", async () => {
+  const { db, paths, human, agent } = fixture();
+  const made = human.create("human-open-draft", "Draft", "body");
+  const dashboard = new TaskDashboardAdapter(db, "repo", human, paths);
+  const row = dashboard.list(false).find((candidate) => candidate.taskId === made.task.taskId);
+  assert.equal(row?.state, "open");
+  await rejects(TaskUnavailableError, () => agent.read(made.task.taskId));
+  dashboard.transition(row!, "ready");
+  assert.equal(
+    dashboard.list(false).find((candidate) => candidate.taskId === made.task.taskId)?.state,
+    "ready",
+  );
 });
 
 test("MG-3 reconcile isolates corrupt and stale intents and continues later operations", () => {

@@ -1,6 +1,6 @@
 # Tasks authority and dashboard
 
-MG-3 adds repository-scoped Host task authority in the existing schema-v7 migration; it does not introduce a schema version beyond v7. SQLite owns task metadata, state, attribution, append-only notes/audits, operation receipts, and immutable revision pointers. Private read-only Markdown files beneath `tasks/bodies/<repo>/<task>/<revision>.md` own revision bytes; their recorded SHA-256 digest is verified whenever imported.
+MG-3 adds repository-scoped Host task authority by introducing schema v7; it does not introduce a schema version beyond v7. SQLite owns task metadata, state, attribution, append-only notes/audits, operation receipts, and immutable revision pointers. Private read-only Markdown files beneath `tasks/bodies/<repo>/<task>/<revision>.md` own revision bytes; their recorded SHA-256 digest is verified whenever imported.
 
 The shared `/tasks`, `/subagents`, and `/workspaces` shell now accepts a real Tasks adapter. Current and archived tabs query repository rows, preserve identity-based selection, and remain bounded by the common terminal row budget. Ratified task keys are `n` (private Markdown editor creation), `r` (ready), `d` (done where the state machine permits it), `Enter` (editor), `i` (metadata), `p` (fixed-revision import), `e` (archive/restore), `s` (related subagent), and `a` (actions). Creation is human-only through `n`; the agent surface remains the three ratified task tools. Subagent jump/action-menu presentation is deferred beyond MG-3 and is reported truthfully rather than mutating authority.
 

@@ -10,7 +10,7 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 
 I13 is retired and is not an active initiative or dependency gate. Its checkpoints 1–7 remain delivered architecture: Host-managed sessions resolve, persist, replay, and require pinned policy. Its undelivered checkpoints 8 (policy mutation), 12 (Guardian configuration), and 13 (Host-owned trust/agent narrowing) are explicitly dropped. I15 is accepted complete after the user's live cmux testing; I16 `/btw` is complete.
 
-The concurrency model delivered across I06–I09 and I14 has since been replaced. Named agent roles, durable work orders, and the review, integration, and recovery tool families no longer exist; what remains is a nine-tool subagent surface in which a subagent is described by its objective and by whether it works in its own JJ workspace or directly in the user's working copy. Those initiatives are kept as a record of what was built and each carries a note saying so; [Subagents and workspaces](../concurrency/README.md) is authoritative for the current design.
+The concurrency model delivered across I06–I09 and I14 has since been replaced. Named agent roles, durable work orders, and the review, integration, and recovery tool families no longer exist; what remains is a twelve-tool subagent surface in which a subagent is described by its objective and by whether it works in its own JJ workspace or directly in the user's working copy. Those initiatives are kept as a record of what was built and each carries a note saying so; [Subagents and workspaces](../concurrency/README.md) is authoritative for the current design.
 
 ## Status legend
 

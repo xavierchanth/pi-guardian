@@ -68,8 +68,8 @@ export async function checkFileToolPath(
     const taskRoot = resolveStoragePaths().taskBodies;
     const canonicalTaskRoot = await canonicalRoot(taskRoot);
     if (
-      canonicalTaskRoot &&
-      (contains(taskRoot, target.lexicalPath) || contains(canonicalTaskRoot, target.canonicalPath))
+      contains(taskRoot, target.lexicalPath) ||
+      (canonicalTaskRoot !== undefined && contains(canonicalTaskRoot, target.canonicalPath))
     ) {
       return READ_ONLY_FILE_TOOL_NAMES.has(toolName)
         ? review(

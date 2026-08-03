@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   DASHBOARD_EMPTY,
   DASHBOARD_HINT,
@@ -191,6 +192,20 @@ test("detail windows current running output and scrolling commands clamp safely"
   assert.equal(scrollDetail(5, "top", 17), 0);
   assert.equal(scrollDetail(5, "bottom", 17), 17);
   assert.equal(scrollDetail(17, "down", 17), 17);
+});
+
+test("shared frames and narrow Tasks rows have exact column width for CJK and emoji", () => {
+  for (const width of [24, 25, 31, 40]) {
+    const rows = renderDashboard({
+      snapshots: [],
+      selected: 0,
+      width,
+      now: NOW,
+      primaryTab: "tasks",
+      bodyRows: [{ text: "> T-7 open r1 修正😀emoji界面", tone: "accent" }],
+    });
+    for (const row of rows) assert.equal(visibleWidth(row.text), width, `${width}: ${row.text}`);
+  }
 });
 
 test("formats elapsed time across second, minute, and hour scales", () => {

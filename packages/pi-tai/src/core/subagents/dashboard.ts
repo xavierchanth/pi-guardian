@@ -6,6 +6,7 @@
  * colours and forwards keystrokes.
  */
 
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { dashboardBodyCapacity } from "../dashboard/viewport.ts";
 import { contextUtilisation, type SubagentSnapshot } from "./domain.ts";
 
@@ -273,7 +274,8 @@ function rowTone(snapshot: SubagentSnapshot, selected: boolean): DashboardTone {
 }
 
 function frame(text: string, inner: number): string {
-  const padded = text + " ".repeat(Math.max(0, inner - visibleWidth(text)));
+  const bounded = truncateToWidth(text, inner, "");
+  const padded = bounded + " ".repeat(Math.max(0, inner - visibleWidth(bounded)));
   return `│ ${padded} │`;
 }
 
@@ -290,21 +292,6 @@ function tabLine<T extends string>(tabs: readonly T[], active: T): string {
 
 function titleCase(value: string): string {
   return value[0]?.toUpperCase() + value.slice(1);
-}
-
-function visibleWidth(value: string): number {
-  return Array.from(value).length;
-}
-
-function truncateToWidth(value: string, width: number, suffix = ""): string {
-  if (visibleWidth(value) <= width) return value;
-  if (width <= 0) return "";
-  const ending = Array.from(suffix).slice(0, width).join("");
-  return (
-    Array.from(value)
-      .slice(0, Math.max(0, width - visibleWidth(ending)))
-      .join("") + ending
-  );
 }
 
 function bottomBorder(width: number): string {

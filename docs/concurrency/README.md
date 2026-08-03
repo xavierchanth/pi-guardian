@@ -7,7 +7,7 @@ why it is shaped the way it is.
 ## Durable lifecycle foundation
 
 The first durability foundation is landed: subagents have opaque UUID authority IDs
-while the nine public tools continue to use session-local `sa-N` labels. Versioned
+while the twelve public tools continue to use session-local `sa-N` labels. Versioned
 lifecycle facts are folded from Pi's active branch (`getBranch()`), re-folded on
 session start and tree navigation, and spawning fails closed when the host cannot
 append an intent/running fact. Pi child journals use the durable ID as context and
@@ -143,7 +143,7 @@ custody-release receipts exist.
 
 ## Tools
 
-Nine, with the judgment about when to use them living in prompts rather than in tool
+Twelve, with the judgment about when to use them living in prompts rather than in tool
 schemas:
 
 | Tool | Purpose |

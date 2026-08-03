@@ -9,6 +9,7 @@ import {
 import {
   SubagentDashboard,
   type DashboardAgents,
+  type DashboardTasks,
   OVERLAY_MARGIN,
   resolveAction,
   registerDashboardShell,
@@ -160,6 +161,40 @@ test("§4.8 dispatch table is exhaustive, contextual, and mode-first", () => {
     assert.equal(resolveAction("V", "normal", tab), "markAll");
     assert.equal(resolveAction("\x1b[6~", "normal", tab), "pageDown");
   }
+});
+
+test("external task editor stops and restarts the TUI in finally on async failure", async () => {
+  const events: string[] = [];
+  let rejectCreate!: (error: Error) => void;
+  const tasks: DashboardTasks = {
+    list: () => [],
+    transition() {},
+    archiveOrRestore: (row) => row,
+    create: () => new Promise<void>((_resolve, reject) => (rejectCreate = reject)),
+    async edit() {},
+    async importRevision() {},
+  };
+  const tui = {
+    stop: () => events.push("stop"),
+    start: () => events.push("start"),
+    requestRender: () => events.push("render"),
+  } as unknown as TUI;
+  const view = new SubagentDashboard({
+    agents: undefined,
+    tasks,
+    tui,
+    theme: { fg: (_tone: string, text: string) => text } as unknown as Theme,
+    close() {},
+    readRows: () => 20,
+  });
+  view.focus("tasks");
+  events.length = 0;
+  view.handleInput("n");
+  assert.deepEqual(events, ["stop"]);
+  rejectCreate(new Error("editor failed"));
+  await settle();
+  assert.deepEqual(events.slice(-2), ["start", "render"]);
+  assert.match(view.render(80).join("\n"), /editor failed/);
 });
 
 test("Tasks distinguishes metadata detail from editing", () => {

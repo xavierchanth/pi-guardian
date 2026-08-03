@@ -170,6 +170,41 @@ test("ignored built-in file targets receive Guardian review with path evidence",
   assert.deepEqual((requests[0].reviewEvidence as { triggers: string[] }).triggers, ["gitignored"]);
 });
 
+test("task-body lexical and canonical targets review reads and deny writes, including an absent root", async () => {
+  const original = process.env.XDG_DATA_HOME;
+  const data = await mkdtemp(join(tmpdir(), "pi-tai-guardian-task-bodies-"));
+  process.env.XDG_DATA_HOME = data;
+  try {
+    const workspace = join(data, "workspace");
+    await mkdir(workspace);
+    const absent = join(data, "pi-tai", "tasks", "bodies", "repo", "task", "1.md");
+    assert.equal(
+      (await checkFileToolPath("read", { path: absent }, workspace, [], [])).kind,
+      "review",
+    );
+    assert.equal(
+      (await checkFileToolPath("write", { path: absent }, workspace, [], [])).kind,
+      "deny",
+    );
+
+    await mkdir(join(data, "pi-tai", "tasks", "bodies", "repo", "task"), { recursive: true });
+    await writeFile(absent, "private");
+    const alias = join(workspace, "body.md");
+    await symlink(absent, alias);
+    assert.equal(
+      (await checkFileToolPath("read", { path: alias }, workspace, [], [])).kind,
+      "review",
+    );
+    assert.equal(
+      (await checkFileToolPath("edit", { path: alias }, workspace, [], [])).kind,
+      "deny",
+    );
+  } finally {
+    if (original === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = original;
+  }
+});
+
 test("outside, traversal, and symlink-escape file targets are denied", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-tai-guardian-"));
   const workspace = join(root, "workspace");
