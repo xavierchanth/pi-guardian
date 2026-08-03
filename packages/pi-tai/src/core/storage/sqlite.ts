@@ -73,7 +73,7 @@ CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (S
 export const SCHEMA_SQL_V7 = `
 CREATE TABLE task_display_sequence(repo_id TEXT PRIMARY KEY REFERENCES repository(repo_id),next_value INTEGER NOT NULL CHECK(next_value>0));
 CREATE TABLE task(task_id TEXT PRIMARY KEY,repo_id TEXT NOT NULL REFERENCES repository(repo_id),display_seq INTEGER NOT NULL CHECK(display_seq>0),display_id TEXT NOT NULL,title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 512),state TEXT NOT NULL CHECK(state IN('open','ready','doing','blocked','done','dropped','archived')),current_revision INTEGER NOT NULL CHECK(current_revision>0),current_digest TEXT NOT NULL CHECK(length(current_digest)=64 AND current_digest NOT GLOB '*[^0-9a-f]*'),provenance_session_id TEXT REFERENCES pi_session(session_id),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(repo_id,display_seq),UNIQUE(repo_id,display_id));
-CREATE TABLE task_revision(task_id TEXT NOT NULL REFERENCES task(task_id),revision INTEGER NOT NULL CHECK(revision>0),digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),bytes INTEGER NOT NULL CHECK(bytes>=0),relative_path TEXT NOT NULL CHECK(relative_path NOT LIKE '/%' AND relative_path NOT GLOB '*..*' AND relative_path LIKE 'tasks/repositories/%/revisions/%.md'),created_at TEXT NOT NULL,PRIMARY KEY(task_id,revision),UNIQUE(relative_path));
+CREATE TABLE task_revision(task_id TEXT NOT NULL REFERENCES task(task_id),revision INTEGER NOT NULL CHECK(revision>0),digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),bytes INTEGER NOT NULL CHECK(bytes>=0),relative_path TEXT NOT NULL CHECK(relative_path NOT LIKE '/%' AND relative_path NOT GLOB '*..*' AND relative_path LIKE 'tasks/bodies/%/%/%.md'),created_at TEXT NOT NULL,PRIMARY KEY(task_id,revision),UNIQUE(relative_path));
 CREATE TABLE task_receipt(receipt_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),kind TEXT NOT NULL CHECK(kind IN('created','revised','transitioned','recovered')),actor TEXT NOT NULL CHECK(actor='human'),from_revision INTEGER,to_revision INTEGER,from_state TEXT,to_state TEXT,digest TEXT,created_at TEXT NOT NULL);
 CREATE TABLE allowed_task_transition(from_state TEXT NOT NULL,to_state TEXT NOT NULL,PRIMARY KEY(from_state,to_state));
 INSERT INTO allowed_task_transition VALUES ('open','ready'),('open','doing'),('open','dropped'),('ready','doing'),('ready','blocked'),('ready','dropped'),('doing','blocked'),('doing','done'),('doing','dropped'),('blocked','ready'),('blocked','doing'),('blocked','dropped'),('done','archived'),('dropped','archived');
@@ -82,11 +82,27 @@ CREATE TRIGGER trg_task_revision_immutable BEFORE UPDATE ON task_revision BEGIN 
 CREATE TRIGGER trg_task_revision_no_delete BEFORE DELETE ON task_revision BEGIN SELECT RAISE(ABORT,'task revisions are immutable'); END;
 CREATE TRIGGER trg_task_current_revision_forward BEFORE UPDATE OF current_revision,current_digest ON task WHEN NEW.current_revision<>OLD.current_revision AND (NEW.current_revision<>OLD.current_revision+1 OR NOT EXISTS(SELECT 1 FROM task_revision r WHERE r.task_id=NEW.task_id AND r.revision=NEW.current_revision AND r.digest=NEW.current_digest)) BEGIN SELECT RAISE(ABORT,'invalid task revision pointer'); END;
 CREATE INDEX idx_task_agent_visible ON task(repo_id,display_seq) WHERE state<>'open';
+ALTER TABLE task_receipt ADD COLUMN operation_id TEXT;
+ALTER TABLE task_receipt ADD COLUMN before_digest TEXT;
+ALTER TABLE task_receipt ADD COLUMN after_digest TEXT;
+ALTER TABLE task_receipt ADD COLUMN repo_id TEXT;
+ALTER TABLE task_receipt ADD COLUMN principal TEXT;
+CREATE UNIQUE INDEX idx_task_receipt_operation ON task_receipt(operation_id);
+CREATE TABLE task_operation(operation_id TEXT PRIMARY KEY,repo_id TEXT NOT NULL REFERENCES repository(repo_id),principal TEXT NOT NULL,task_id TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('created','revised','transitioned')),status TEXT NOT NULL CHECK(status IN('intent','committed','failed')),target_revision INTEGER NOT NULL CHECK(target_revision>0),target_digest TEXT NOT NULL CHECK(length(target_digest)=64 AND target_digest NOT GLOB '*[^0-9a-f]*'),payload TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL);
+CREATE INDEX idx_task_operation_intent ON task_operation(repo_id,status) WHERE status='intent';
+CREATE TRIGGER trg_task_pointer_any_update BEFORE UPDATE OF current_revision,current_digest ON task BEGIN SELECT RAISE(ABORT,'task pointer has no exact revision') WHERE NOT EXISTS(SELECT 1 FROM task_revision r WHERE r.task_id=NEW.task_id AND r.revision=NEW.current_revision AND r.digest=NEW.current_digest); END;
+CREATE TRIGGER trg_task_receipt_exact BEFORE INSERT ON task_receipt BEGIN
+ SELECT RAISE(ABORT,'receipt operation mismatch') WHERE NEW.operation_id IS NULL OR NOT EXISTS(SELECT 1 FROM task_operation o WHERE o.operation_id=NEW.operation_id AND o.task_id=NEW.task_id AND o.repo_id=NEW.repo_id AND o.principal=NEW.principal AND o.status='intent' AND o.target_revision=NEW.to_revision AND o.target_digest=NEW.after_digest);
+ SELECT RAISE(ABORT,'receipt after mismatch') WHERE NOT EXISTS(SELECT 1 FROM task t WHERE t.task_id=NEW.task_id AND t.repo_id=NEW.repo_id AND t.current_revision=NEW.to_revision AND t.current_digest=NEW.after_digest AND t.state=NEW.to_state);
+END;
 `;
 export const MIGRATIONS = [
-  { version: 1, sql: SCHEMA_SQL_V1 }, { version: 2, sql: SCHEMA_SQL_V2 },
-  { version: 3, sql: SCHEMA_SQL_V3 }, { version: 4, sql: SCHEMA_SQL_V4 },
-  { version: 5, sql: SCHEMA_SQL_V5 }, { version: 6, sql: SCHEMA_SQL_V6 },
+  { version: 1, sql: SCHEMA_SQL_V1 },
+  { version: 2, sql: SCHEMA_SQL_V2 },
+  { version: 3, sql: SCHEMA_SQL_V3 },
+  { version: 4, sql: SCHEMA_SQL_V4 },
+  { version: 5, sql: SCHEMA_SQL_V5 },
+  { version: 6, sql: SCHEMA_SQL_V6 },
   { version: 7, sql: SCHEMA_SQL_V7 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
