@@ -216,6 +216,60 @@ export class HumanTaskAuthority {
       );
     });
   }
+  archive(id: TaskId): HumanTask {
+    return this.tx(() => {
+      const row = this.owned(id);
+      if (!(["done", "dropped"] as string[]).includes(row.state))
+        throw new TaskAuthorityError("conflict");
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'archive',?,?,?)",
+        )
+        .run(
+          `audit_${randomUUID()}`,
+          id,
+          this.repoId,
+          this.cap.principal,
+          row.state,
+          row.state,
+          now,
+        );
+      const result = this.db
+        .prepare(
+          "UPDATE task SET archived_at=?,updated_at=? WHERE task_id=? AND repo_id=? AND archived_at IS NULL",
+        )
+        .run(now, now, id, this.repoId);
+      if (result.changes !== 1) throw new TaskAuthorityError("conflict");
+      return this.task(id);
+    });
+  }
+  restore(id: TaskId): HumanTask {
+    return this.tx(() => {
+      const row = this.owned(id);
+      if (!(["done", "dropped"] as string[]).includes(row.state))
+        throw new TaskAuthorityError("conflict");
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'restore',?,'ready',?)",
+        )
+        .run(`audit_${randomUUID()}`, id, this.repoId, this.cap.principal, row.state, now);
+      // The transition audit is separate because both state and archive guards verify the latest matching action.
+      this.db
+        .prepare(
+          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'transition',?,'ready',?)",
+        )
+        .run(`audit_${randomUUID()}`, id, this.repoId, this.cap.principal, row.state, now);
+      const result = this.db
+        .prepare(
+          "UPDATE task SET state='ready',archived_at=NULL,updated_at=? WHERE task_id=? AND repo_id=? AND archived_at IS NOT NULL AND state IN('done','dropped')",
+        )
+        .run(now, id, this.repoId);
+      if (result.changes !== 1) throw new TaskAuthorityError("conflict");
+      return this.task(id);
+    });
+  }
   reconcile(): Array<{ task: HumanTask; receipt: Receipt }> {
     const rows = this.db
       .prepare(

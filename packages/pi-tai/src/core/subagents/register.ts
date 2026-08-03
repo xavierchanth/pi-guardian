@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
   type ExtensionAPI,
@@ -22,6 +22,7 @@ import { migrateWorkspaceRegistry } from "../storage/custody-migration.ts";
 import { ensureStoragePaths, resolveStoragePaths, type StoragePaths } from "../storage/paths.ts";
 import { openDurableDatabase } from "../storage/sqlite.ts";
 import { TaskAgentAuthority } from "../tasks/agent-authority.ts";
+import { HumanTaskAuthority, issueHumanCapability } from "../tasks/host-authority.ts";
 import { connectSubagentActivity } from "./activity.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
@@ -146,6 +147,17 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         // This is the sole production reader of the legacy registry. Migration
         // copies and receipts it, but never mutates or writes workspaces.json.
         migrateWorkspaceRegistry(database, agentDir, paths);
+        // Resume every durable human file/SQLite intent before accepting new work.
+        const recoveries = database
+          .prepare("SELECT DISTINCT repo_id,principal FROM task_operation WHERE status='intent'")
+          .all() as Array<{ repo_id: string; principal: string }>;
+        for (const recovery of recoveries)
+          HumanTaskAuthority.inject(
+            database,
+            paths,
+            recovery.repo_id,
+            issueHumanCapability(recovery.principal),
+          ).reconcile();
         const rootSessionId = ctx.sessionManager.getSessionId();
         const now = new Date().toISOString();
         database
@@ -212,9 +224,18 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
   const taskAuthority = async (ctx: ExtensionContext) => {
     const current = await requireRuntime(ctx);
     if (!current.database || !current.storagePaths) throw new Error("Task is unavailable");
-    const repo = current.database
-      .prepare("SELECT repo_id FROM repository WHERE identity_proven=1 AND last_known_root=?")
-      .get(ctx.cwd) as { repo_id: string } | undefined;
+    const cwd = resolve(ctx.cwd);
+    const repos = current.database
+      .prepare(
+        "SELECT repo_id,last_known_root FROM repository WHERE identity_proven=1 AND store_key IS NOT NULL",
+      )
+      .all() as Array<{ repo_id: string; last_known_root: string }>;
+    const repo = repos
+      .filter(({ last_known_root }) => {
+        const rel = relative(resolve(last_known_root), cwd);
+        return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+      })
+      .sort((a, b) => b.last_known_root.length - a.last_known_root.length)[0];
     if (!repo) throw new Error("Task is unavailable");
     return new TaskAgentAuthority(
       current.database,
@@ -246,28 +267,13 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     label: "Update Task",
     description:
       "Transition a task, append a note, or set its title. Cannot archive, reopen, drop, or revise its body.",
-    parameters: Type.Union([
-      Type.Object({
-        task_id: Type.String(),
-        action: Type.Literal("transition"),
-        to: Type.Union([
-          Type.Literal("ready"),
-          Type.Literal("doing"),
-          Type.Literal("blocked"),
-          Type.Literal("done"),
-        ]),
-      }),
-      Type.Object({
-        task_id: Type.String(),
-        action: Type.Literal("add_note"),
-        note: Type.String(),
-      }),
-      Type.Object({
-        task_id: Type.String(),
-        action: Type.Literal("set_title"),
-        title: Type.String(),
-      }),
-    ]),
+    parameters: Type.Object({
+      task_id: Type.String(),
+      action: Type.String({ enum: ["transition", "add_note", "set_title"] }),
+      to: Type.Optional(Type.String({ enum: ["ready", "doing", "blocked", "done"] })),
+      note: Type.Optional(Type.String()),
+      title: Type.Optional(Type.String()),
+    }),
     execute: async (_id, p, _s, _u, ctx) =>
       text((await taskAuthority(ctx)).update(p.task_id, p as never)),
   });
