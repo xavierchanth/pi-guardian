@@ -248,6 +248,7 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     return built;
   }
 
+  // Legacy shape: dependencies.registerDashboard?.(pi, () => built?.agents)
   dependencies.registerDashboard?.(
     pi,
     () => built?.agents,

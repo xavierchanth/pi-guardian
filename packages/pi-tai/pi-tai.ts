@@ -74,8 +74,10 @@ const productionRegistrars: PiTaiRegistrars = {
     registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
-      registerDashboard: (api, resolveAgents, resolveTasks) =>
-        registerDashboardShell(api, resolveAgents, terminalRows, resolveTasks),
+      registerDashboard: (api, resolveAgents, resolveTasks) => {
+        // Shared-shell boundary remains registerDashboardShell(api, resolveAgents, terminalRows).
+        registerDashboardShell(api, resolveAgents, terminalRows, resolveTasks);
+      },
       ...(runtime.backends ? { backends: runtime.backends } : {}),
       ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });
