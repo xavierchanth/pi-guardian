@@ -5,7 +5,6 @@ import {
   type PiTaiConfigService,
   registerPiTaiConfig,
 } from "./src/core/config/register.ts";
-import { registerContextTransfer } from "./src/core/context-transfer/register.ts";
 import { registerApprovalGuardian } from "./src/core/guardian/register.ts";
 import { registerModelProfiles } from "./src/core/model-profiles/register.ts";
 import type { BackendName } from "./src/core/subagents/domain.ts";
@@ -50,7 +49,6 @@ export interface PiTaiRegistrars {
   keybindings: PiTaiRegistrar;
   config: PiTaiRegistrar;
   compaction: PiTaiRegistrar;
-  contextTransfer: PiTaiRegistrar;
   responseEditor: PiTaiRegistrar;
   modelProfiles: PiTaiRegistrar;
   subagents: PiTaiRegistrar;
@@ -66,7 +64,6 @@ const productionRegistrars: PiTaiRegistrars = {
   keybindings: (pi, runtime) => registerFirstPartyKeybindings(pi, runtime.agentDir),
   config: (pi, runtime) => registerPiTaiConfig(pi, runtime.config),
   compaction: (pi, runtime) => registerAutoCompaction(pi, runtime.config),
-  contextTransfer: (pi, runtime) => registerContextTransfer(pi, runtime.agentDir),
   responseEditor: (pi) => {
     registerResponseEditor(pi);
   },
@@ -118,7 +115,6 @@ export function createPiTaiExtension(
     await registrars.keybindings(pi, runtime);
     await registrars.config(pi, runtime);
     await registrars.compaction(pi, runtime);
-    await registrars.contextTransfer(pi, runtime);
     await registrars.responseEditor(pi, runtime);
     await registrars.modelProfiles(pi, runtime);
     await registrars.subagents(pi, runtime);

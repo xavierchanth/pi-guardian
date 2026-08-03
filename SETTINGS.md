@@ -138,6 +138,3 @@ Low- and medium-risk related work may proceed. High- and critical-risk actions n
 
 Built-in file tools enforce canonical workspace boundaries. External research is delegated through the `researcher` subagent capability; root sessions have no direct web tools.
 
-## Context transfer
-
-Context transfer v1 has no configuration. Use `/context-export [notes…]` and `/context-import <ID>`; artifacts are retained locally for 30 days, with at most 50 kept.

@@ -176,7 +176,8 @@ async function classifyPiAgentPath(
   const authPath = join(agentDirectory, "auth.json");
   const modelsPath = join(agentDirectory, "models.json");
   const sessionsPath = join(agentDirectory, "sessions");
-  const contextExportsPath = join(agentDirectory, "pi-tai", "context-exports");
+  // Retired and current Pi-Tai state can contain private session-derived data.
+  const piTaiPrivatePath = join(agentDirectory, "pi-tai");
   if (logicalPath === authPath || logicalPath === modelsPath) {
     return review(
       target,
@@ -193,17 +194,17 @@ async function classifyPiAgentPath(
       "The target is Pi session history and may contain unrelated private conversation or tool data.",
     );
   }
-  if (contains(contextExportsPath, logicalPath)) {
+  if (contains(piTaiPrivatePath, logicalPath)) {
     return review(
       target,
       requestedPath,
       "pi-session",
-      "The target is a private context-transfer summary from another session.",
+      "The target is private Pi-Tai state and may contain session-derived data.",
     );
   }
   if (
     (toolName === "grep" || toolName === "find") &&
-    [authPath, modelsPath, sessionsPath, contextExportsPath].some((protectedPath) =>
+    [authPath, modelsPath, sessionsPath, piTaiPrivatePath].some((protectedPath) =>
       contains(logicalPath, protectedPath),
     )
   ) {

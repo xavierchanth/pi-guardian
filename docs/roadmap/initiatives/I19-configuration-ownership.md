@@ -16,7 +16,7 @@ Before migration, inventory every configuration field, default constant, environ
 - Host-owned machine policy/capability, or
 - a justified, documented opt-out.
 
-The audit explicitly covers subagents and allowed test harnesses, context transfer and retention, keybinding provisioning, model-profile cycling, ANSI polling, native notifications, `/btw`, footer, and response editor. Existing compaction and cmux opt-outs remain preserved unless separately approved.
+The audit explicitly covers subagents and allowed test harnesses, keybinding provisioning, model-profile cycling, ANSI polling, native notifications, `/btw`, footer, and response editor. Existing compaction and cmux opt-outs remain preserved unless separately approved.
 
 ## Security invariants
 

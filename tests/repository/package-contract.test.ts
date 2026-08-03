@@ -43,16 +43,6 @@ test("the legacy session capability controller is absent from the package", () =
   assert.doesNotMatch(source, /registerCommand\(["']capabilities["']/);
 });
 
-test("context-transfer domain and storage remain Pi-independent", () => {
-  for (const file of ["domain.ts", "storage.ts"]) {
-    const source = readFileSync(
-      join(root, "packages/pi-tai/src/core/context-transfer", file),
-      "utf8",
-    );
-    assert.doesNotMatch(source, /@earendil-works\//, file);
-  }
-});
-
 test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
   const instructions = readFileSync(join(root, "packages/pi-tai/instructions/system.md"), "utf8");
   assert.ok(instructions.trim().length > 0);

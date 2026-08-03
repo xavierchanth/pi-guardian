@@ -17,9 +17,6 @@ test("composition root registers every feature once in order", async () => {
       compaction: () => {
         calls.push("compaction");
       },
-      contextTransfer: () => {
-        calls.push("context-transfer");
-      },
       responseEditor: () => {
         calls.push("response-editor");
       },
@@ -63,7 +60,6 @@ test("composition root registers every feature once in order", async () => {
     "keybindings",
     "config",
     "compaction",
-    "context-transfer",
     "response-editor",
     "model-profiles",
     "subagents",

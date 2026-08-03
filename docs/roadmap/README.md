@@ -41,7 +41,7 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | Complete | — | Notifications identify session and outcome; cmux sidebar carries live session status |
 | I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Complete | — | A question answered from bounded coherent session context that leaves no trace in it |
 | I17 | [Researcher capability subagent](initiatives/I17-capability-subagents.md) | Complete | — | External research moves behind a specialized Codex subagent |
-| I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Complete | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
+| I18 | [Context transfer](initiatives/I18-context-transfer.md) | Retired | — | Removed by explicit user decision after the post-subagent commands went unused; historical private artifacts are left in place |
 | I19 | [Configuration ownership and feature policy](initiatives/I19-configuration-ownership.md) | Planned | I01, I02, I03 | Terminal preferences and Host-owned session/machine policy have explicit, non-widening ownership |
 
 ## Dependency graph
@@ -66,7 +66,7 @@ graph TD
   I15[I15 Session presence — complete]
   I16[I16 /btw sidebar query — complete]
   I17[I17 Capability subagents — complete]
-  I18[I18 Context transfer — complete]
+  I18[I18 Context transfer — retired]
   I19[I19 Configuration ownership]
 
   I00 --> I01
