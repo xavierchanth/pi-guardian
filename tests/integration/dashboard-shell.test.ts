@@ -170,7 +170,10 @@ test("external task editor stops and restarts the TUI in finally on async failur
     list: () => [],
     transition() {},
     archiveOrRestore: (row) => row,
-    create: () => new Promise<void>((_resolve, reject) => (rejectCreate = reject)),
+    create: () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectCreate = reject;
+      }),
     async edit() {},
     async importRevision() {},
   };
