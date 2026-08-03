@@ -5,7 +5,7 @@ import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../
 import type { LifecycleRecord } from "../subagents/lifecycle.ts";
 import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const SCHEMA_SQL_V1 = `
 CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
@@ -70,17 +70,27 @@ ALTER TABLE custody_operation_v6 RENAME TO custody_operation;
 CREATE INDEX idx_custody_op_live ON custody_operation(state) WHERE state IN('intent','jj_applied','unknown');
 CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (SELECT requested_by FROM custody_operation WHERE op_id=NEW.op_id) IN('system_reconcile','system_migration','system_spawn','system_settle') BEGIN SELECT RAISE(ABORT,'reconciliation may never abandon'); END;
 `;
+export const SCHEMA_SQL_V7 = `
+CREATE TABLE task_display_sequence(repo_id TEXT PRIMARY KEY REFERENCES repository(repo_id),next_value INTEGER NOT NULL CHECK(next_value>0));
+CREATE TABLE task(task_id TEXT PRIMARY KEY,repo_id TEXT NOT NULL REFERENCES repository(repo_id),display_seq INTEGER NOT NULL CHECK(display_seq>0),display_id TEXT NOT NULL,title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 512),state TEXT NOT NULL CHECK(state IN('open','ready','doing','blocked','done','dropped','archived')),current_revision INTEGER NOT NULL CHECK(current_revision>0),current_digest TEXT NOT NULL CHECK(length(current_digest)=64 AND current_digest NOT GLOB '*[^0-9a-f]*'),provenance_session_id TEXT REFERENCES pi_session(session_id),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(repo_id,display_seq),UNIQUE(repo_id,display_id));
+CREATE TABLE task_revision(task_id TEXT NOT NULL REFERENCES task(task_id),revision INTEGER NOT NULL CHECK(revision>0),digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),bytes INTEGER NOT NULL CHECK(bytes>=0),relative_path TEXT NOT NULL CHECK(relative_path NOT LIKE '/%' AND relative_path NOT GLOB '*..*' AND relative_path LIKE 'tasks/repositories/%/revisions/%.md'),created_at TEXT NOT NULL,PRIMARY KEY(task_id,revision),UNIQUE(relative_path));
+CREATE TABLE task_receipt(receipt_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),kind TEXT NOT NULL CHECK(kind IN('created','revised','transitioned','recovered')),actor TEXT NOT NULL CHECK(actor='human'),from_revision INTEGER,to_revision INTEGER,from_state TEXT,to_state TEXT,digest TEXT,created_at TEXT NOT NULL);
+CREATE TABLE allowed_task_transition(from_state TEXT NOT NULL,to_state TEXT NOT NULL,PRIMARY KEY(from_state,to_state));
+INSERT INTO allowed_task_transition VALUES ('open','ready'),('open','doing'),('open','dropped'),('ready','doing'),('ready','blocked'),('ready','dropped'),('doing','blocked'),('doing','done'),('doing','dropped'),('blocked','ready'),('blocked','doing'),('blocked','dropped'),('done','archived'),('dropped','archived');
+CREATE TRIGGER trg_task_legal_transition BEFORE UPDATE OF state ON task WHEN NEW.state<>OLD.state AND NOT EXISTS(SELECT 1 FROM allowed_task_transition WHERE from_state=OLD.state AND to_state=NEW.state) BEGIN SELECT RAISE(ABORT,'illegal task transition'); END;
+CREATE TRIGGER trg_task_revision_immutable BEFORE UPDATE ON task_revision BEGIN SELECT RAISE(ABORT,'task revisions are immutable'); END;
+CREATE TRIGGER trg_task_revision_no_delete BEFORE DELETE ON task_revision BEGIN SELECT RAISE(ABORT,'task revisions are immutable'); END;
+CREATE TRIGGER trg_task_current_revision_forward BEFORE UPDATE OF current_revision,current_digest ON task WHEN NEW.current_revision<>OLD.current_revision AND (NEW.current_revision<>OLD.current_revision+1 OR NOT EXISTS(SELECT 1 FROM task_revision r WHERE r.task_id=NEW.task_id AND r.revision=NEW.current_revision AND r.digest=NEW.current_digest)) BEGIN SELECT RAISE(ABORT,'invalid task revision pointer'); END;
+CREATE INDEX idx_task_agent_visible ON task(repo_id,display_seq) WHERE state<>'open';
+`;
 export const MIGRATIONS = [
-  { version: 1, sql: SCHEMA_SQL_V1 },
-  { version: 2, sql: SCHEMA_SQL_V2 },
-  { version: 3, sql: SCHEMA_SQL_V3 },
-  { version: 4, sql: SCHEMA_SQL_V4 },
-  { version: 5, sql: SCHEMA_SQL_V5 },
-  { version: 6, sql: SCHEMA_SQL_V6 },
+  { version: 1, sql: SCHEMA_SQL_V1 }, { version: 2, sql: SCHEMA_SQL_V2 },
+  { version: 3, sql: SCHEMA_SQL_V3 }, { version: 4, sql: SCHEMA_SQL_V4 },
+  { version: 5, sql: SCHEMA_SQL_V5 }, { version: 6, sql: SCHEMA_SQL_V6 },
+  { version: 7, sql: SCHEMA_SQL_V7 },
 ] as const;
 /** Complete current schema, retained for schema-golden callers. */
-export const SCHEMA_SQL =
-  SCHEMA_SQL_V1 + SCHEMA_SQL_V2 + SCHEMA_SQL_V3 + SCHEMA_SQL_V4 + SCHEMA_SQL_V5 + SCHEMA_SQL_V6;
+export const SCHEMA_SQL = MIGRATIONS.map((migration) => migration.sql).join("");
 
 export interface OpenSqliteOptions {
   paths: StoragePaths;
