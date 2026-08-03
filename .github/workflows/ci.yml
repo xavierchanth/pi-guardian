@@ -25,8 +25,15 @@ jobs:
           cache: npm
       - name: Install pinned Rust toolchain
         run: |
-          rustup toolchain install "${{ steps.versions.outputs.rust }}" --profile minimal
+          rustup toolchain install "${{ steps.versions.outputs.rust }}" --profile minimal --component rustfmt --component clippy
           rustup override set "${{ steps.versions.outputs.rust }}"
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev
       - run: npm ci
       - name: Rust formatting gate
         run: cargo fmt --all -- --check
