@@ -171,6 +171,7 @@ packages/pi-tai/pi-tai.ts           Pi extension composition root
 packages/pi-tai/core.ts             stable facade for reusable core services
 packages/pi-tai/src/core/           runtime behavior and domain services
 packages/pi-tai/src/core/subagents/ nine public tools, backends, catalogs, lifecycle, and dashboard
+packages/pi-tai/src/core/tasks/     scoped task authority, dashboard rows, immutable revision import and receipts
 packages/pi-tai/src/core/isolation/ managed JJ workspace allocation, merge, and reclamation
 packages/pi-tai/src/core/jj/        enrolled repository and managed JJ workspace operations
 packages/pi-tai/src/terminal/       terminal-only themes, chrome, input, and notifications

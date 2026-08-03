@@ -74,8 +74,8 @@ const productionRegistrars: PiTaiRegistrars = {
     registerAgents(pi, {
       config: runtime.config,
       agentDir: runtime.agentDir,
-      registerDashboard: (api, resolveAgents) =>
-        registerDashboardShell(api, resolveAgents, terminalRows),
+      registerDashboard: (api, resolveAgents, resolveTasks) =>
+        registerDashboardShell(api, resolveAgents, terminalRows, resolveTasks),
       ...(runtime.backends ? { backends: runtime.backends } : {}),
       ...(runtime.defaultBackend ? { defaultBackend: runtime.defaultBackend } : {}),
     });

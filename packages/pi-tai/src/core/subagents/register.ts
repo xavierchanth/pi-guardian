@@ -22,6 +22,7 @@ import { migrateWorkspaceRegistry } from "../storage/custody-migration.ts";
 import { ensureStoragePaths, resolveStoragePaths, type StoragePaths } from "../storage/paths.ts";
 import { openDurableDatabase } from "../storage/sqlite.ts";
 import { TaskAgentAuthority } from "../tasks/agent-authority.ts";
+import { TaskDashboardAdapter } from "../tasks/dashboard.ts";
 import { HumanTaskAuthority, issueHumanCapability } from "../tasks/host-authority.ts";
 import { connectSubagentActivity } from "./activity.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
@@ -82,6 +83,7 @@ export interface AgentsDependencies {
   readonly registerDashboard?: (
     pi: ExtensionAPI,
     resolveAgents: () => SubagentManager | undefined,
+    resolveTasks: () => TaskDashboardAdapter | undefined,
   ) => void;
 }
 
@@ -92,6 +94,7 @@ interface Runtime {
   /** Owned only by production composition; injected test managers have no DB. */
   readonly database?: DatabaseSync;
   readonly storagePaths?: StoragePaths;
+  readonly dashboardTasks?: TaskDashboardAdapter;
 }
 
 /**
@@ -210,16 +213,46 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     });
     isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: ctx.cwd });
     connectSubagentActivity(pi, agents);
+    let dashboardTasks: TaskDashboardAdapter | undefined;
+    if (database) {
+      const cwd = resolve(ctx.cwd);
+      const repo = (
+        database
+          .prepare(
+            "SELECT repo_id,last_known_root FROM repository WHERE identity_proven=1 AND store_key IS NOT NULL",
+          )
+          .all() as Array<{ repo_id: string; last_known_root: string }>
+      )
+        .filter(({ last_known_root }) => {
+          const rel = relative(resolve(last_known_root), cwd);
+          return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+        })
+        .sort((a, b) => b.last_known_root.length - a.last_known_root.length)[0];
+      if (repo) {
+        const authority = HumanTaskAuthority.inject(
+          database,
+          resolveStoragePaths(),
+          repo.repo_id,
+          issueHumanCapability(`session:${ctx.sessionManager.getSessionId()}`),
+        );
+        dashboardTasks = new TaskDashboardAdapter(database, repo.repo_id, authority);
+      }
+    }
     built = {
       workspaces,
       agents,
       isolated,
       ...(database ? { database, storagePaths: resolveStoragePaths() } : {}),
+      ...(dashboardTasks ? { dashboardTasks } : {}),
     };
     return built;
   }
 
-  dependencies.registerDashboard?.(pi, () => built?.agents);
+  dependencies.registerDashboard?.(
+    pi,
+    () => built?.agents,
+    () => built?.dashboardTasks,
+  );
 
   const taskAuthority = async (ctx: ExtensionContext) => {
     const current = await requireRuntime(ctx);

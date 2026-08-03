@@ -24,6 +24,13 @@ import {
   scrollDetail,
 } from "../../core/subagents/dashboard.ts";
 import type { SubagentSnapshot } from "../../core/subagents/domain.ts";
+import type { TaskDashboardRow } from "../../core/tasks/dashboard.ts";
+
+export interface DashboardTasks {
+  list(archived: boolean): readonly TaskDashboardRow[];
+  transition(row: TaskDashboardRow, to: TaskDashboardRow["state"]): void;
+  archiveOrRestore(row: TaskDashboardRow): TaskDashboardRow;
+}
 
 /**
  * The slice of {@link SubagentManager} the dashboard needs. Narrowing it keeps
@@ -50,6 +57,9 @@ export type DashboardAction =
   | "stateNext"
   | "statePrevious"
   | "inert"
+  | "taskNew"
+  | "taskReady"
+  | "taskDone"
   | "taskEdit"
   | "taskDetail"
   | "subagentDetail"
@@ -93,6 +103,9 @@ export function resolveAction(
     return mode === "detail" ? "inert" : "primaryPrevious";
   if (matchesKey(data, "tab")) return mode === "detail" ? "inert" : "stateNext";
   if (matchesKey(data, "shift+tab")) return mode === "detail" ? "inert" : "statePrevious";
+  if (tab === "tasks" && matchesKey(data, "n")) return "taskNew";
+  if (tab === "tasks" && matchesKey(data, "r")) return "taskReady";
+  if (tab === "tasks" && matchesKey(data, "d")) return "taskDone";
   if (matchesKey(data, "enter"))
     return tab === "tasks"
       ? "taskEdit"
@@ -152,12 +165,14 @@ const TONE_COLOR: Record<DashboardTone, "border" | "accent" | "text" | "muted" |
 
 export class SubagentDashboard {
   private readonly agents: DashboardAgents | undefined;
+  private readonly tasks: DashboardTasks | undefined;
   private readonly tui: TUI;
   private readonly theme: Theme;
   private readonly close: () => void;
   private readonly readRows: (tui: TUI) => number;
   private readonly unsubscribe: () => void;
   private snapshots: readonly SubagentSnapshot[];
+  private taskRows: readonly TaskDashboardRow[] = [];
   private disposed = false;
   private generation = 0;
   private selectedId: string | undefined;
@@ -172,18 +187,21 @@ export class SubagentDashboard {
 
   constructor(options: {
     agents: DashboardAgents | undefined;
+    tasks?: DashboardTasks | undefined;
     tui: TUI;
     theme: Theme;
     close: () => void;
     readRows: (tui: TUI) => number;
   }) {
     this.agents = options.agents;
+    this.tasks = options.tasks;
     this.tui = options.tui;
     this.theme = options.theme;
     this.close = options.close;
     this.readRows = options.readRows;
     this.snapshots = this.currentRows();
-    this.selectedId = this.snapshots[0]?.id;
+    this.taskRows = this.currentTaskRows();
+    this.selectedId = this.activeIds()[0];
     this.unsubscribe = this.agents?.subscribe(() => this.reload()) ?? (() => {});
   }
 
@@ -228,11 +246,41 @@ export class SubagentDashboard {
         this.notice = undefined;
         this.requestRender();
       } else this.setNotice("Subagent detail is unavailable because no subagent is selected.");
-    } else if (action === "taskEdit")
-      this.setNotice("Task editing is unavailable until the Tasks adapter is connected.");
-    else if (action === "taskDetail")
-      this.setNotice("Task metadata detail is unavailable until the Tasks adapter is connected.");
-    else if (action === "workspaceCustodyDetail")
+    } else if (action === "taskReady" || action === "taskDone") {
+      const row = this.selectedTask();
+      if (!row || !this.tasks) this.setNotice("No task is selected.");
+      else
+        try {
+          this.tasks.transition(row, action === "taskReady" ? "ready" : "done");
+          this.reload();
+        } catch (error) {
+          this.setNotice(error instanceof Error ? error.message : String(error));
+        }
+    } else if (action === "archiveRestore") {
+      const row = this.selectedTask();
+      if (!row || !this.tasks) this.setNotice("No task is selected.");
+      else
+        try {
+          this.tasks.archiveOrRestore(row);
+          this.reload();
+        } catch (error) {
+          this.setNotice(error instanceof Error ? error.message : String(error));
+        }
+    } else if (action === "taskNew") this.setNotice("Use the task_create tool to create a task.");
+    else if (action === "taskEdit")
+      this.setNotice(
+        this.selectedTask()
+          ? "Press Enter after configuring a task editor to edit this immutable revision."
+          : "Task editing is unavailable because no task is selected.",
+      );
+    else if (action === "taskDetail") {
+      const row = this.selectedTask();
+      this.setNotice(
+        row
+          ? `${row.displayId} · ${row.state} · r${row.revision} · ${row.digest.slice(0, 12)}`
+          : "Task metadata detail is unavailable because no task is selected.",
+      );
+    } else if (action === "workspaceCustodyDetail")
       this.setNotice(
         "Workspace custody detail is unavailable until the Workspaces adapter is connected.",
       );
@@ -268,6 +316,27 @@ export class SubagentDashboard {
       return rows.rows
         .slice(0, rowBudget)
         .map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
+    if (this.primaryTab === "tasks") {
+      const capacity = dashboardBodyCapacity(rowBudget, Boolean(this.notice));
+      const ids = this.taskRows.map((row) => row.taskId);
+      const viewport = ensureVisible(ids, this.selectedId, capacity, this.viewportStart);
+      this.viewportStart = viewport.start;
+      const body = this.taskRows.slice(viewport.start, viewport.start + capacity).map((row) => {
+        const marker = row.taskId === this.selectedId ? ">" : " ";
+        return `${marker} ${row.displayId.padEnd(7)} ${row.state.padEnd(8)} r${row.revision} ${row.title}`.slice(
+          0,
+          width,
+        );
+      });
+      const lines = [
+        `[Tasks] · ${this.stateTab}`,
+        ...(this.notice ? [this.notice] : []),
+        ...(body.length ? body : ["No tasks."]),
+        "n new · r ready · d done · Enter edit · i info · p import · e archive/restore · s subagent · a actions",
+        footerHint("tasks"),
+      ];
+      return lines.slice(0, rowBudget).map((line) => this.theme.fg("text", line));
+    }
     const ids = this.snapshots.map((snapshot) => snapshot.id);
     const emptyMessage =
       this.primaryTab === "subagents"
@@ -309,14 +378,14 @@ export class SubagentDashboard {
   }
 
   private move(delta: number): void {
-    const ids = this.snapshots.map((snapshot) => snapshot.id);
+    const ids = this.activeIds();
     this.selectedId = moveSelection(ids, this.selectedId, delta);
     this.selectedIndex = Math.max(0, ids.indexOf(this.selectedId ?? ""));
     this.requestRender();
   }
 
   private navigateList(command: "pageDown" | "pageUp" | "top" | "bottom"): void {
-    const ids = this.snapshots.map((row) => row.id);
+    const ids = this.activeIds();
     if (!ids.length) return;
     const capacity = Math.max(
       1,
@@ -385,11 +454,8 @@ export class SubagentDashboard {
       ? this.snapshots.findIndex((row) => row.id === this.selectedId)
       : this.selectedIndex;
     this.snapshots = this.currentRows();
-    this.selectedId = reconcileSelection(
-      this.snapshots.map((row) => row.id),
-      this.selectedId,
-      oldIndex,
-    );
+    this.taskRows = this.currentTaskRows();
+    this.selectedId = reconcileSelection(this.activeIds(), this.selectedId, oldIndex);
     this.selectedIndex = Math.max(
       0,
       this.snapshots.findIndex((row) => row.id === this.selectedId),
@@ -404,6 +470,22 @@ export class SubagentDashboard {
     this.requestRender();
   }
 
+  private currentTaskRows(): readonly TaskDashboardRow[] {
+    return this.primaryTab === "tasks"
+      ? (this.tasks?.list(this.stateTab === "archived") ?? [])
+      : [];
+  }
+
+  private activeIds(): string[] {
+    return this.primaryTab === "tasks"
+      ? this.taskRows.map((row) => row.taskId)
+      : this.snapshots.map((row) => row.id);
+  }
+
+  private selectedTask(): TaskDashboardRow | undefined {
+    return this.taskRows.find((row) => row.taskId === this.selectedId);
+  }
+
   private requestRender(): void {
     if (!this.disposed) this.tui.requestRender();
   }
@@ -413,6 +495,7 @@ export function registerDashboardShell(
   pi: ExtensionAPI,
   resolveAgents: () => DashboardAgents | undefined,
   readRows: (tui: TUI) => number,
+  resolveTasks: () => DashboardTasks | undefined = () => undefined,
 ): void {
   const command = {
     description: "Show running and finished subagents",
@@ -425,9 +508,10 @@ export function registerDashboardShell(
       // dashboard is not a delegation, so an absent runtime renders as the
       // empty state rather than forcing an expensive construction.
       const agents = resolveAgents();
+      const tasks = resolveTasks();
       await ctx.ui.custom<void>(
         (tui, theme, _keybindings, done) =>
-          new SubagentDashboard({ agents, tui, theme, close: () => done(), readRows }),
+          new SubagentDashboard({ agents, tasks, tui, theme, close: () => done(), readRows }),
         {
           overlay: true,
           overlayOptions: {
@@ -450,10 +534,12 @@ export function registerDashboardShell(
           return;
         }
         const agents = resolveAgents();
+        const tasks = resolveTasks();
         await ctx.ui.custom<void>(
           (tui, theme, _keybindings, done) => {
             const view = new SubagentDashboard({
               agents,
+              tasks,
               tui,
               theme,
               close: () => done(),
