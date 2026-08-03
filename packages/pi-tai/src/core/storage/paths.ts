@@ -25,6 +25,8 @@ export interface StoragePaths {
   migration: string;
   sessions: string;
   workspaces: string;
+  /** Immutable Markdown task revision bodies. */
+  taskBodies: string;
 }
 
 function absoluteOr(value: string | undefined, fallback: string): string {
@@ -69,6 +71,7 @@ export function resolveStoragePaths(
     migration: join(state, "migration"),
     sessions: join(data, "sessions"),
     workspaces: join(data, "workspaces"),
+    taskBodies: join(data, "tasks", "bodies"),
   };
 }
 
@@ -92,6 +95,7 @@ export function ensureStoragePaths(paths: StoragePaths): void {
     paths.migration,
     paths.sessions,
     paths.workspaces,
+    paths.taskBodies,
   ])
     ensurePrivateDirectory(path);
 }

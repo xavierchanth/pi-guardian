@@ -84,7 +84,7 @@ export class HumanTaskAuthority {
     title = normalizeTitle(title);
     validateBody(body);
     this.provenance(provenanceSessionId);
-    const prior = this.prior(operationId);
+    const prior = this.retry(operationId);
     if (prior) return prior;
     const id = `task_${randomUUID().replaceAll("-", "")}` as TaskId,
       digest = sha(body),
@@ -137,7 +137,7 @@ export class HumanTaskAuthority {
   revise(operationId: string, id: TaskId, expectedRevision: number, body: string) {
     operation(operationId);
     validateBody(body);
-    const prior = this.prior(operationId);
+    const prior = this.retry(operationId);
     if (prior) return prior;
     const row = this.owned(id);
     if (row.current_revision !== expectedRevision) throw new TaskAuthorityError("conflict");
@@ -178,7 +178,7 @@ export class HumanTaskAuthority {
   ) {
     operation(operationId);
     if (!TASK_STATES.includes(to)) throw new TaskAuthorityError("invalid");
-    const prior = this.prior(operationId);
+    const prior = this.retry(operationId);
     if (prior) return prior;
     return this.tx(() => {
       const r = this.owned(id);
@@ -206,9 +206,9 @@ export class HumanTaskAuthority {
   reconcile(): Array<{ task: HumanTask; receipt: Receipt }> {
     const rows = this.db
       .prepare(
-        "SELECT operation_id FROM task_operation WHERE repo_id=? AND status='intent' ORDER BY created_at",
+        "SELECT operation_id FROM task_operation WHERE repo_id=? AND principal=? AND status='intent' ORDER BY created_at",
       )
-      .all(this.repoId) as { operation_id: string }[];
+      .all(this.repoId, this.cap.principal) as { operation_id: string }[];
     const out: Array<{ task: HumanTask; receipt: Receipt }> = [];
     for (const { operation_id } of rows) {
       const o = this.op(operation_id);
@@ -290,9 +290,9 @@ export class HumanTaskAuthority {
                 );
               this.db
                 .prepare(
-                  "UPDATE task SET current_revision=?,current_digest=?,updated_at=? WHERE task_id=?",
+                  "UPDATE task SET current_revision=?,current_digest=?,updated_at=? WHERE task_id=? AND repo_id=?",
                 )
-                .run(o.target_revision, o.target_digest, now, o.task_id);
+                .run(o.target_revision, o.target_digest, now, o.task_id, this.repoId);
               return this.finish(
                 operation_id,
                 "recovered",
@@ -324,7 +324,7 @@ export class HumanTaskAuthority {
     if (!r) throw new TaskAuthorityError("conflict");
     return r;
   }
-  private intent(op: string, id: TaskId, kind: string, rev: number, digest: string, body: string) {
+  private intent(op: string, id: TaskId, kind: string, rev: number, digest: string, _body: string) {
     this.db
       .prepare(
         "INSERT INTO task_operation(operation_id,repo_id,principal,task_id,kind,status,target_revision,target_digest,payload,created_at) VALUES(?,?,?,?,?,'intent',?,?,'{}',?)",
@@ -393,6 +393,19 @@ export class HumanTaskAuthority {
       ...(r.provenance_session_id ? { provenanceSessionId: String(r.provenance_session_id) } : {}),
     };
   }
+  private retry(op: string) {
+    const existing = this.db
+      .prepare("SELECT repo_id,principal,status FROM task_operation WHERE operation_id=?")
+      .get(op) as { repo_id: string; principal: string; status: string } | undefined;
+    if (!existing) return undefined;
+    // Operation IDs are globally unique and cannot be probed or stolen across scopes.
+    if (existing.repo_id !== this.repoId || existing.principal !== this.cap.principal)
+      throw new TaskAuthorityError("conflict");
+    if (existing.status === "intent") this.reconcile();
+    const result = this.prior(op);
+    if (!result) throw new TaskAuthorityError("conflict");
+    return result;
+  }
   private prior(op: string) {
     const r = this.db
       .prepare(
@@ -440,7 +453,7 @@ export class HumanTaskAuthority {
     }
   }
   private staged(id: TaskId, r: number, digest: string): string | undefined {
-    const p = join(this.paths.data, this.rel(id, r));
+    const p = join(privateChild(this.paths.taskBodies, this.repoId, id), `${r}.md`);
     if (!existsSync(p)) return undefined;
     const b = readFileSync(p);
     if (sha(b) !== digest) throw new TaskAuthorityError("conflict");
@@ -450,9 +463,9 @@ export class HumanTaskAuthority {
     return join("tasks", "bodies", this.repoId, id, `${r}.md`);
   }
   private publish(id: TaskId, r: number, body: string, digest: string) {
-    const root = privateChild(join(this.paths.data, "tasks", "bodies"), this.repoId, id);
+    const root = privateChild(this.paths.taskBodies, this.repoId, id);
     ensurePrivateDirectory(root);
-    const target = join(this.paths.data, this.rel(id, r));
+    const target = join(root, `${r}.md`);
     if (existsSync(target)) {
       if (sha(readFileSync(target)) !== digest) throw new TaskAuthorityError("conflict");
       return;
@@ -486,7 +499,7 @@ function normalizeTitle(v: string) {
   return n;
 }
 function validateBody(v: string) {
-  if (Buffer.byteLength(v) > 16 * 1024 * 1024) throw new TaskAuthorityError("invalid");
+  if (Buffer.byteLength(v) > 1024 * 1024) throw new TaskAuthorityError("invalid");
 }
 function sha(v: string | Buffer) {
   return createHash("sha256").update(v).digest("hex");

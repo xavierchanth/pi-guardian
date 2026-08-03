@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { resolveStoragePaths } from "../storage/paths.ts";
 import { checkGitIgnored } from "./git-ignore.ts";
 
 export const FILE_TOOL_NAMES = new Set(["read", "write", "edit", "grep", "find", "ls"]);
@@ -54,12 +55,30 @@ export async function checkFileToolPath(
     const workspace = await realpath(cwd);
     const lexicalWorkspace = resolve(cwd);
     const allowedRoots = await canonicalRoots([workspace, ...tempCandidates]);
-    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName)
-      ? await canonicalRoots(readCandidates)
-      : [];
+    const allReadRoots = await canonicalRoots(readCandidates);
+    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName) ? allReadRoots : [];
     const canonicalAgentDirectory = await canonicalRoot(agentDirectory);
     const lexicalAgentDirectory = resolve(agentDirectory);
     const target = await canonicalizeTarget(cwd, requestedPath);
+
+    // Task bodies are human-owned immutable records, not an agent file API.
+    // Resolve from XDG on every decision so no lexical alias or legacy agent
+    // directory can bypass the durable storage boundary.
+    const taskRoot = resolveStoragePaths().taskBodies;
+    const canonicalTaskRoot = await canonicalRoot(taskRoot);
+    if (
+      canonicalTaskRoot &&
+      (contains(taskRoot, target.lexicalPath) || contains(canonicalTaskRoot, target.canonicalPath))
+    ) {
+      return READ_ONLY_FILE_TOOL_NAMES.has(toolName)
+        ? review(
+            target,
+            requestedPath,
+            "sensitive-path",
+            "The target is private human-owned task body storage.",
+          )
+        : deny(target.canonicalPath, "Built-in file tools cannot mutate task body storage.");
+    }
 
     if (
       contains(lexicalWorkspace, target.lexicalPath) &&
@@ -102,6 +121,15 @@ export async function checkFileToolPath(
       contains(root, target.canonicalPath),
     );
     const withinReadBoundary = readRoots.some((root) => contains(root, target.canonicalPath));
+    const withinProtectedReadRoot = allReadRoots.some((root) =>
+      contains(root, target.canonicalPath),
+    );
+    if (!READ_ONLY_FILE_TOOL_NAMES.has(toolName) && withinProtectedReadRoot) {
+      return deny(
+        target.canonicalPath,
+        `Built-in file tools cannot modify a read-only package or skill root: ${target.canonicalPath}.`,
+      );
+    }
     if (!withinWritableBoundary && !withinReadBoundary) {
       return deny(
         target.canonicalPath,
@@ -126,6 +154,18 @@ export async function checkFileToolPath(
       return { kind: "allow", canonicalPath: target.canonicalPath };
     }
 
+    // A checkout may be managed by JJ without a colocated .git directory; its
+    // dependency tree is still ignored private material rather than an
+    // automatic-read exception.
+    if (contains(join(workspace, "node_modules"), target.canonicalPath)) {
+      return review(
+        target,
+        requestedPath,
+        "gitignored",
+        "The dependency tree is ignored by the checkout and requires Guardian review.",
+      );
+    }
+
     const ignoreDecision = await classifyGitIgnore(target);
     if (ignoreDecision) {
       return review(target, requestedPath, ignoreDecision.trigger, ignoreDecision.detail);
@@ -144,7 +184,6 @@ export async function checkFileToolPath(
 export function defaultReadCandidates(): string[] {
   const agentDir = getAgentDir();
   const piPackageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-  const runtimePackageRoot = findPiPackageRoot(process.argv[1]);
   return [
     piTaiPackageRoot(),
     ...["skills", "extensions", "prompts", "themes", "npm", "git"].map((directory) =>
@@ -155,7 +194,6 @@ export function defaultReadCandidates(): string[] {
     ),
     join(homedir(), ".agents", "skills"),
     resolve(dirname(piPackageEntry), ".."),
-    ...(runtimePackageRoot ? [runtimePackageRoot] : []),
   ];
 }
 
@@ -347,15 +385,6 @@ function deny(canonicalPath: string, reason: string): PathDecision {
  */
 function piTaiPackageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-}
-
-function findPiPackageRoot(entry: string | undefined): string | undefined {
-  if (!entry) return undefined;
-  const marker = `${sep}@earendil-works${sep}pi-coding-agent${sep}`;
-  const absolute = resolve(entry);
-  const markerIndex = absolute.lastIndexOf(marker);
-  if (markerIndex === -1) return undefined;
-  return absolute.slice(0, markerIndex + marker.length - 1);
 }
 
 export async function canonicalizeCwd(cwd: string): Promise<string> {

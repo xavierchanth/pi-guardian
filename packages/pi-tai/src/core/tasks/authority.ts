@@ -35,7 +35,7 @@ export class AgentTaskQuery {
   list(): AgentVisibleTask[] {
     return this.db
       .prepare(
-        "SELECT task_id,display_id,state,title,current_revision,current_digest FROM task WHERE repo_id=? AND state<>'open' ORDER BY display_seq",
+        "SELECT task_id,display_id,state,title,current_revision,current_digest FROM task WHERE repo_id=? AND state IN ('ready','doing','blocked') ORDER BY display_seq",
       )
       .all(this.repoId)
       .map((row) => visible(row as Record<string, unknown>));
@@ -43,7 +43,7 @@ export class AgentTaskQuery {
   get(id: TaskId): AgentVisibleTask | undefined {
     const row = this.db
       .prepare(
-        "SELECT task_id,display_id,state,title,current_revision,current_digest FROM task WHERE repo_id=? AND task_id=? AND state<>'open'",
+        "SELECT task_id,display_id,state,title,current_revision,current_digest FROM task WHERE repo_id=? AND task_id=? AND state IN ('ready','doing','blocked')",
       )
       .get(this.repoId, id) as Record<string, unknown> | undefined;
     return row ? visible(row) : undefined;
