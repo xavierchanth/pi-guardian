@@ -99,8 +99,7 @@ export class TaskDashboardAdapter {
   }
 
   async edit(row: TaskDashboardRow): Promise<void> {
-    if (row.archived)
-      throw new Error("Archived tasks cannot be edited; restore the task first.");
+    if (row.archived) throw new Error("Archived tasks cannot be edited; restore the task first.");
     const editor = resolveTaskEditor(undefined);
     if (!editor) throw new Error("No task editor is available; configure EDITOR.");
     const body = new TextDecoder("utf-8", { fatal: true }).decode(

@@ -89,19 +89,19 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
       }))
     : input.snapshots.length
       ? input.snapshots.slice(start, start + capacity).map((snapshot, offset) => {
-        const index = start + offset;
-        return {
-          text: entryText(snapshot, index === selected, inner, input.now),
-          tone: rowTone(snapshot, index === selected),
-        };
-      })
-    : capacity > 0
-      ? [
-          {
-            text: truncateToWidth(input.emptyMessage ?? DASHBOARD_EMPTY, inner, "..."),
-            tone: "muted",
-          },
-        ]
+          const index = start + offset;
+          return {
+            text: entryText(snapshot, index === selected, inner, input.now),
+            tone: rowTone(snapshot, index === selected),
+          };
+        })
+      : capacity > 0
+        ? [
+            {
+              text: truncateToWidth(input.emptyMessage ?? DASHBOARD_EMPTY, inner, "..."),
+              tone: "muted",
+            },
+          ]
         : [];
 
   const primary = input.primaryTab ?? "subagents";

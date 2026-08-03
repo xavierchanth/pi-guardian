@@ -381,9 +381,10 @@ export class SubagentDashboard {
         bodyRows: body.length
           ? body.map((text, index) => ({
               text,
-              tone: this.taskRows[viewport.start + index]?.taskId === this.selectedId
-                ? ("accent" as const)
-                : ("text" as const),
+              tone:
+                this.taskRows[viewport.start + index]?.taskId === this.selectedId
+                  ? ("accent" as const)
+                  : ("text" as const),
             }))
           : [{ text: "No tasks.", tone: "muted" }],
         hint: "n new · r ready · d done · Enter edit · p import · e archive/restore · Esc close",
