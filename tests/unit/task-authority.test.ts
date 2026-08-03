@@ -77,7 +77,17 @@ test("MG-3 exact agent transitions, actionable validation, privacy, replay, and 
   );
   assert.deepEqual(human.archive(original.task.taskId), human.archive(original.task.taskId));
   assert.equal(human.restore(original.task.taskId).state, "ready");
-  assert.equal(human.archive(original.task.taskId).state, "ready");
+  const doing = human.transition(
+    "human-doing-archive",
+    original.task.taskId,
+    "ready",
+    1,
+    "doing",
+  );
+  assert.equal(doing.task.state, "doing");
+  assert.equal(human.archive(original.task.taskId).state, "doing");
+  assert.equal(human.restore(original.task.taskId).state, "doing");
+  assert.equal(human.archive(original.task.taskId).state, "doing");
 
   const hidden = ["missing", original.task.taskId];
   const foreign = HumanTaskAuthority.inject(

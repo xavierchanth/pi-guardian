@@ -64,11 +64,13 @@ test("dashboard import prompts for and delivers the selected immutable revision"
   const made = authority.create("create-ui-import", null, "Derived title\nbody");
   authority.revise("revise-ui-import", made.task.taskId, 1, "latest");
   const digest = createHash("sha256").update("Derived title\nbody").digest("hex");
-  const prompts = ["1", digest];
+  const prompts = ["1"];
+  const labels: string[] = [];
   const events: string[] = [];
   const adapter = new TaskDashboardAdapter(db, "repo", authority, paths, {
     principal: "alice",
-    async input() {
+    async input(label) {
+      labels.push(label);
       return prompts.shift();
     },
     send(message) {
@@ -84,6 +86,9 @@ test("dashboard import prompts for and delivers the selected immutable revision"
   assert.equal(adapter.list(false)[0]?.title, "Derived title");
   const imported = await adapter.importRevision(adapter.list(false)[0]!);
   assert.equal(imported?.revision, 1);
+  assert.equal(labels.length, 1);
+  assert.match(labels[0]!, /immutable revision/);
+  assert.doesNotMatch(labels[0]!, /digest/i);
   assert.deepEqual(events, ["send", "trace"]);
 });
 

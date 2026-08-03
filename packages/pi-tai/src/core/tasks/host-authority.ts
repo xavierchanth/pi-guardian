@@ -260,23 +260,34 @@ export class HumanTaskAuthority {
   restore(id: TaskId): HumanTask {
     return this.tx(() => {
       const row = this.owned(id);
-      if (!(["done", "dropped"] as string[]).includes(row.state))
-        throw new TaskAuthorityError("conflict");
+      if (!row.archived_at) throw new TaskAuthorityError("conflict");
+      const terminal = (["done", "dropped"] as string[]).includes(row.state);
+      const restoredState = terminal ? "ready" : row.state;
       const now = new Date().toISOString();
       this.db
         .prepare(
-          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'restore',?,'ready',?)",
+          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'restore',?,?,?)",
         )
-        .run(`audit_${randomUUID()}`, id, this.repoId, this.cap.principal, row.state, now);
-      // The transition audit is separate because both state and archive guards verify the latest matching action.
-      this.db
-        .prepare(
-          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'transition',?,'ready',?)",
-        )
-        .run(`audit_${randomUUID()}`, id, this.repoId, this.cap.principal, row.state, now);
+        .run(
+          `audit_${randomUUID()}`,
+          id,
+          this.repoId,
+          this.cap.principal,
+          row.state,
+          restoredState,
+          now,
+        );
+      if (terminal)
+        this.db
+          .prepare(
+            "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'transition',?,'ready',?)",
+          )
+          .run(`audit_${randomUUID()}`, id, this.repoId, this.cap.principal, row.state, now);
       const result = this.db
         .prepare(
-          "UPDATE task SET state='ready',archived_at=NULL,updated_at=? WHERE task_id=? AND repo_id=? AND archived_at IS NOT NULL AND state IN('done','dropped')",
+          terminal
+            ? "UPDATE task SET state='ready',archived_at=NULL,updated_at=? WHERE task_id=? AND repo_id=? AND archived_at IS NOT NULL AND state IN('done','dropped')"
+            : "UPDATE task SET archived_at=NULL,updated_at=? WHERE task_id=? AND repo_id=? AND archived_at IS NOT NULL AND state IN('ready','doing','blocked')",
         )
         .run(now, id, this.repoId);
       if (result.changes !== 1) throw new TaskAuthorityError("conflict");

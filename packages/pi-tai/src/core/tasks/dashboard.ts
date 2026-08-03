@@ -80,11 +80,11 @@ export class TaskDashboardAdapter {
     this.authority.transition(randomUUID(), row.taskId, row.state, row.revision, to);
   }
 
-  create(title?: string): void {
+  async create(title?: string): Promise<void> {
     const editor = resolveTaskEditor(undefined);
     if (!editor) throw new Error("No task editor is available; configure EDITOR.");
     const emptyDigest = createHash("sha256").update("").digest("hex");
-    const result = editTaskBody({
+    const result = await editTaskBody({
       runtimeRoot: this.paths.runtime,
       taskId: "new-task",
       revision: 0,
@@ -98,7 +98,9 @@ export class TaskDashboardAdapter {
     if (result.status === "unchanged") throw new Error("Task creation cancelled: body is empty.");
   }
 
-  edit(row: TaskDashboardRow): void {
+  async edit(row: TaskDashboardRow): Promise<void> {
+    if (row.archived)
+      throw new Error("Archived tasks cannot be edited; restore the task first.");
     const editor = resolveTaskEditor(undefined);
     if (!editor) throw new Error("No task editor is available; configure EDITOR.");
     const body = new TextDecoder("utf-8", { fatal: true }).decode(
@@ -106,7 +108,7 @@ export class TaskDashboardAdapter {
         join(privateChild(this.paths.taskBodies, this.repoId, row.taskId), `${row.revision}.md`),
       ),
     );
-    const result = editTaskBody({
+    const result = await editTaskBody({
       runtimeRoot: this.paths.runtime,
       taskId: row.taskId,
       revision: row.revision,
@@ -133,11 +135,6 @@ export class TaskDashboardAdapter {
     if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("Invalid task revision");
     const knownDigest = this.revisionDigest(row.taskId, revision);
     if (!knownDigest) throw new Error("Exact task revision is unavailable");
-    const digest = await this.importUi.input(
-      `Verify ${row.displayId} r${revision}: sha256 digest`,
-      knownDigest,
-    );
-    if (digest === undefined) return undefined;
     return importFixedRevision({
       db: this.db,
       paths: this.paths,
@@ -145,7 +142,7 @@ export class TaskDashboardAdapter {
       principal: this.importUi.principal,
       taskId: row.taskId,
       revision,
-      expectedDigest: digest.trim().toLowerCase(),
+      expectedDigest: knownDigest,
       sendMessage: (message) => this.importUi!.send(message),
       appendTrace: (event) => this.importUi!.trace(event),
     });

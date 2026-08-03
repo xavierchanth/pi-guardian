@@ -30,8 +30,8 @@ export interface DashboardTasks {
   list(archived: boolean): readonly TaskDashboardRow[];
   transition(row: TaskDashboardRow, to: TaskDashboardRow["state"]): void;
   archiveOrRestore(row: TaskDashboardRow): TaskDashboardRow;
-  create(title?: string): void;
-  edit(row: TaskDashboardRow): void;
+  create(title?: string): Promise<void>;
+  edit(row: TaskDashboardRow): Promise<void>;
   importRevision(row: TaskDashboardRow): Promise<unknown>;
 }
 
@@ -259,6 +259,8 @@ export class SubagentDashboard {
         } catch (error) {
           this.setNotice(error instanceof Error ? error.message : String(error));
         }
+    } else if (action === "archiveRestore" && this.primaryTab !== "tasks") {
+      this.setNotice(unavailableNotice(action, this.primaryTab));
     } else if (action === "archiveRestore") {
       const row = this.selectedTask();
       if (!row || !this.tasks) this.setNotice("No task is selected.");
@@ -272,13 +274,7 @@ export class SubagentDashboard {
     } else if (action === "taskNew") {
       if (!this.tasks)
         this.setNotice("Task creation is unavailable because storage is not connected.");
-      else
-        try {
-          this.tasks.create();
-          this.reload();
-        } catch (error) {
-          this.setNotice(error instanceof Error ? error.message : String(error));
-        }
+      else void this.runExternalEditor(() => this.tasks!.create());
     } else if (action === "taskImportRevision") {
       const row = this.selectedTask();
       if (!row || !this.tasks) this.setNotice("No task is selected.");
@@ -297,13 +293,9 @@ export class SubagentDashboard {
       const row = this.selectedTask();
       if (!row || !this.tasks)
         this.setNotice("Task editing is unavailable because no task is selected.");
-      else
-        try {
-          this.tasks.edit(row);
-          this.reload();
-        } catch (error) {
-          this.setNotice(error instanceof Error ? error.message : String(error));
-        }
+      else if (row.archived)
+        this.setNotice("Archived tasks cannot be edited; restore the task first.");
+      else void this.runExternalEditor(() => this.tasks!.edit(row));
     } else if (action === "taskDetail") {
       const row = this.selectedTask();
       this.setNotice(
@@ -322,6 +314,23 @@ export class SubagentDashboard {
         ? this.scroll(action as "pageDown" | "pageUp" | "top" | "bottom")
         : this.navigateList(action as "pageDown" | "pageUp" | "top" | "bottom");
     else this.setNotice(unavailableNotice(action, this.primaryTab));
+  }
+
+  private async runExternalEditor(operation: () => Promise<void>): Promise<void> {
+    const generation = this.generation;
+    let stopped = false;
+    try {
+      this.tui.stop();
+      stopped = true;
+      await operation();
+      if (!this.disposed && generation === this.generation) this.reload();
+    } catch (error) {
+      if (!this.disposed && generation === this.generation)
+        this.setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (stopped) this.tui.start();
+      if (!this.disposed && generation === this.generation) this.tui.requestRender(true);
+    }
   }
 
   render(width: number): string[] {
@@ -360,14 +369,27 @@ export class SubagentDashboard {
           "",
         );
       });
-      const lines = [
-        `[Tasks] · ${this.stateTab}`,
-        ...(this.notice ? [this.notice] : []),
-        ...(body.length ? body : ["No tasks."]),
-        "n new · r ready · d done · Enter edit · i info · p import · e archive/restore · s subagent · a actions",
-        footerHint("tasks"),
-      ];
-      return lines.slice(0, rowBudget).map((line) => this.theme.fg("text", line));
+      return renderDashboard({
+        snapshots: [],
+        selected: 0,
+        width,
+        now: Date.now(),
+        maxRows: rowBudget,
+        primaryTab: "tasks",
+        stateTab: this.stateTab,
+        ...(this.notice ? { notice: this.notice } : {}),
+        bodyRows: body.length
+          ? body.map((text, index) => ({
+              text,
+              tone: this.taskRows[viewport.start + index]?.taskId === this.selectedId
+                ? ("accent" as const)
+                : ("text" as const),
+            }))
+          : [{ text: "No tasks.", tone: "muted" }],
+        hint: "n new · r ready · d done · Enter edit · p import · e archive/restore · Esc close",
+      })
+        .slice(0, rowBudget)
+        .map((row) => this.theme.fg(TONE_COLOR[row.tone], row.text));
     }
     const ids = this.snapshots.map((snapshot) => snapshot.id);
     const emptyMessage =

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -54,22 +54,26 @@ export type TaskEditResult =
   | { status: "refused" | "error"; tempFile: string; message: string };
 
 /** External editing with an intentionally retained recovery file unless commit succeeds. */
-export function editTaskBody(options: EditTaskBodyOptions): TaskEditResult {
+export async function editTaskBody(options: EditTaskBodyOptions): Promise<TaskEditResult> {
   const root = privateChild(options.runtimeRoot, "task-editor");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   chmodSync(root, 0o700);
   const tempFile = join(root, `${options.taskId}-r${options.revision}-${randomUUID()}.md`);
   writeFileSync(tempFile, options.body, { encoding: "utf8", mode: 0o600, flag: "wx" });
   try {
-    const child = spawnSync(options.editor.executable, [...options.editor.args, tempFile], {
-      stdio: "inherit",
-      shell: false,
+    const status = await new Promise<{ code: number | null; error?: Error }>((resolve) => {
+      const child = spawn(options.editor.executable, [...options.editor.args, tempFile], {
+        stdio: "inherit",
+        shell: false,
+      });
+      child.once("error", (error) => resolve({ code: null, error }));
+      child.once("close", (code) => resolve({ code }));
     });
-    if (child.error || child.status !== 0)
+    if (status.error || status.code !== 0)
       return {
         status: "error",
         tempFile,
-        message: child.error?.message ?? `Editor exited with status ${String(child.status)}`,
+        message: status.error?.message ?? `Editor exited with status ${String(status.code)}`,
       };
     const bytes = readFileSync(tempFile);
     const body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

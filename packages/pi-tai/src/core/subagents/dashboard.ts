@@ -33,6 +33,8 @@ export interface DashboardInput {
   readonly notice?: string;
   readonly emptyMessage?: string;
   readonly hint?: string;
+  /** Alternate preformatted body used by sibling dashboard tabs. */
+  readonly bodyRows?: readonly DashboardRow[];
 }
 
 export const DASHBOARD_TITLE = "Subagents";
@@ -80,8 +82,13 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
       ? Math.max(1, input.snapshots.length)
       : dashboardBodyCapacity(input.maxRows, Boolean(input.notice));
   const start = Math.max(0, Math.trunc(input.start ?? 0));
-  const body: DashboardRow[] = input.snapshots.length
-    ? input.snapshots.slice(start, start + capacity).map((snapshot, offset) => {
+  const body: DashboardRow[] = input.bodyRows
+    ? input.bodyRows.slice(0, capacity).map((row) => ({
+        text: truncateToWidth(row.text, inner, "..."),
+        tone: row.tone,
+      }))
+    : input.snapshots.length
+      ? input.snapshots.slice(start, start + capacity).map((snapshot, offset) => {
         const index = start + offset;
         return {
           text: entryText(snapshot, index === selected, inner, input.now),
@@ -95,7 +102,7 @@ export function renderDashboard(input: DashboardInput): DashboardRow[] {
             tone: "muted",
           },
         ]
-      : [];
+        : [];
 
   const primary = input.primaryTab ?? "subagents";
   const state = input.stateTab ?? "current";

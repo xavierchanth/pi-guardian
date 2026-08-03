@@ -55,8 +55,9 @@ export async function checkFileToolPath(
     const workspace = await realpath(cwd);
     const lexicalWorkspace = resolve(cwd);
     const allowedRoots = await canonicalRoots([workspace, ...tempCandidates]);
-    const allReadRoots = await canonicalRoots(readCandidates);
-    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName) ? allReadRoots : [];
+    const readRoots = READ_ONLY_FILE_TOOL_NAMES.has(toolName)
+      ? await canonicalRoots(readCandidates)
+      : [];
     const canonicalAgentDirectory = await canonicalRoot(agentDirectory);
     const lexicalAgentDirectory = resolve(agentDirectory);
     const target = await canonicalizeTarget(cwd, requestedPath);
@@ -121,15 +122,6 @@ export async function checkFileToolPath(
       contains(root, target.canonicalPath),
     );
     const withinReadBoundary = readRoots.some((root) => contains(root, target.canonicalPath));
-    const withinProtectedReadRoot = allReadRoots.some((root) =>
-      contains(root, target.canonicalPath),
-    );
-    if (!READ_ONLY_FILE_TOOL_NAMES.has(toolName) && withinProtectedReadRoot) {
-      return deny(
-        target.canonicalPath,
-        `Built-in file tools cannot modify a read-only package or skill root: ${target.canonicalPath}.`,
-      );
-    }
     if (!withinWritableBoundary && !withinReadBoundary) {
       return deny(
         target.canonicalPath,
