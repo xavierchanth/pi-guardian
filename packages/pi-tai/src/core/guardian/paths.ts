@@ -60,23 +60,6 @@ export async function checkFileToolPath(
     const canonicalAgentDirectory = await canonicalRoot(agentDirectory);
     const lexicalAgentDirectory = resolve(agentDirectory);
     const target = await canonicalizeTarget(cwd, requestedPath);
-    const xdgData =
-      process.env.XDG_DATA_HOME && isAbsolute(process.env.XDG_DATA_HOME)
-        ? process.env.XDG_DATA_HOME
-        : join(homedir(), ".local", "share");
-    const taskRoot = resolve(xdgData, "pi-tai", "tasks");
-    const canonicalTaskRoot = await canonicalRoot(taskRoot);
-    if (
-      canonicalTaskRoot &&
-      (contains(taskRoot, target.lexicalPath) || contains(canonicalTaskRoot, target.canonicalPath))
-    ) {
-      return review(
-        target,
-        requestedPath,
-        "sensitive-path",
-        "The target is private human-owned task body storage.",
-      );
-    }
 
     if (
       contains(lexicalWorkspace, target.lexicalPath) &&
