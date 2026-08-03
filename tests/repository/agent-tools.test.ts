@@ -116,16 +116,19 @@ describe("subagent tool surface", () => {
     for (const root of roots) await rm(root, { recursive: true, force: true });
   });
 
-  it("registers exactly the nine-tool surface", async () => {
+  it("registers exactly the twelve-tool surface", async () => {
     const { host } = await harness();
 
     assert.deepEqual([...host.tools.keys()].sort(), [
+      "list_tasks",
+      "read_task",
       "subagent_cancel",
       "subagent_check",
       "subagent_list",
       "subagent_send",
       "subagent_spawn",
       "subagent_wait",
+      "update_task",
       "workspace_discard",
       "workspace_merge",
       "workspace_status",

@@ -185,6 +185,19 @@ export class HumanTaskAuthority {
       if (r.state !== expectedState || r.current_revision !== expectedRevision)
         throw new TaskAuthorityError("conflict");
       this.intent(operationId, id, "transitioned", r.current_revision, r.current_digest, "");
+      this.db
+        .prepare(
+          "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'transition',?,?,?)",
+        )
+        .run(
+          `audit_${randomUUID()}`,
+          id,
+          this.repoId,
+          this.cap.principal,
+          r.state,
+          to,
+          new Date().toISOString(),
+        );
       const result = this.db
         .prepare(
           "UPDATE task SET state=?,updated_at=? WHERE task_id=? AND repo_id=? AND state=? AND current_revision=?",

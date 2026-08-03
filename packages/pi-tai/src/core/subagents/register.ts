@@ -19,8 +19,9 @@ import { SqliteWorkspaceCustody } from "../isolation/sqlite-custody.ts";
 import { SQLiteCustodyCoordinator } from "../isolation/sqlite-custody-coordinator.ts";
 import { JjProcessExecutor } from "../jj/executor.ts";
 import { migrateWorkspaceRegistry } from "../storage/custody-migration.ts";
-import { ensureStoragePaths, resolveStoragePaths } from "../storage/paths.ts";
+import { ensureStoragePaths, resolveStoragePaths, type StoragePaths } from "../storage/paths.ts";
 import { openDurableDatabase } from "../storage/sqlite.ts";
+import { TaskAgentAuthority } from "../tasks/agent-authority.ts";
 import { connectSubagentActivity } from "./activity.ts";
 import { BackendRegistry, type SubagentBackend } from "./backend.ts";
 import { ClaudeBackend } from "./backends/claude.ts";
@@ -89,6 +90,7 @@ interface Runtime {
   readonly isolated: IsolatedSubagents;
   /** Owned only by production composition; injected test managers have no DB. */
   readonly database?: DatabaseSync;
+  readonly storagePaths?: StoragePaths;
 }
 
 /**
@@ -196,11 +198,79 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
     });
     isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: ctx.cwd });
     connectSubagentActivity(pi, agents);
-    built = { workspaces, agents, isolated, ...(database ? { database } : {}) };
+    built = {
+      workspaces,
+      agents,
+      isolated,
+      ...(database ? { database, storagePaths: resolveStoragePaths() } : {}),
+    };
     return built;
   }
 
   dependencies.registerDashboard?.(pi, () => built?.agents);
+
+  const taskAuthority = async (ctx: ExtensionContext) => {
+    const current = await requireRuntime(ctx);
+    if (!current.database || !current.storagePaths) throw new Error("Task is unavailable");
+    const repo = current.database
+      .prepare("SELECT repo_id FROM repository WHERE identity_proven=1 AND last_known_root=?")
+      .get(ctx.cwd) as { repo_id: string } | undefined;
+    if (!repo) throw new Error("Task is unavailable");
+    return new TaskAgentAuthority(
+      current.database,
+      current.storagePaths,
+      repo.repo_id,
+      `agent:${ctx.sessionManager.getSessionId()}`,
+    );
+  };
+  const text = (value: unknown) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+    details: value,
+  });
+  pi.registerTool({
+    name: "list_tasks",
+    label: "List Tasks",
+    description: "List unarchived ready, doing, and blocked tasks in this repository.",
+    parameters: Type.Object({}),
+    execute: async (_id, _p, _s, _u, ctx) => text((await taskAuthority(ctx)).list()),
+  });
+  pi.registerTool({
+    name: "read_task",
+    label: "Read Task",
+    description: "Read one visible repository task and record a fixed read receipt.",
+    parameters: Type.Object({ task_id: Type.String() }),
+    execute: async (_id, p, _s, _u, ctx) => text((await taskAuthority(ctx)).read(p.task_id)),
+  });
+  pi.registerTool({
+    name: "update_task",
+    label: "Update Task",
+    description:
+      "Transition a task, append a note, or set its title. Cannot archive, reopen, drop, or revise its body.",
+    parameters: Type.Union([
+      Type.Object({
+        task_id: Type.String(),
+        action: Type.Literal("transition"),
+        to: Type.Union([
+          Type.Literal("ready"),
+          Type.Literal("doing"),
+          Type.Literal("blocked"),
+          Type.Literal("done"),
+        ]),
+      }),
+      Type.Object({
+        task_id: Type.String(),
+        action: Type.Literal("add_note"),
+        note: Type.String(),
+      }),
+      Type.Object({
+        task_id: Type.String(),
+        action: Type.Literal("set_title"),
+        title: Type.String(),
+      }),
+    ]),
+    execute: async (_id, p, _s, _u, ctx) =>
+      text((await taskAuthority(ctx)).update(p.task_id, p as never)),
+  });
 
   // ---- spawning -------------------------------------------------------------
 

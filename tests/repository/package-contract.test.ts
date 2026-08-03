@@ -77,18 +77,21 @@ test("checkpoint prompt accepts additional instructions", () => {
   assert.match(prompt, /without weakening the safety requirements above/);
 });
 
-test("the subagent tool surface is the nine-tool set", () => {
+test("the production agent tool surface is the twelve-tool set", () => {
   const source = readFileSync(join(root, "packages/pi-tai/src/core/subagents/register.ts"), "utf8");
   const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)]
     .map((match) => match[1])
     .sort();
   assert.deepEqual(registered, [
+    "list_tasks",
+    "read_task",
     "subagent_cancel",
     "subagent_check",
     "subagent_list",
     "subagent_send",
     "subagent_spawn",
     "subagent_wait",
+    "update_task",
     "workspace_discard",
     "workspace_merge",
     "workspace_status",
