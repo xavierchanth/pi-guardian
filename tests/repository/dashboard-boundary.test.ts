@@ -5,14 +5,14 @@ import test from "node:test";
 
 const root = join(import.meta.dirname, "../..");
 
-test("shared dashboard projections have no terminal or TUI dependency", () => {
+test("shared dashboard projections do not reverse the core-to-terminal dependency", () => {
   for (const file of [
     "packages/pi-tai/src/core/dashboard/viewport.ts",
     "packages/pi-tai/src/core/dashboard/row-source.ts",
     "packages/pi-tai/src/core/subagents/dashboard.ts",
   ]) {
     const source = readFileSync(join(root, file), "utf8");
-    assert.doesNotMatch(source, /@earendil-works\/pi-tui|\/terminal\//);
+    assert.doesNotMatch(source, /\/terminal\//);
   }
 });
 

@@ -6,7 +6,7 @@
  * colours and forwards keystrokes.
  */
 
-import { truncateToWidth, visibleWidth } from "../dashboard/columns.ts";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { dashboardBodyCapacity } from "../dashboard/viewport.ts";
 import { contextUtilisation, type SubagentSnapshot } from "./domain.ts";
 

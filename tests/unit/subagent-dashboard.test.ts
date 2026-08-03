@@ -194,17 +194,22 @@ test("detail windows current running output and scrolling commands clamp safely"
   assert.equal(scrollDetail(17, "down", 17), 17);
 });
 
-test("shared frames and narrow Tasks rows have exact column width for CJK and emoji", () => {
+test("shared frames use pi-tui column semantics for Unicode edge cases", () => {
+  const edgeCases = ["© copyright", "1️⃣ keycap", "zero​width", "é combining", "修正😀emoji界面"];
   for (const width of [24, 25, 31, 40]) {
-    const rows = renderDashboard({
-      snapshots: [],
-      selected: 0,
-      width,
-      now: NOW,
-      primaryTab: "tasks",
-      bodyRows: [{ text: "> T-7 open r1 修正😀emoji界面", tone: "accent" }],
-    });
-    for (const row of rows) assert.equal(visibleWidth(row.text), width, `${width}: ${row.text}`);
+    for (const text of edgeCases) {
+      const rows = renderDashboard({
+        snapshots: [],
+        selected: 0,
+        width,
+        now: NOW,
+        primaryTab: "tasks",
+        bodyRows: [{ text: `> T-7 open r1 ${text}`, tone: "accent" }],
+      });
+      for (const row of rows) {
+        assert.equal(visibleWidth(row.text), width, `${width}: ${row.text}`);
+      }
+    }
   }
 });
 
