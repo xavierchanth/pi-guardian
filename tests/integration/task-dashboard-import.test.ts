@@ -34,10 +34,10 @@ function fixture() {
 }
 
 test("task dashboard reads current and archived rows and restores with attributed audits", () => {
-  const { db, authority } = fixture();
+  const { paths, db, authority } = fixture();
   const made = authority.create("create-dashboard-1", "Real row", "one");
   authority.transition("ready-dashboard-1", made.task.taskId, "open", 1, "ready");
-  const adapter = new TaskDashboardAdapter(db, "repo", authority);
+  const adapter = new TaskDashboardAdapter(db, "repo", authority, paths);
   assert.deepEqual(
     adapter.list(false).map((r) => r.title),
     ["Real row"],

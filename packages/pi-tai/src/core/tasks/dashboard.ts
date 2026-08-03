@@ -6,6 +6,7 @@ import type { StoragePaths } from "../storage/paths.ts";
 import { privateChild } from "../storage/paths.ts";
 import type { TaskId, TaskState } from "./authority.ts";
 import type { HumanTaskAuthority } from "./host-authority.ts";
+import { editTaskBody, resolveTaskEditor } from "../../terminal/tasks/editor.ts";
 
 export interface TaskDashboardRow {
   taskId: TaskId;
@@ -24,10 +25,12 @@ export class TaskDashboardAdapter {
   private readonly db: DatabaseSync;
   private readonly repoId: string;
   private readonly authority: HumanTaskAuthority;
-  constructor(db: DatabaseSync, repoId: string, authority: HumanTaskAuthority) {
+  private readonly paths: StoragePaths;
+  constructor(db: DatabaseSync, repoId: string, authority: HumanTaskAuthority, paths: StoragePaths) {
     this.db = db;
     this.repoId = repoId;
     this.authority = authority;
+    this.paths = paths;
   }
 
   list(archived: boolean): TaskDashboardRow[] {
@@ -62,6 +65,53 @@ export class TaskDashboardAdapter {
 
   transition(row: TaskDashboardRow, to: TaskState): void {
     this.authority.transition(randomUUID(), row.taskId, row.state, row.revision, to);
+  }
+
+  create(title: string): void {
+    const editor = resolveTaskEditor(undefined);
+    if (!editor) throw new Error("No task editor is available; configure EDITOR.");
+    const emptyDigest = createHash("sha256").update("").digest("hex");
+    const result = editTaskBody({
+      runtimeRoot: this.paths.runtime,
+      taskId: "new-task",
+      revision: 0,
+      digest: emptyDigest,
+      body: "",
+      editor,
+      current: () => ({ revision: 0, digest: emptyDigest }),
+      commit: (body) => this.authority.create(randomUUID(), title, body),
+    });
+    if (result.status === "error" || result.status === "refused") throw new Error(result.message);
+    if (result.status === "unchanged") throw new Error("Task creation cancelled: body is empty.");
+  }
+
+  edit(row: TaskDashboardRow): void {
+    const editor = resolveTaskEditor(undefined);
+    if (!editor) throw new Error("No task editor is available; configure EDITOR.");
+    const body = new TextDecoder("utf-8", { fatal: true }).decode(
+      readFileSync(join(privateChild(this.paths.taskBodies, this.repoId, row.taskId), `${row.revision}.md`)),
+    );
+    const result = editTaskBody({
+      runtimeRoot: this.paths.runtime,
+      taskId: row.taskId,
+      revision: row.revision,
+      digest: row.digest,
+      body,
+      editor,
+      current: () => {
+        const current = this.list(false).find((candidate) => candidate.taskId === row.taskId);
+        return { revision: current?.revision ?? -1, digest: current?.digest ?? "" };
+      },
+      commit: (nextBody) => this.authority.revise(randomUUID(), row.taskId, row.revision, nextBody),
+    });
+    if (result.status === "error" || result.status === "refused") throw new Error(result.message);
+  }
+
+  revisionDigest(taskId: TaskId, revision: number): string | undefined {
+    const row = this.db
+      .prepare("SELECT digest FROM task_revision WHERE task_id=? AND revision=?")
+      .get(taskId, revision) as { digest: string } | undefined;
+    return row?.digest;
   }
 }
 

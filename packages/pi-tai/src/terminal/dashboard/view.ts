@@ -30,6 +30,8 @@ export interface DashboardTasks {
   list(archived: boolean): readonly TaskDashboardRow[];
   transition(row: TaskDashboardRow, to: TaskDashboardRow["state"]): void;
   archiveOrRestore(row: TaskDashboardRow): TaskDashboardRow;
+  create(title: string): void;
+  edit(row: TaskDashboardRow): void;
 }
 
 /**
@@ -266,13 +268,26 @@ export class SubagentDashboard {
         } catch (error) {
           this.setNotice(error instanceof Error ? error.message : String(error));
         }
-    } else if (action === "taskNew") this.setNotice("Use the task_create tool to create a task.");
-    else if (action === "taskEdit")
-      this.setNotice(
-        this.selectedTask()
-          ? "Press Enter after configuring a task editor to edit this immutable revision."
-          : "Task editing is unavailable because no task is selected.",
-      );
+    } else if (action === "taskNew") {
+      if (!this.tasks) this.setNotice("Task creation is unavailable because storage is not connected.");
+      else
+        try {
+          this.tasks.create("New task");
+          this.reload();
+        } catch (error) {
+          this.setNotice(error instanceof Error ? error.message : String(error));
+        }
+    } else if (action === "taskEdit") {
+      const row = this.selectedTask();
+      if (!row || !this.tasks) this.setNotice("Task editing is unavailable because no task is selected.");
+      else
+        try {
+          this.tasks.edit(row);
+          this.reload();
+        } catch (error) {
+          this.setNotice(error instanceof Error ? error.message : String(error));
+        }
+    }
     else if (action === "taskDetail") {
       const row = this.selectedTask();
       this.setNotice(

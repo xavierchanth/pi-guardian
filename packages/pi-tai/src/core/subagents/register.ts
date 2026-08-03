@@ -229,13 +229,14 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
         })
         .sort((a, b) => b.last_known_root.length - a.last_known_root.length)[0];
       if (repo) {
+        const paths = resolveStoragePaths();
         const authority = HumanTaskAuthority.inject(
           database,
-          resolveStoragePaths(),
+          paths,
           repo.repo_id,
           issueHumanCapability(`session:${ctx.sessionManager.getSessionId()}`),
         );
-        dashboardTasks = new TaskDashboardAdapter(database, repo.repo_id, authority);
+        dashboardTasks = new TaskDashboardAdapter(database, repo.repo_id, authority, paths);
       }
     }
     built = {
