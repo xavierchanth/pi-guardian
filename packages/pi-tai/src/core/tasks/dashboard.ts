@@ -6,7 +6,7 @@ import type { StoragePaths } from "../storage/paths.ts";
 import { privateChild } from "../storage/paths.ts";
 import type { TaskId, TaskState } from "./authority.ts";
 import type { HumanTaskAuthority } from "./host-authority.ts";
-import { editTaskBody, resolveTaskEditor } from "../../terminal/tasks/editor.ts";
+import { editTaskBody, resolveTaskEditor } from "./editor.ts";
 
 export interface TaskDashboardRow {
   taskId: TaskId;
@@ -26,11 +26,24 @@ export class TaskDashboardAdapter {
   private readonly repoId: string;
   private readonly authority: HumanTaskAuthority;
   private readonly paths: StoragePaths;
-  constructor(db: DatabaseSync, repoId: string, authority: HumanTaskAuthority, paths: StoragePaths) {
+  private readonly importUi?: {
+    input(label: string, placeholder?: string): Promise<string | undefined>;
+    send(message: string): void | Promise<void>;
+    trace(event: FixedRevisionImport): void | Promise<void>;
+    principal: string;
+  };
+  constructor(
+    db: DatabaseSync,
+    repoId: string,
+    authority: HumanTaskAuthority,
+    paths: StoragePaths,
+    importUi?: TaskDashboardAdapter["importUi"],
+  ) {
     this.db = db;
     this.repoId = repoId;
     this.authority = authority;
     this.paths = paths;
+    this.importUi = importUi;
   }
 
   list(archived: boolean): TaskDashboardRow[] {
@@ -67,7 +80,7 @@ export class TaskDashboardAdapter {
     this.authority.transition(randomUUID(), row.taskId, row.state, row.revision, to);
   }
 
-  create(title: string): void {
+  create(title?: string): void {
     const editor = resolveTaskEditor(undefined);
     if (!editor) throw new Error("No task editor is available; configure EDITOR.");
     const emptyDigest = createHash("sha256").update("").digest("hex");
@@ -79,7 +92,7 @@ export class TaskDashboardAdapter {
       body: "",
       editor,
       current: () => ({ revision: 0, digest: emptyDigest }),
-      commit: (body) => this.authority.create(randomUUID(), title, body),
+      commit: (body) => this.authority.create(randomUUID(), title?.trim() || null, body),
     });
     if (result.status === "error" || result.status === "refused") throw new Error(result.message);
     if (result.status === "unchanged") throw new Error("Task creation cancelled: body is empty.");
@@ -89,7 +102,9 @@ export class TaskDashboardAdapter {
     const editor = resolveTaskEditor(undefined);
     if (!editor) throw new Error("No task editor is available; configure EDITOR.");
     const body = new TextDecoder("utf-8", { fatal: true }).decode(
-      readFileSync(join(privateChild(this.paths.taskBodies, this.repoId, row.taskId), `${row.revision}.md`)),
+      readFileSync(
+        join(privateChild(this.paths.taskBodies, this.repoId, row.taskId), `${row.revision}.md`),
+      ),
     );
     const result = editTaskBody({
       runtimeRoot: this.paths.runtime,
@@ -105,6 +120,35 @@ export class TaskDashboardAdapter {
       commit: (nextBody) => this.authority.revise(randomUUID(), row.taskId, row.revision, nextBody),
     });
     if (result.status === "error" || result.status === "refused") throw new Error(result.message);
+  }
+
+  async importRevision(row: TaskDashboardRow): Promise<FixedRevisionImport | undefined> {
+    if (!this.importUi) throw new Error("Fixed task revision import is unavailable.");
+    const revisionText = await this.importUi.input(
+      `Import ${row.displayId}: immutable revision`,
+      String(row.revision),
+    );
+    if (revisionText === undefined) return undefined;
+    const revision = Number(revisionText.trim());
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("Invalid task revision");
+    const knownDigest = this.revisionDigest(row.taskId, revision);
+    if (!knownDigest) throw new Error("Exact task revision is unavailable");
+    const digest = await this.importUi.input(
+      `Verify ${row.displayId} r${revision}: sha256 digest`,
+      knownDigest,
+    );
+    if (digest === undefined) return undefined;
+    return importFixedRevision({
+      db: this.db,
+      paths: this.paths,
+      repoId: this.repoId,
+      principal: this.importUi.principal,
+      taskId: row.taskId,
+      revision,
+      expectedDigest: digest.trim().toLowerCase(),
+      sendMessage: (message) => this.importUi!.send(message),
+      appendTrace: (event) => this.importUi!.trace(event),
+    });
   }
 
   revisionDigest(taskId: TaskId, revision: number): string | undefined {

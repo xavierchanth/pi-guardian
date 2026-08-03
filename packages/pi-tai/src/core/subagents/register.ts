@@ -236,7 +236,28 @@ export function registerAgents(pi: ExtensionAPI, dependencies: AgentsDependencie
           repo.repo_id,
           issueHumanCapability(`session:${ctx.sessionManager.getSessionId()}`),
         );
-        dashboardTasks = new TaskDashboardAdapter(database, repo.repo_id, authority, paths);
+        const principal = `session:${ctx.sessionManager.getSessionId()}`;
+        dashboardTasks = new TaskDashboardAdapter(database, repo.repo_id, authority, paths, {
+          principal,
+          input: (label, placeholder) => ctx.ui.input(label, placeholder),
+          send: (message) => {
+            if (typeof pi.sendMessage !== "function")
+              throw new Error("Message delivery is unavailable.");
+            pi.sendMessage(
+              { customType: "pi-tai-task-import", content: message, display: true },
+              { deliverAs: "nextTurn", triggerTurn: false },
+            );
+          },
+          trace: (event) => {
+            pi.appendEntry("pi-tai-task-import-receipt", {
+              taskId: event.taskId,
+              displayId: event.displayId,
+              revision: event.revision,
+              digest: event.digest,
+              deliveryId: event.deliveryId,
+            });
+          },
+        });
       }
     }
     built = {

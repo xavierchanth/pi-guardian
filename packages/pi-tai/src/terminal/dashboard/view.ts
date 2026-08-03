@@ -8,7 +8,7 @@
  */
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, type TUI } from "@earendil-works/pi-tui";
+import { matchesKey, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import {
   type DashboardPrimaryTab,
   type DashboardStateTab,
@@ -30,8 +30,9 @@ export interface DashboardTasks {
   list(archived: boolean): readonly TaskDashboardRow[];
   transition(row: TaskDashboardRow, to: TaskDashboardRow["state"]): void;
   archiveOrRestore(row: TaskDashboardRow): TaskDashboardRow;
-  create(title: string): void;
+  create(title?: string): void;
   edit(row: TaskDashboardRow): void;
+  importRevision(row: TaskDashboardRow): Promise<unknown>;
 }
 
 /**
@@ -269,17 +270,33 @@ export class SubagentDashboard {
           this.setNotice(error instanceof Error ? error.message : String(error));
         }
     } else if (action === "taskNew") {
-      if (!this.tasks) this.setNotice("Task creation is unavailable because storage is not connected.");
+      if (!this.tasks)
+        this.setNotice("Task creation is unavailable because storage is not connected.");
       else
         try {
-          this.tasks.create("New task");
+          this.tasks.create();
           this.reload();
         } catch (error) {
           this.setNotice(error instanceof Error ? error.message : String(error));
         }
+    } else if (action === "taskImportRevision") {
+      const row = this.selectedTask();
+      if (!row || !this.tasks) this.setNotice("No task is selected.");
+      else {
+        this.setNotice(`Selecting immutable revision for ${row.displayId}…`);
+        void this.tasks.importRevision(row).then(
+          (result) =>
+            this.setNotice(
+              result ? `Imported a verified revision of ${row.displayId}.` : undefined,
+            ),
+          (error: unknown) =>
+            this.setNotice(error instanceof Error ? error.message : String(error)),
+        );
+      }
     } else if (action === "taskEdit") {
       const row = this.selectedTask();
-      if (!row || !this.tasks) this.setNotice("Task editing is unavailable because no task is selected.");
+      if (!row || !this.tasks)
+        this.setNotice("Task editing is unavailable because no task is selected.");
       else
         try {
           this.tasks.edit(row);
@@ -287,8 +304,7 @@ export class SubagentDashboard {
         } catch (error) {
           this.setNotice(error instanceof Error ? error.message : String(error));
         }
-    }
-    else if (action === "taskDetail") {
+    } else if (action === "taskDetail") {
       const row = this.selectedTask();
       this.setNotice(
         row
@@ -338,9 +354,10 @@ export class SubagentDashboard {
       this.viewportStart = viewport.start;
       const body = this.taskRows.slice(viewport.start, viewport.start + capacity).map((row) => {
         const marker = row.taskId === this.selectedId ? ">" : " ";
-        return `${marker} ${row.displayId.padEnd(7)} ${row.state.padEnd(8)} r${row.revision} ${row.title}`.slice(
-          0,
+        return truncateToWidth(
+          `${marker} ${row.displayId.padEnd(7)} ${row.state.padEnd(8)} r${row.revision} ${row.title}`,
           width,
+          "",
         );
       });
       const lines = [

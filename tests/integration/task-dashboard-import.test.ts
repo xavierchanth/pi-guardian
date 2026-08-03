@@ -59,6 +59,34 @@ test("task dashboard reads current and archived rows and restores with attribute
   );
 });
 
+test("dashboard import prompts for and delivers the selected immutable revision", async () => {
+  const { paths, db, authority } = fixture();
+  const made = authority.create("create-ui-import", null, "Derived title\nbody");
+  authority.revise("revise-ui-import", made.task.taskId, 1, "latest");
+  const digest = createHash("sha256").update("Derived title\nbody").digest("hex");
+  const prompts = ["1", digest];
+  const events: string[] = [];
+  const adapter = new TaskDashboardAdapter(db, "repo", authority, paths, {
+    principal: "alice",
+    async input() {
+      return prompts.shift();
+    },
+    send(message) {
+      assert.match(message, /Derived title/);
+      assert.doesNotMatch(message, /latest/);
+      events.push("send");
+    },
+    trace(event) {
+      assert.equal(event.digest, digest);
+      events.push("trace");
+    },
+  });
+  assert.equal(adapter.list(false)[0]?.title, "Derived title");
+  const imported = await adapter.importRevision(adapter.list(false)[0]!);
+  assert.equal(imported?.revision, 1);
+  assert.deepEqual(events, ["send", "trace"]);
+});
+
 test("fixed import never switches to latest and receipts before nextTurn delivery and trace", async () => {
   const { paths, db, authority } = fixture();
   const made = authority.create("create-import-01", "Import", "revision one");

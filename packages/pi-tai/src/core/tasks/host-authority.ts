@@ -76,13 +76,15 @@ export class HumanTaskAuthority {
   }
   create(
     operationId: string,
-    title: string,
+    title: string | null,
     body: string,
     provenanceSessionId?: string,
   ): { task: HumanTask; receipt: Receipt } {
     operation(operationId);
-    title = normalizeTitle(title);
     validateBody(body);
+    title = normalizeTitle(
+      title ?? body.split(/\r?\n/u).find((line) => line.trim()) ?? "Untitled task",
+    );
     this.provenance(provenanceSessionId);
     const prior = this.retry(operationId);
     if (prior) return prior;
