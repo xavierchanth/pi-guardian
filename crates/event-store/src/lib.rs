@@ -187,13 +187,13 @@ impl EventStore {
                 |row| row.get::<_, u64>(0),
             )
             .optional()?;
-        if let Some(current) = current_revision {
-            if projection.revision < current {
-                return Err(StoreError::RevisionRegression {
-                    current,
-                    incoming: projection.revision,
-                });
-            }
+        if let Some(current) = current_revision
+            && projection.revision < current
+        {
+            return Err(StoreError::RevisionRegression {
+                current,
+                incoming: projection.revision,
+            });
         }
         let last_sequence = transaction.query_row(
             "SELECT COALESCE(MAX(sequence), 0) FROM session_events WHERE session_id = ?1",
