@@ -298,12 +298,9 @@ export class HumanTaskAuthority {
             provenanceSessionId?: string;
           };
           const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
-          if (body === undefined) {
-            this.db
-              .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
-              .run(operation_id);
-            continue;
-          }
+          // Absence may mean publication is still in flight or temporarily unreadable.
+          // Keep the intent retryable; only positively stale intents are terminal.
+          if (body === undefined) continue;
           out.push(
             this.tx(() => {
               const now = new Date().toISOString();
@@ -346,12 +343,9 @@ export class HumanTaskAuthority {
           );
         } else if (o.kind === "revised") {
           const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
-          if (body === undefined) {
-            this.db
-              .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
-              .run(operation_id);
-            continue;
-          }
+          // Absence may mean publication is still in flight or temporarily unreadable.
+          // Keep the intent retryable; only positively stale intents are terminal.
+          if (body === undefined) continue;
           const r = this.owned(o.task_id as TaskId);
           if (r.current_revision === o.target_revision - 1)
             out.push(
@@ -387,8 +381,8 @@ export class HumanTaskAuthority {
           else this.fail(operation_id);
         } else this.fail(operation_id);
       } catch {
-        // One corrupt, stale, or unprovable intent must never disable task/custody startup.
-        this.fail(operation_id);
+        // IO and lock failures are not proof that an intent is invalid. Leave it
+        // pending for a later startup while continuing with independent intents.
       }
     }
     return out;

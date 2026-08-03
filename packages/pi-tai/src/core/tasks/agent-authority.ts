@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { StoragePaths } from "../storage/paths.ts";
+import { privateChild, type StoragePaths } from "../storage/paths.ts";
 
 export class TaskUnavailableError extends Error {
   constructor() {
@@ -148,15 +148,13 @@ export class TaskAgentAuthority {
   private snapshot(task: any, receipt: boolean) {
     let body: string;
     try {
-      body = readFileSync(
+      const bytes = readFileSync(
         join(
-          this.paths.taskBodies,
-          this.repoId,
-          String(task.task_id),
+          privateChild(this.paths.taskBodies, this.repoId, String(task.task_id)),
           `${Number(task.revision)}.md`,
         ),
-        "utf8",
       );
+      body = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
       throw new TaskUnavailableError();
     }
