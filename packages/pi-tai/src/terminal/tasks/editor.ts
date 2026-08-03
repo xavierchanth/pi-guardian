@@ -10,8 +10,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { delimiter, join } from "node:path";
-import { parseEditorCommand } from "../../terminal/response-editor/command.ts";
-import { privateChild } from "../storage/paths.ts";
+import { parseEditorCommand } from "../response-editor/command.ts";
+import { privateChild } from "../../core/storage/paths.ts";
 
 export interface TaskEditorChoice {
   executable: string;

@@ -342,11 +342,14 @@ export class HumanTaskAuthority {
             }),
           );
         } else if (o.kind === "revised") {
-          const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
-          // Absence may mean publication is still in flight or temporarily unreadable.
-          // Keep the intent retryable; only positively stale intents are terminal.
-          if (body === undefined) continue;
           const r = this.owned(o.task_id as TaskId);
+          if (r.current_revision !== o.target_revision - 1) {
+            this.fail(operation_id);
+            continue;
+          }
+          const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
+          // Absence at the expected boundary may mean publication is still in flight.
+          if (body === undefined) continue;
           if (r.current_revision === o.target_revision - 1)
             out.push(
               this.tx(() => {
@@ -380,9 +383,10 @@ export class HumanTaskAuthority {
             );
           else this.fail(operation_id);
         } else this.fail(operation_id);
-      } catch {
-        // IO and lock failures are not proof that an intent is invalid. Leave it
-        // pending for a later startup while continuing with independent intents.
+      } catch (error) {
+        // Malformed durable payload is positive evidence of a terminal intent.
+        // IO and lock failures remain pending for a later startup.
+        if (error instanceof SyntaxError) this.fail(operation_id);
       }
     }
     return out;
