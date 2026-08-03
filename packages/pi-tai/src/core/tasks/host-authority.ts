@@ -184,7 +184,14 @@ export class HumanTaskAuthority {
       const r = this.owned(id);
       if (r.state !== expectedState || r.current_revision !== expectedRevision)
         throw new TaskAuthorityError("conflict");
-      this.intent(operationId, id, "transitioned", r.current_revision, r.current_digest, "");
+      this.intent(
+        operationId,
+        id,
+        "transitioned",
+        r.current_revision,
+        r.current_digest,
+        r.current_digest,
+      );
       this.db
         .prepare(
           "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'human',?,'transition',?,?,?)",
@@ -219,7 +226,11 @@ export class HumanTaskAuthority {
   archive(id: TaskId): HumanTask {
     return this.tx(() => {
       const row = this.owned(id);
-      if (!(["done", "dropped"] as string[]).includes(row.state))
+      if (row.archived_at) {
+        if ((["done", "dropped"] as string[]).includes(row.state)) return this.task(id);
+        throw new TaskAuthorityError("conflict");
+      }
+      if (!(["ready", "doing", "blocked"] as string[]).includes(row.state))
         throw new TaskAuthorityError("conflict");
       const now = new Date().toISOString();
       this.db
@@ -278,103 +289,114 @@ export class HumanTaskAuthority {
       .all(this.repoId, this.cap.principal) as { operation_id: string }[];
     const out: Array<{ task: HumanTask; receipt: Receipt }> = [];
     for (const { operation_id } of rows) {
-      const o = this.op(operation_id);
-      if (o.kind === "created") {
-        const p = JSON.parse(o.payload) as {
-          title: string;
-          seq: number;
-          provenanceSessionId?: string;
-        };
-        const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
-        if (body === undefined) {
-          this.db
-            .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
-            .run(operation_id);
-          continue;
-        }
-        out.push(
-          this.tx(() => {
-            const now = new Date().toISOString();
+      try {
+        const o = this.op(operation_id);
+        if (o.kind === "created") {
+          const p = JSON.parse(o.payload) as {
+            title: string;
+            seq: number;
+            provenanceSessionId?: string;
+          };
+          const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
+          if (body === undefined) {
             this.db
-              .prepare(
-                "INSERT OR IGNORE INTO task(task_id,repo_id,display_seq,display_id,title,state,current_revision,current_digest,provenance_session_id,created_at,updated_at) VALUES(?,?,?,?,?,'open',1,?,?,?,?)",
-              )
-              .run(
-                o.task_id,
-                this.repoId,
-                p.seq,
-                `T-${p.seq}`,
-                p.title,
-                o.target_digest,
-                p.provenanceSessionId ?? null,
-                now,
-                now,
-              );
-            this.db
-              .prepare("INSERT OR IGNORE INTO task_revision VALUES(?,?,?,?,?,?)")
-              .run(
-                o.task_id,
-                1,
-                o.target_digest,
-                Buffer.byteLength(body),
-                this.rel(o.task_id as TaskId, 1),
-                now,
-              );
-            return this.finish(
-              operation_id,
-              "recovered",
-              null,
-              1,
-              null,
-              "open",
-              null,
-              o.target_digest,
-            );
-          }),
-        );
-      } else if (o.kind === "revised") {
-        const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
-        if (body === undefined) {
-          this.db
-            .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
-            .run(operation_id);
-          continue;
-        }
-        const r = this.owned(o.task_id as TaskId);
-        if (r.current_revision === o.target_revision - 1)
+              .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
+              .run(operation_id);
+            continue;
+          }
           out.push(
             this.tx(() => {
               const now = new Date().toISOString();
               this.db
-                .prepare("INSERT OR IGNORE INTO task_revision VALUES(?,?,?,?,?,?)")
+                .prepare(
+                  "INSERT OR IGNORE INTO task(task_id,repo_id,display_seq,display_id,title,state,current_revision,current_digest,provenance_session_id,created_at,updated_at) VALUES(?,?,?,?,?,'open',1,?,?,?,?)",
+                )
                 .run(
                   o.task_id,
-                  o.target_revision,
+                  this.repoId,
+                  p.seq,
+                  `T-${p.seq}`,
+                  p.title,
                   o.target_digest,
-                  Buffer.byteLength(body),
-                  this.rel(o.task_id as TaskId, o.target_revision),
+                  p.provenanceSessionId ?? null,
+                  now,
                   now,
                 );
               this.db
-                .prepare(
-                  "UPDATE task SET current_revision=?,current_digest=?,updated_at=? WHERE task_id=? AND repo_id=?",
-                )
-                .run(o.target_revision, o.target_digest, now, o.task_id, this.repoId);
+                .prepare("INSERT OR IGNORE INTO task_revision VALUES(?,?,?,?,?,?)")
+                .run(
+                  o.task_id,
+                  1,
+                  o.target_digest,
+                  Buffer.byteLength(body),
+                  this.rel(o.task_id as TaskId, 1),
+                  now,
+                );
               return this.finish(
                 operation_id,
                 "recovered",
-                r.current_revision,
-                o.target_revision,
-                r.state,
-                r.state,
-                r.current_digest,
+                null,
+                1,
+                null,
+                "open",
+                null,
                 o.target_digest,
               );
             }),
           );
+        } else if (o.kind === "revised") {
+          const body = this.staged(o.task_id as TaskId, o.target_revision, o.target_digest);
+          if (body === undefined) {
+            this.db
+              .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=?")
+              .run(operation_id);
+            continue;
+          }
+          const r = this.owned(o.task_id as TaskId);
+          if (r.current_revision === o.target_revision - 1)
+            out.push(
+              this.tx(() => {
+                const now = new Date().toISOString();
+                this.db
+                  .prepare("INSERT OR IGNORE INTO task_revision VALUES(?,?,?,?,?,?)")
+                  .run(
+                    o.task_id,
+                    o.target_revision,
+                    o.target_digest,
+                    Buffer.byteLength(body),
+                    this.rel(o.task_id as TaskId, o.target_revision),
+                    now,
+                  );
+                this.db
+                  .prepare(
+                    "UPDATE task SET current_revision=?,current_digest=?,updated_at=? WHERE task_id=? AND repo_id=?",
+                  )
+                  .run(o.target_revision, o.target_digest, now, o.task_id, this.repoId);
+                return this.finish(
+                  operation_id,
+                  "recovered",
+                  r.current_revision,
+                  o.target_revision,
+                  r.state,
+                  r.state,
+                  r.current_digest,
+                  o.target_digest,
+                );
+              }),
+            );
+          else this.fail(operation_id);
+        } else this.fail(operation_id);
+      } catch {
+        // One corrupt, stale, or unprovable intent must never disable task/custody startup.
+        this.fail(operation_id);
       }
     }
     return out;
+  }
+  private fail(operationId: string) {
+    this.db
+      .prepare("UPDATE task_operation SET status='failed' WHERE operation_id=? AND status='intent'")
+      .run(operationId);
   }
   private provenance(id?: string) {
     if (id && !this.db.prepare("SELECT 1 FROM pi_session WHERE session_id=?").get(id))
@@ -383,10 +405,15 @@ export class HumanTaskAuthority {
   private owned(id: TaskId) {
     const r = this.db
       .prepare(
-        "SELECT state,current_revision,current_digest FROM task WHERE task_id=? AND repo_id=?",
+        "SELECT state,current_revision,current_digest,archived_at FROM task WHERE task_id=? AND repo_id=?",
       )
       .get(id, this.repoId) as
-      | { state: TaskState; current_revision: number; current_digest: string }
+      | {
+          state: TaskState;
+          current_revision: number;
+          current_digest: string;
+          archived_at: string | null;
+        }
       | undefined;
     if (!r) throw new TaskAuthorityError("conflict");
     return r;
@@ -489,8 +516,7 @@ export class HumanTaskAuthority {
       task: this.task(r.task_id as TaskId),
       receipt: {
         operationId: op,
-        taskId: r.task_id,
-        ...q,
+        taskId: r.task_id as TaskId,
         kind: q.kind,
         beforeRevision: q.from_revision,
         afterRevision: q.to_revision,
@@ -516,7 +542,9 @@ export class HumanTaskAuthority {
       try {
         this.db.exec("ROLLBACK");
       } catch {}
-      throw e instanceof TaskAuthorityError ? e : new TaskAuthorityError("conflict");
+      throw e instanceof TaskAuthorityError
+        ? e
+        : new TaskAuthorityError("conflict", e instanceof Error ? e.message : undefined);
     }
   }
   private staged(id: TaskId, r: number, digest: string): string | undefined {

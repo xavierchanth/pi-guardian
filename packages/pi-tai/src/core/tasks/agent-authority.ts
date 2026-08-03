@@ -9,6 +9,12 @@ export class TaskUnavailableError extends Error {
     super("Task is unavailable");
   }
 }
+export class TaskInvalidError extends Error {
+  readonly code = "invalid";
+  constructor(message = "Invalid task action") {
+    super(message.slice(0, 160));
+  }
+}
 export type AgentTaskAction =
   | { action: "transition"; to: "ready" | "doing" | "blocked" | "done" }
   | { action: "add_note"; note: string }
@@ -54,10 +60,15 @@ export class TaskAgentAuthority {
   update(id: string, action: AgentTaskAction) {
     try {
       return this.tx(() => {
+        // Visibility is resolved first so invalid input cannot probe hidden tasks.
         const task = this.visible(id);
         const now = new Date().toISOString();
-        if (!action || !["transition", "add_note", "set_title"].includes(action.action))
-          throw new Error();
+        if (
+          !action ||
+          typeof action !== "object" ||
+          !["transition", "add_note", "set_title"].includes(action.action)
+        )
+          throw new TaskInvalidError();
         if (
           (action.action === "transition" &&
             ("note" in action || "title" in action || !("to" in action))) ||
@@ -66,7 +77,7 @@ export class TaskAgentAuthority {
           (action.action === "set_title" &&
             ("to" in action || "note" in action || !("title" in action)))
         )
-          throw new Error();
+          throw new TaskInvalidError();
         if (action.action === "add_note") {
           const note = cleanNote(action.note);
           this.db
@@ -94,15 +105,13 @@ export class TaskAgentAuthority {
             .run(title, now, task.task_id, this.repoId);
           if (changed.changes !== 1) throw new Error();
         } else {
-          if (
-            !(
-              action.to === "ready" ||
-              action.to === "doing" ||
-              action.to === "blocked" ||
-              action.to === "done"
-            )
-          )
-            throw new Error();
+          const allowed: Record<string, readonly string[]> = {
+            ready: ["doing", "blocked"],
+            doing: ["blocked", "ready", "done"],
+            blocked: ["doing", "ready"],
+          };
+          if (!allowed[String(task.state)]?.includes(action.to))
+            throw new TaskInvalidError("Invalid visible task transition");
           this.db
             .prepare(
               "INSERT INTO task_audit(audit_id,task_id,repo_id,actor,principal,operation,from_state,to_state,created_at) VALUES(?,?,?,'agent',?,'transition',?,?,?)",
@@ -131,7 +140,8 @@ export class TaskAgentAuthority {
         if (!settled) throw new Error();
         return this.snapshot(settled as any, true);
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof TaskInvalidError) throw error;
       throw new TaskUnavailableError();
     }
   }
@@ -202,19 +212,20 @@ export class TaskAgentAuthority {
   }
 }
 function cleanTitle(value: unknown) {
-  if (typeof value !== "string") throw new Error();
+  if (typeof value !== "string") throw new TaskInvalidError("Title must be text");
   const title = value.normalize("NFC").trim().replace(/\s+/gu, " ");
-  if (!title || title.length > 512 || /[\u0000-\u001f\u007f]/u.test(title)) throw new Error();
+  if (!title || title.length > 512 || /[\u0000-\u001f\u007f]/u.test(title))
+    throw new TaskInvalidError("Title must be nonblank and at most 512 characters");
   return title;
 }
 function cleanNote(value: unknown) {
-  if (typeof value !== "string") throw new Error();
+  if (typeof value !== "string") throw new TaskInvalidError("Note must be text");
   const note = value.normalize("NFC").trim();
   if (
     !note ||
     Buffer.byteLength(note) > 16384 ||
     /[\u0000\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(note)
   )
-    throw new Error();
+    throw new TaskInvalidError("Note must be nonblank and at most 16384 bytes");
   return note;
 }
