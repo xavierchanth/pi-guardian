@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "kind": "event",
   "workerSequence": 4,
   "runtimeGeneration": 7,

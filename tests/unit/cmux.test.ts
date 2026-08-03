@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerCmux } from "../../packages/pi-tai/src/cmux/register.ts";
-import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/config/schema.ts";
+import { registerCmux } from "../../packages/pi-tai/src/terminal/cmux/register.ts";
+import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/core/config/schema.ts";
 
 function harness(enabled = true) {
   const handlers = new Map<string, (event: unknown, context: unknown) => unknown>();

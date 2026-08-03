@@ -24,8 +24,14 @@ const timeout = setTimeout(() => {
 }, 10_000);
 
 const lines = createInterface({ input: child.stdout });
-const shippedPrompt = await readFile(resolve(root, "packages/pi-tai/src/agents/prompt.ts"), "utf8");
-if (!shippedPrompt.includes('capability: \\"researcher\\"') || !shippedPrompt.includes("subagent_spawn")) {
+const shippedPrompt = await readFile(
+  resolve(root, "packages/pi-tai/src/core/subagents/prompt.ts"),
+  "utf8",
+);
+if (
+  !shippedPrompt.includes('capability: "researcher"') ||
+  !shippedPrompt.includes("subagent_spawn")
+) {
   throw new Error("shipped extension does not prompt researcher delegation");
 }
 
@@ -80,10 +86,9 @@ lines.on("line", (line) => {
       names.has("design") ||
       names.has("implement") ||
       !names.has("dpic") ||
-      !names.has("capabilities") ||
+      names.has("capabilities") ||
       !names.has("subagents") ||
-      !names.has("context-export") ||
-      !names.has("context-import") ||
+      !names.has("btw") ||
       names.has("init-pi-tai") ||
       names.has("parallelize") ||
       names.has("plan-status") ||

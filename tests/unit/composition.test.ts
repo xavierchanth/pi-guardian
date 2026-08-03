@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPiTaiExtension } from "../../packages/pi-tai/pi-tai.ts";
-import { SessionCapabilityController } from "../../packages/pi-tai/src/capabilities/controller.ts";
-import { createPiTaiConfigService } from "../../packages/pi-tai/src/config/register.ts";
-import { createPiSessionWorkContextStore } from "../../packages/pi-tai/src/work-context/persistence.ts";
+import { createPiTaiConfigService } from "../../packages/pi-tai/src/core/config/register.ts";
 
 test("composition root registers every feature once in order", async () => {
   const calls: string[] = [];
@@ -19,15 +17,6 @@ test("composition root registers every feature once in order", async () => {
       compaction: () => {
         calls.push("compaction");
       },
-      capabilities: () => {
-        calls.push("capabilities");
-      },
-      workContext: () => {
-        calls.push("work-context");
-      },
-      contextTransfer: () => {
-        calls.push("context-transfer");
-      },
       responseEditor: () => {
         calls.push("response-editor");
       },
@@ -37,8 +26,8 @@ test("composition root registers every feature once in order", async () => {
       subagents: () => {
         calls.push("subagents");
       },
-      sessionTitle: () => {
-        calls.push("session-title");
+      sidebar: () => {
+        calls.push("sidebar");
       },
       cmux: () => {
         calls.push("cmux");
@@ -59,11 +48,8 @@ test("composition root registers every feature once in order", async () => {
     () => ({
       mode: "pi-cli",
       config: createPiTaiConfigService(),
-      workContext: createPiSessionWorkContextStore(),
-      titleGenerator: async () => "test title",
       queryTerminalBackground: async () => undefined,
       notificationSender: () => undefined,
-      capabilities: new SessionCapabilityController(),
       agentDir: "/tmp/pi-tai-test-agent",
     }),
   );
@@ -74,13 +60,10 @@ test("composition root registers every feature once in order", async () => {
     "keybindings",
     "config",
     "compaction",
-    "capabilities",
-    "work-context",
-    "context-transfer",
     "response-editor",
     "model-profiles",
     "subagents",
-    "session-title",
+    "sidebar",
     "cmux",
     "notifications",
     "guardian",

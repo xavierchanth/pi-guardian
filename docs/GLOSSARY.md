@@ -2,12 +2,12 @@
 
 | Term | Definition |
 |---|---|
-| **Pi-Tai core** | Reusable domain and application services implementing session, agent, work-context, concurrency, Guardian, workspace, and usage behavior. |
+| **Pi-Tai core** | Reusable domain and application services implementing session, agent, concurrency, Guardian, workspace, and usage behavior. |
 | **Host** | Long-lived authority for one machine. Owns durable sessions, machine identity, persistence adapters, runtime supervision, and client arbitration. |
 | **home Host** | The one Host authoritative for a session. Remote access does not change session ownership. |
 | **client** | Replaceable presentation or protocol process attached to the Host, such as Pi CLI, desktop, ACP, or a remote application. |
 | **runtime worker** | Host-supervised process that embeds Pi SDK and the Pi-Tai core to execute sessions. It does not independently own product state. |
-| **session** | Durable Host-owned thread of user commands, agent events, work context, child topology, usage, and resource custody. |
+| **session** | Durable Host-owned thread of user commands, agent events, child topology, usage, and resource custody. |
 | **foreground operation** | One accepted prompt or interaction cycle whose state is idle, running, or requires action. |
 | **event cursor** | Monotonic position in one session's ordered durable event stream, used for replay and optimistic concurrency. |
 | **projection** | Rebuildable view derived from canonical events and snapshots for a client or protocol. |
@@ -18,7 +18,6 @@
 | **child context** | Private managed Pi SDK `AgentSession` linked to one parent and excluded from user session navigation. |
 | **execution cycle** | One concrete run or recovery attempt of a durable child context. |
 | **charter** | System prompt given to a subagent, fixing the objective, the acceptance criteria, the constraints, and how to leave its workspace. |
-| **work context** | Current goal and execution checklist associated with a session or context. |
 | **orchestration change** | Mutable private per-session JJ change, described `pi-tai: session <id>`, preserving that Host session's integrated work without moving or rewriting the invoking user workspace. |
 | **source base** | The invoking workspace's single parent, `@-`, recorded as the stable insertion and rebase anchor for managed work. |
 | **source working change** | The user's live source `@`; Pi-Tai may observe its identity and content for guarded checkpointing but never describes or rewrites it. |

@@ -4,15 +4,33 @@ Pi-Tai can hand a self-contained task to a background agent that works in its ow
 checkout, then fold the result back in. This document describes how that works and
 why it is shaped the way it is.
 
+## Durable lifecycle foundation
+
+The first durability foundation is landed: subagents have opaque UUID authority IDs
+while the twelve public tools continue to use session-local `sa-N` labels. Versioned
+lifecycle facts are folded from Pi's active branch (`getBranch()`), re-folded on
+session start and tree navigation, and spawning fails closed when the host cannot
+append an intent/running fact. Pi child journals use the durable ID as context and
+their private session-file handle is captured, but children are **not** automatically
+resumed. In-memory pruning no longer consumes pending delivery state.
+
+K7b workspace custody is now landed: production uses SQLite authority, partitions
+custody by durable root session, recovers coordinator operations before tools, and
+migrates legacy v2 JSON non-destructively and idempotently. Later phases remain
+pending for report artifacts and delivery ledger/channel separation, explicit
+continuation and recreation, archive UI, and retention. Pi custom entries are an adapter behind the
+`SubagentLifecycleStore` port, not a claim that Pi files are final Host authority.
+
 Two modules do the work, and they know almost nothing about each other:
 
-- **`src/isolation/`** manages JJ workspaces. It has no concept of an agent — a
+- **`packages/pi-tai/src/core/isolation/`** manages JJ workspaces. It has no concept of an agent — a
   workspace is a directory plus a range of changes, and its owner is an opaque label.
-- **`src/agents/`** manages subagents. It has no concept of version control — a
+- **`packages/pi-tai/src/core/subagents/`** coherently owns subagent tools, backends, catalogs,
+  lifecycle, and dashboard. Its manager has no concept of version control — a
   subagent gets a working directory, and where that directory came from is not its
   problem.
 
-`src/agents/isolated.ts` is the only place they meet. Keeping them apart means a
+`packages/pi-tai/src/core/subagents/isolated.ts` is the only place they meet. Keeping them apart means a
 failure in version control is diagnosable without reasoning about process spawning,
 and vice versa.
 
@@ -36,26 +54,21 @@ whose commits are not descendants of its own root.
 
 ### Landing the work
 
-`merge` picks between two strategies:
+`merge` always uses **merge-under**: `jj rebase -r @ -d <existing parents>
+-d <each content head>`. There is no strategy parameter and no linear insertion
+fallback. The target keeps every existing parent and gains each source content
+frontier, preserving the source as a reviewable chain. The manager immediately runs
+`jj simplify-parents --revision @` against exactly the target working copy and proves
+all content heads remain reachable.
 
-- **linear** — `jj rebase --revisions <changes> --insert-before @`. Chosen only when
-  your `@` is empty and single-parent, where it is unambiguously safe. History stays
-  flat.
-- **merge-under** — `jj rebase -r @ -d <existing parents> -d <each head>`. Your `@`
-  keeps every parent it had and gains the agent's work. Afterwards, when this merge
-  introduced a parent that is already reachable through another parent, the manager
-  runs `jj simplify-parents` against exactly that working-copy change. It skips this
-  cosmetic step if redundancy predated the merge or the change has descendants,
-  verifies every agent head remains reachable, and restores the captured operation
-  if simplification or verification fails. That rollback is skipped if another
-  operation intervened, rather than risking the loss of unrelated work. Cosmetic
-  cleanup never fails the merge.
-
-`auto` tries linear when the preconditions hold, and if the insert produces
-conflicts it restores the pre-merge operation and retries as a merge. That fallback
-is deliberate: conflicts are tractable in a live working copy, where you resolve them
-by editing, and painful inside a rewritten range. Merge-under also keeps the agent's
-work reviewable as a discrete chain rather than flattening it into your history.
+Before graph mutation, the source always runs guarded `workspace update-stale` and
+classifies exact source-exclusive Change IDs. Safe linear interior empties are
+abandoned together in one bounded Phase-A operation; attached empty heads wait until
+after forget and checkout deletion (Phase B). Empty merges, conflicts, protected
+bookmarks, immutable changes, and externally shared revisions fail closed. A Phase-A
+proof failure restores and proves the exact recorded pre-operation state before
+returning a retryable refusal. Conflicted graph merges retain source custody; retry
+only finalizes and never reruns rebase or simplify.
 
 Note the plural in *each head*. A workspace that collected work from concurrent
 subagents holds several independent chains, and every one of them has to become a
@@ -118,13 +131,19 @@ requested result ready at that moment, and identifies those still running; call 
 remaining ids to collect staggered completions. Returned results (and only those results) are
 consumed so they are not also auto-delivered. Already-finished ids return immediately.
 
-At most four subagents run at once. The reservation is taken synchronously before the
-first await, so several tool calls in one assistant turn cannot all observe a free
-slot and race past the cap.
+At most 32 subagents run at once. Running and pending durable reservations are taken
+synchronously before the first await, so several tool calls in one assistant turn
+cannot race past either cap. Durable subagent identity is retained up to a hard
+4,096-record safety ceiling. That ceiling counts the monotonic union of records in
+the session file across branch navigation, not only records visible on the active
+branch. At most 256 safely-evictable records are normally kept resident in memory.
+Undelivered results, attention-required records, and workspace-bearing records are
+never evicted; residency may therefore conservatively exceed 256 until durable
+custody-release receipts exist.
 
 ## Tools
 
-Nine, with the judgment about when to use them living in prompts rather than in tool
+Twelve, with the judgment about when to use them living in prompts rather than in tool
 schemas:
 
 | Tool | Purpose |
@@ -132,17 +151,23 @@ schemas:
 | `subagent_spawn` | Start a subagent. `continue` reuses a settled subagent's workspace. |
 | `subagent_wait` | Block until any named subagent finishes and repeatedly collect ready results. Foreground user input releases the wait without cancelling or steering pending agents. |
 | `subagent_check` | Peek at one without blocking or consuming its result. |
-| `subagent_send` | Steer a running subagent. |
+| `subagent_send` | Steer a genuinely streaming run, or explicitly continue a normally settled conversation when its harness has a durable handle. Sends are FIFO per child. |
 | `subagent_cancel` | Stop subagents, keeping their workspaces. |
 | `subagent_list` | List subagents and their status. |
 | `workspace_merge` | Fold a subagent's changes into the working copy. |
 | `workspace_discard` | Throw a subagent's workspace away. |
 | `workspace_status` | List workspaces and what they hold. |
 
-`continue` covers the case where a subagent fails or is cancelled partway: its
-workspace is kept, and a fresh subagent — possibly on a different harness or a
-stronger model — picks up in the same checkout, with a charter telling it to read the
-existing commits first.
+Delegation is currently text-only. Conversation images and attachment objects are not
+inherited or forwarded. A spawn containing a Pi clipboard image path under a trusted OS
+temporary root is rejected before workspace or backend launch; callers must provide a
+textual description or save the image at a stable, user-authorized project path. This is
+a transient-path guard, not a durable attachment store or path authorization mechanism.
+
+An interrupted, cancelled, pruned, or shut-down entry is closed and is never
+automatically continued. Workspace reuse is a separate explicit spawn concern. A
+settled conversation continuation is exposed as running only after its lifecycle fact
+is durable; failed persistence leaves it terminal.
 
 ## Models
 
@@ -172,7 +197,7 @@ request.
 The OpenCode Go aliases require OpenCode credentials configured in Pi under the
 `opencode-go` provider (`OPENCODE_API_KEY` or `/login`). The versioned source of
 truth for every alias, provider/model ID, default effort, compatible harness, and
-purpose is [`src/agents/models.json`](../../packages/pi-tai/src/agents/models.json).
+purpose is [`src/core/subagents/models.json`](../../packages/pi-tai/src/core/subagents/models.json).
 Pi-Tai validates that catalog when it loads and refuses malformed or incompatible
 entries.
 

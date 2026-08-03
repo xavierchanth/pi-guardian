@@ -1,7 +1,7 @@
 # I14 — The source workspace belongs to the user
 
 **Status:** Completed  
-**Depends on:** I06, I08. Start after I13 checkpoint 4.
+**Depends on:** I06, I08. (The former I13 start gate was satisfied before I13 retired.)
 
 **Superseded:** The delegation model described here — named agent roles, durable work orders, and the review, integration, and recovery tool families — was replaced by the subagent and workspace design in [docs/concurrency/README.md](../../concurrency/README.md). This document is kept as a record of what was built at the time and is not a description of the current system.
 

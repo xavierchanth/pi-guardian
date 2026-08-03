@@ -40,17 +40,24 @@ export async function loadGuardianFallbackCorpus(source: string): Promise<Guardi
   try {
     raw = parse(await readFile(source, "utf8"));
   } catch (error) {
-    throw new Error(`${source}: YAML parse failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `${source}: YAML parse failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   return validateGuardianFallbackCorpus(raw, source);
 }
 
-export function validateGuardianFallbackCorpus(raw: unknown, source = "<input>"): GuardianFallbackCorpus {
+export function validateGuardianFallbackCorpus(
+  raw: unknown,
+  source = "<input>",
+): GuardianFallbackCorpus {
   const value = record(raw, source, "$");
   exact(value, ["version", "suite", "description", "cases"], source, "$");
   if (value.version !== 1) fail(source, "version", "expected 1");
-  if (value.suite !== "guardian-review-fallback") fail(source, "suite", "expected guardian-review-fallback");
-  if (!Array.isArray(value.cases) || value.cases.length === 0) fail(source, "cases", "expected non-empty sequence");
+  if (value.suite !== "guardian-review-fallback")
+    fail(source, "suite", "expected guardian-review-fallback");
+  if (!Array.isArray(value.cases) || value.cases.length === 0)
+    fail(source, "cases", "expected non-empty sequence");
 
   const cases = value.cases.map((item, index) => guardianCase(item, source, index));
   const ids = new Set<string>();
@@ -66,12 +73,17 @@ export function validateGuardianFallbackCorpus(raw: unknown, source = "<input>")
     cases,
   };
   const serialized = JSON.stringify(corpus);
-  if (/\.jj\/workspaces\//.test(serialized)) fail(source, "cases", "managed workspace paths must be normalized to .jj/workspaces");
-  if (/"timestamp"\s*:/.test(serialized) || /20\d{2}-\d{2}-\d{2}T/.test(serialized)) fail(source, "cases", "timestamps are not permitted");
-  if (/\/(?:Users|home|Applications|opt|var|private)\//.test(serialized)) fail(source, "cases", "machine-specific absolute paths are not permitted");
-  if (/[0-9a-f]{16,}/i.test(serialized)) fail(source, "cases", "opaque source identifiers are not permitted");
-  for (const match of serialized.matchAll(/https?:\/\/([^/\\\"\s]+)/g)) {
-    if (match[1] !== "example.invalid") fail(source, "cases", "only reserved synthetic URL hosts are permitted");
+  if (/\.jj\/workspaces\//.test(serialized))
+    fail(source, "cases", "managed workspace paths must be normalized to .jj/workspaces");
+  if (/"timestamp"\s*:/.test(serialized) || /20\d{2}-\d{2}-\d{2}T/.test(serialized))
+    fail(source, "cases", "timestamps are not permitted");
+  if (/\/(?:Users|home|Applications|opt|var|private)\//.test(serialized))
+    fail(source, "cases", "machine-specific absolute paths are not permitted");
+  if (/[0-9a-f]{16,}/i.test(serialized))
+    fail(source, "cases", "opaque source identifiers are not permitted");
+  for (const match of serialized.matchAll(/https?:\/\/([^/\\"\s]+)/g)) {
+    if (match[1] !== "example.invalid")
+      fail(source, "cases", "only reserved synthetic URL hosts are permitted");
   }
   return corpus;
 }
@@ -94,33 +106,69 @@ function guardianCase(raw: unknown, source: string, index: number): GuardianFall
   return {
     id,
     title: text(value.title, source, `${path}.title`),
-    reviewFailure: oneOf(value.reviewFailure, ["timeout", "cancelled", "provider-failure"] as const, source, `${path}.reviewFailure`),
+    reviewFailure: oneOf(
+      value.reviewFailure,
+      ["timeout", "cancelled", "provider-failure"] as const,
+      source,
+      `${path}.reviewFailure`,
+    ),
     action: {
       toolName: text(action.toolName, source, `${actionPath}.toolName`),
       cwd: text(action.cwd, source, `${actionPath}.cwd`),
       arguments: record(action.arguments, source, `${actionPath}.arguments`),
     },
     expected: {
-      classification: oneOf(expected.classification, ["local-read-only", "remote-read-only", "development-command", "repository-edit", "vcs-checkpoint", "destructive-filesystem", "destructive-vcs"] as const, source, `${expectedPath}.classification`),
-      disposition: oneOf(expected.disposition, ["allow", "block"] as const, source, `${expectedPath}.disposition`),
+      classification: oneOf(
+        expected.classification,
+        [
+          "local-read-only",
+          "remote-read-only",
+          "development-command",
+          "repository-edit",
+          "vcs-checkpoint",
+          "destructive-filesystem",
+          "destructive-vcs",
+        ] as const,
+        source,
+        `${expectedPath}.classification`,
+      ),
+      disposition: oneOf(
+        expected.disposition,
+        ["allow", "block"] as const,
+        source,
+        `${expectedPath}.disposition`,
+      ),
       rationale: text(expected.rationale, source, `${expectedPath}.rationale`),
     },
   };
 }
 
 function record(value: unknown, source: string, path: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) fail(source, path, "expected mapping");
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail(source, path, "expected mapping");
   return value as Record<string, unknown>;
 }
-function exact(value: Record<string, unknown>, keys: readonly string[], source: string, path: string): void {
-  for (const key of Object.keys(value)) if (!keys.includes(key)) fail(source, `${path}.${key}`, "unknown field");
+function exact(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  source: string,
+  path: string,
+): void {
+  for (const key of Object.keys(value))
+    if (!keys.includes(key)) fail(source, `${path}.${key}`, "unknown field");
 }
 function text(value: unknown, source: string, path: string): string {
   if (typeof value !== "string" || !value.trim()) fail(source, path, "expected non-empty string");
   return value.trim();
 }
-function oneOf<T extends string>(value: unknown, choices: readonly T[], source: string, path: string): T {
-  if (typeof value !== "string" || !choices.includes(value as T)) fail(source, path, `expected one of: ${choices.join(", ")}`);
+function oneOf<T extends string>(
+  value: unknown,
+  choices: readonly T[],
+  source: string,
+  path: string,
+): T {
+  if (typeof value !== "string" || !choices.includes(value as T))
+    fail(source, path, `expected one of: ${choices.join(", ")}`);
   return value as T;
 }
 function fail(source: string, path: string, reason: string): never {

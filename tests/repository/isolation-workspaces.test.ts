@@ -5,12 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 import {
   InMemoryWorkspaceRegistry,
   JjCli,
-  WorkspaceManager,
-} from "../../packages/pi-tai/src/isolation/index.ts";
+} from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { WorkspaceManager } from "../../packages/pi-tai/src/core/isolation/manager.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -46,12 +46,28 @@ function managerFor(source: string, workspaceRoot: string): WorkspaceManager {
 }
 
 async function parentsOf(cwd: string, revision: string): Promise<string[]> {
-  const out = await jj(cwd, "log", "--revision", `parents(${revision})`, "--no-graph", "--template", 'change_id ++ "\\n"');
-  return out.split("\n").map((line) => line.trim()).filter(Boolean);
+  const out = await jj(
+    cwd,
+    "log",
+    "--revision",
+    `parents(${revision})`,
+    "--no-graph",
+    "--template",
+    'change_id ++ "\\n"',
+  );
+  return out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 /** Produces a described, non-empty change inside a workspace. */
-async function commitInWorkspace(path: string, file: string, contents: string, message: string): Promise<void> {
+async function commitInWorkspace(
+  path: string,
+  file: string,
+  contents: string,
+  message: string,
+): Promise<void> {
   await writeFile(join(path, file), contents);
   await jj(path, "describe", "--message", message);
   await jj(path, "new");
@@ -90,10 +106,14 @@ describe("managed jj workspaces", () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
     // Build a second head and merge it into `@` so the source has two parents.
-    const mainHead = (await jj(source, "log", "--revision", "@-", "--no-graph", "--template", "change_id")).trim();
+    const mainHead = (
+      await jj(source, "log", "--revision", "@-", "--no-graph", "--template", "change_id")
+    ).trim();
     await jj(source, "new", "root()", "--message", "side branch");
     await writeFile(join(source, "side.txt"), "side\n");
-    const side = (await jj(source, "log", "--revision", "@", "--no-graph", "--template", "change_id")).trim();
+    const side = (
+      await jj(source, "log", "--revision", "@", "--no-graph", "--template", "change_id")
+    ).trim();
     await jj(source, "new", mainHead, side);
 
     const parents = await parentsOf(source, "@");
@@ -104,7 +124,7 @@ describe("managed jj workspaces", () => {
     assert.deepEqual(await parentsOf(record.path, "@"), parents);
   });
 
-  it("merges linearly when the user's working copy is empty and single-parent", async () => {
+  it("uses merge-under when the user's working copy is empty and single-parent", async () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
     const record = await manager.create({ label: "worker" });
@@ -113,7 +133,7 @@ describe("managed jj workspaces", () => {
     const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
-    assert.equal(result.kind === "merged" && result.summary.strategy, "linear");
+    assert.equal(result.kind === "merged" && result.summary.strategy, "merge-under");
     assert.equal(await readFile(join(source, "feature.txt"), "utf8"), "agent output\n");
     assert.equal((await parentsOf(source, "@")).length, 1, "linear merge keeps a single-parent @");
     assert.deepEqual(await manager.list(), [], "a merged workspace leaves no record");
@@ -132,9 +152,16 @@ describe("managed jj workspaces", () => {
     assert.equal(result.kind === "merged" && result.summary.strategy, "merge-under");
     assert.equal(await readFile(join(source, "feature.txt"), "utf8"), "agent output\n");
     assert.equal(await readFile(join(source, "wip.txt"), "utf8"), "user work in progress\n");
-    assert.equal((await parentsOf(source, "@")).length, 1, "merge-introduced redundant parent is simplified");
+    assert.equal(
+      (await parentsOf(source, "@")).length,
+      1,
+      "merge-introduced redundant parent is simplified",
+    );
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "applied");
-    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "redundant-parents-removed");
+    assert.equal(
+      result.kind === "merged" && result.summary.parentSimplificationReason,
+      "redundant-parents-removed",
+    );
   });
 
   it("does not fail merge-under when a cosmetic topology probe fails", async () => {
@@ -142,19 +169,26 @@ describe("managed jj workspaces", () => {
     const cli = new JjCli(new JjProcessExecutor());
     const manager = new WorkspaceManager({
       jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
-        hasRedundantParents: async () => { throw new Error("simulated cosmetic failure"); },
+        hasRedundantParents: async () => {
+          throw new Error("simulated cosmetic failure");
+        },
       }) as JjCli,
-      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+      registry: new InMemoryWorkspaceRegistry(),
+      sourcePath: source,
+      workspaceRoot,
     });
     const record = await manager.create();
     await commitInWorkspace(record.path, "cosmetic.txt", "kept\n", "cosmetic failure work");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
-    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "precheck-failed");
+    assert.equal(
+      result.kind === "merged" && result.summary.parentSimplificationReason,
+      "precheck-failed",
+    );
     assert.equal(await readFile(join(source, "cosmetic.txt"), "utf8"), "kept\n");
   });
 
@@ -165,18 +199,27 @@ describe("managed jj workspaces", () => {
       jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
         areAncestorsOf: async () => false,
       }) as JjCli,
-      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+      registry: new InMemoryWorkspaceRegistry(),
+      sourcePath: source,
+      workspaceRoot,
     });
     const record = await manager.create();
     await commitInWorkspace(record.path, "rollback.txt", "kept\n", "rollback work");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged", "cosmetic verification never fails the merge");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "failed");
-    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "postcheck-failed-rolled-back");
-    assert.equal((await parentsOf(source, "@")).length, 2, "rollback restores the unsimplified merge parents");
+    assert.equal(
+      result.kind === "merged" && result.summary.parentSimplificationReason,
+      "postcheck-failed-rolled-back",
+    );
+    assert.equal(
+      (await parentsOf(source, "@")).length,
+      2,
+      "rollback restores the unsimplified merge parents",
+    );
     assert.equal(await readFile(join(source, "rollback.txt"), "utf8"), "kept\n");
   });
 
@@ -194,13 +237,19 @@ describe("managed jj workspaces", () => {
     const record = await manager.create();
     await commitInWorkspace(record.path, "agent.txt", "agent\n", "agent change");
     await writeFile(join(source, "dirty.txt"), "dirty\n");
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
-    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "pre-existing-redundancy");
+    assert.equal(
+      result.kind === "merged" && result.summary.parentSimplificationReason,
+      "pre-existing-redundancy",
+    );
     const finalParents = await parentsOf(source, "@");
-    assert.ok(originalParents.every((parent) => finalParents.includes(parent)), "pre-existing parent edges are preserved");
+    assert.ok(
+      originalParents.every((parent) => finalParents.includes(parent)),
+      "pre-existing parent edges are preserved",
+    );
   });
 
   it("skips simplification when the merge target has descendants and does not rewrite them", async () => {
@@ -211,12 +260,18 @@ describe("managed jj workspaces", () => {
     const manager = new WorkspaceManager({
       jj: Object.assign(Object.create(Object.getPrototypeOf(cli)), cli, {
         hasDescendants: async () => {
-          descendantCommitAtProbe = (await jj(descendantWorkspace!, "log", "-r", "@", "--no-graph", "-T", "commit_id")).trim();
+          descendantCommitAtProbe = (
+            await jj(descendantWorkspace!, "log", "-r", "@", "--no-graph", "-T", "commit_id")
+          ).trim();
           return true;
         },
-        simplifyParents: async () => { throw new Error("simplification must be skipped"); },
+        simplifyParents: async () => {
+          throw new Error("simplification must be skipped");
+        },
       }) as JjCli,
-      registry: new InMemoryWorkspaceRegistry(), sourcePath: source, workspaceRoot,
+      registry: new InMemoryWorkspaceRegistry(),
+      sourcePath: source,
+      workspaceRoot,
     });
     const record = await manager.create();
     await commitInWorkspace(record.path, "agent.txt", "agent\n", "agent change");
@@ -225,15 +280,26 @@ describe("managed jj workspaces", () => {
     await jj(source, "workspace", "add", descendantWorkspace, "--name", "observer");
     await writeFile(join(descendantWorkspace, "observer.txt"), "observer\n");
     await jj(descendantWorkspace, "describe", "--message", "observer descendant");
-    const descendantChange = (await jj(descendantWorkspace, "log", "-r", "@", "--no-graph", "-T", "change_id")).trim();
+    const descendantChange = (
+      await jj(descendantWorkspace, "log", "-r", "@", "--no-graph", "-T", "change_id")
+    ).trim();
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(result.kind === "merged" && result.summary.parentSimplification, "skipped");
-    assert.equal(result.kind === "merged" && result.summary.parentSimplificationReason, "has-descendants");
-    const descendantCommitAfter = (await jj(source, "log", "-r", descendantChange, "--no-graph", "-T", "commit_id")).trim();
-    assert.equal(descendantCommitAfter, descendantCommitAtProbe, "the cosmetic phase does not rewrite the descendant");
+    assert.equal(
+      result.kind === "merged" && result.summary.parentSimplificationReason,
+      "has-descendants",
+    );
+    const descendantCommitAfter = (
+      await jj(source, "log", "-r", descendantChange, "--no-graph", "-T", "commit_id")
+    ).trim();
+    assert.equal(
+      descendantCommitAfter,
+      descendantCommitAtProbe,
+      "the cosmetic phase does not rewrite the descendant",
+    );
   });
 
   it("keeps the agent's work reviewable as a discrete change after merging under", async () => {
@@ -244,18 +310,26 @@ describe("managed jj workspaces", () => {
     await commitInWorkspace(record.path, "b.txt", "two\n", "second agent change");
     await writeFile(join(source, "wip.txt"), "dirty\n");
 
-    const result = await manager.merge(record.id, "merge-under");
+    const result = await manager.merge(record.id);
 
     assert.equal(result.kind, "merged");
     const summary = result.kind === "merged" ? result.summary : undefined;
     assert.equal(summary?.changeIds.length, 2);
     const descriptions = await jj(
-      source, "log",
-      "--revision", `${summary!.changeIds[0]}::${summary!.changeIds[1]}`,
-      "--no-graph", "--template", 'description.first_line() ++ "\\n"',
+      source,
+      "log",
+      "--revision",
+      `${summary!.changeIds[0]}::${summary!.changeIds[1]}`,
+      "--no-graph",
+      "--template",
+      'description.first_line() ++ "\\n"',
     );
     assert.deepEqual(
-      descriptions.split("\n").map((line) => line.trim()).filter(Boolean).sort(),
+      descriptions
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .sort(),
       ["first agent change", "second agent change"],
     );
   });
@@ -273,10 +347,15 @@ describe("managed jj workspaces", () => {
 
     const result = await manager.merge(record.id);
 
-    assert.equal(result.kind, "merged");
-    const summary = result.kind === "merged" ? result.summary : undefined;
-    assert.equal(summary?.strategy, "merge-under", "a conflicting linear insert is undone and retried as a merge");
-    assert.ok(summary!.conflictPaths.includes("base.txt"), "the conflict surfaces in the user's working copy");
+    assert.equal(result.kind, "retained_conflicts");
+    const summary = result.kind === "retained_conflicts" ? result.summary : undefined;
+    assert.equal(summary?.strategy, "merge-under");
+    assert.ok(summary!.conflictPaths.includes("base.txt"));
+    assert.equal((await manager.list()).length, 1, "conflicted source custody is retained");
+
+    await writeFile(join(source, "base.txt"), "resolved user and agent work\n");
+    const retry = await manager.merge(record.id);
+    assert.equal(retry.kind, "merged", "resolved target is explicitly finalized");
     assert.equal((await parentsOf(source, "@")).length, 2);
     assert.deepEqual(await manager.list(), []);
   });
@@ -323,7 +402,11 @@ describe("managed jj workspaces", () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
     const empty = await manager.create({ label: "empty" });
-    const busy = await manager.create({ label: "busy", owner: "sa-1" });
+    const busy = await manager.create({
+      label: "busy",
+      ownerId: "owner-durable-1",
+      ownerDisplayId: "sa-1",
+    });
     await commitInWorkspace(busy.path, "feature.txt", "agent output\n", "add feature");
 
     const swept = await manager.sweep();
@@ -331,18 +414,31 @@ describe("managed jj workspaces", () => {
     const byId = new Map(swept.map((entry) => [entry.id, entry]));
     assert.equal(byId.get(empty.id)?.disposition, "reclaimed");
     assert.equal(byId.get(busy.id)?.disposition, "needs_attention");
-    assert.deepEqual((await manager.list()).map((record) => record.id), [busy.id]);
+    assert.deepEqual(
+      (await manager.list()).map((record) => record.id),
+      [busy.id],
+    );
   });
 
   it("leaves workspaces belonging to a running owner alone", async () => {
     const { source, workspaceRoot } = await scratchRepository();
     const manager = managerFor(source, workspaceRoot);
-    const record = await manager.create({ label: "live", owner: "sa-7" });
+    const record = await manager.create({
+      label: "live",
+      ownerId: "owner-durable-7",
+      ownerDisplayId: "sa-7",
+    });
 
-    const swept = await manager.sweep(["sa-7"]);
+    const swept = await manager.sweep(["owner-durable-7"]);
 
-    assert.equal(swept[0]?.disposition, "kept");
-    assert.equal((await manager.list()).length, 1);
+    assert.deepEqual(
+      swept.map(({ id, disposition }) => ({ id, disposition })),
+      [{ id: record.id, disposition: "kept" }],
+    );
+    assert.deepEqual(
+      (await manager.list()).map((entry) => entry.id),
+      [record.id],
+    );
   });
 
   it("cleans up the attachment when workspace creation fails after `workspace add`", async () => {
@@ -380,7 +476,10 @@ describe("workspace bases", () => {
     // The child sees the trunk's landed work, which it could not if it had
     // branched from the user's copy.
     assert.equal(await readFile(join(child.path, "trunk.txt"), "utf8"), "trunk work\n");
-    await assert.rejects(readFile(join(source, "trunk.txt"), "utf8"), "the user's copy is untouched");
+    await assert.rejects(
+      readFile(join(source, "trunk.txt"), "utf8"),
+      "the user's copy is untouched",
+    );
   });
 
   it("merges a child into its trunk, leaving the user's copy alone", async () => {
@@ -394,8 +493,14 @@ describe("workspace bases", () => {
 
     assert.equal(result.kind, "merged");
     assert.equal(await readFile(join(trunk.path, "feature.txt"), "utf8"), "agent output\n");
-    await assert.rejects(readFile(join(source, "feature.txt"), "utf8"), "nothing reaches the user yet");
-    assert.deepEqual((await manager.list()).map((record) => record.id), [trunk.id]);
+    await assert.rejects(
+      readFile(join(source, "feature.txt"), "utf8"),
+      "nothing reaches the user yet",
+    );
+    assert.deepEqual(
+      (await manager.list()).map((record) => record.id),
+      [trunk.id],
+    );
   });
 
   it("delivers a whole run to the user in one merge of the trunk", async () => {
@@ -442,13 +547,27 @@ describe("trunk stack hygiene", () => {
     await manager.merge(trunk.id);
 
     const empties = await jj(
-      source, "log", "--revision", "::@ & empty() & ~root()",
-      "--no-graph", "--template", 'change_id ++ "\\n"',
+      source,
+      "log",
+      "--revision",
+      "::@ & empty() & ~root()",
+      "--no-graph",
+      "--template",
+      'change_id ++ "\\n"',
     );
-    const ids = empties.split("\n").map((line) => line.trim()).filter(Boolean);
+    const ids = empties
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
     // `@` itself is legitimately empty; anything below it is scaffolding that leaked.
-    const head = (await jj(source, "log", "--revision", "@", "--no-graph", "--template", "change_id")).trim();
-    assert.deepEqual(ids.filter((id) => id !== head), [], "workspace scaffolding must not reach the user's stack");
+    const head = (
+      await jj(source, "log", "--revision", "@", "--no-graph", "--template", "change_id")
+    ).trim();
+    assert.deepEqual(
+      ids.filter((id) => id !== head),
+      [],
+      "workspace scaffolding must not reach the user's stack",
+    );
   });
 
   it("keeps every head reachable when a trunk holds independent branches", async () => {
@@ -461,14 +580,18 @@ describe("trunk stack hygiene", () => {
     for (const name of ["one", "two"]) {
       const child = await manager.create({ label: name, parent: trunk.id });
       await commitInWorkspace(child.path, `${name}.txt`, `${name}\n`, `agent: add ${name}`);
-      assert.equal((await manager.merge(child.id, "merge-under")).kind, "merged");
+      assert.equal((await manager.merge(child.id)).kind, "merged");
     }
 
     const result = await manager.merge(trunk.id);
 
     assert.equal(result.kind, "merged");
     assert.equal(await readFile(join(source, "one.txt"), "utf8"), "one\n");
-    assert.equal(await readFile(join(source, "two.txt"), "utf8"), "two\n", "the second branch must not be orphaned");
+    assert.equal(
+      await readFile(join(source, "two.txt"), "utf8"),
+      "two\n",
+      "the second branch must not be orphaned",
+    );
   });
 });
 
@@ -486,7 +609,7 @@ describe("multi-head trunk delivered under a dirty working copy", () => {
     }
     for (const { name, workspace } of children) {
       await commitInWorkspace(workspace.path, `${name}.txt`, `${name}\n`, `agent: add ${name}`);
-      await manager.merge(workspace.id, "merge-under");
+      await manager.merge(workspace.id);
     }
     // A dirty working copy forces merge-under on the close, which is the path
     // that has to pick destinations for a multi-headed range.
@@ -497,6 +620,10 @@ describe("multi-head trunk delivered under a dirty working copy", () => {
     assert.equal(result.kind === "merged" && result.summary.strategy, "merge-under");
     assert.equal(await readFile(join(source, "wip.txt"), "utf8"), "user work\n");
     assert.equal(await readFile(join(source, "one.txt"), "utf8"), "one\n");
-    assert.equal(await readFile(join(source, "two.txt"), "utf8"), "two\n", "second branch orphaned");
+    assert.equal(
+      await readFile(join(source, "two.txt"), "utf8"),
+      "two\n",
+      "second branch orphaned",
+    );
   });
 });

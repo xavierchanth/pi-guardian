@@ -5,13 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import { BackendRegistry } from "../../packages/pi-tai/src/agents/backend.ts";
-import { StubBackend } from "../../packages/pi-tai/src/agents/backends/stub.ts";
-import { IsolatedSubagents } from "../../packages/pi-tai/src/agents/isolated.ts";
-import { SubagentManager } from "../../packages/pi-tai/src/agents/manager.ts";
-import type { SubagentSnapshot } from "../../packages/pi-tai/src/agents/domain.ts";
-import { InMemoryWorkspaceRegistry, JjCli, WorkspaceManager } from "../../packages/pi-tai/src/isolation/index.ts";
-import { JjProcessExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
+import { BackendRegistry } from "../../packages/pi-tai/src/core/subagents/backend.ts";
+import { StubBackend } from "../../packages/pi-tai/src/core/subagents/backends/stub.ts";
+import { IsolatedSubagents } from "../../packages/pi-tai/src/core/subagents/isolated.ts";
+import type { LifecycleEvent } from "../../packages/pi-tai/src/core/subagents/lifecycle.ts";
+import { SubagentManager } from "../../packages/pi-tai/src/core/subagents/manager.ts";
+import type { SubagentSnapshot } from "../../packages/pi-tai/src/core/subagents/domain.ts";
+import {
+  InMemoryWorkspaceRegistry,
+  JjCli,
+} from "../../packages/pi-tai/src/core/isolation/index.ts";
+import { WorkspaceManager } from "../../packages/pi-tai/src/core/isolation/manager.ts";
+import { JjProcessExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -123,13 +128,18 @@ describe("isolated subagents", () => {
 
   it("does not leak a workspace when the spawn itself fails", async () => {
     const backend = new StubBackend();
-    backend.spawn = async () => { throw new Error("model provider is down"); };
+    backend.spawn = async () => {
+      throw new Error("model provider is down");
+    };
     const { isolated, workspaces, source } = await harness(backend);
 
     await assert.rejects(isolated.spawn(request()), /model provider is down/);
 
     assert.deepEqual(await workspaces.list(), [], "the workspace record is gone");
-    assert.ok(!(await jj(source, "workspace", "list")).includes("pitai-"), "the jj attachment is gone");
+    assert.ok(
+      !(await jj(source, "workspace", "list")).includes("pitai-"),
+      "the jj attachment is gone",
+    );
   });
 
   it("reclaims the workspace of a child that produced nothing", async () => {
@@ -144,29 +154,43 @@ describe("isolated subagents", () => {
   });
 
   it("keeps the workspace of a child that produced work", async () => {
-    const { isolated, agents, workspaces } = await harness(writingBackend("feature.txt", "agent output\n"));
+    const { isolated, agents, workspaces } = await harness(
+      writingBackend("feature.txt", "agent output\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);
     await settleQueue();
 
-    assert.equal((await workspaces.list()).length, 1, "real work is never discarded by the settle hook");
+    assert.equal(
+      (await workspaces.list()).length,
+      1,
+      "real work is never discarded by the settle hook",
+    );
     assert.ok(isolated.workspaceFor(snapshot.id));
   });
 
   it("keeps a failed child's work for inspection rather than discarding it", async () => {
-    const { isolated, agents, workspaces } = await harness(writingBackend("partial.txt", "half done\n"));
+    const { isolated, agents, workspaces } = await harness(
+      writingBackend("partial.txt", "half done\n"),
+    );
 
     const snapshot = await isolated.spawn(request({ prompt: "FAIL: ran out of budget" }));
     const [settled] = (await agents.wait([snapshot.id])).settled;
     await settleQueue();
 
     assert.equal(settled?.status, "error");
-    assert.equal((await workspaces.list()).length, 1, "a failed child's partial work survives for review");
+    assert.equal(
+      (await workspaces.list()).length,
+      1,
+      "a failed child's partial work survives for review",
+    );
   });
 
   it("merges a settled child's work into the source graph", async () => {
-    const { isolated, agents, source, workspaces } = await harness(writingBackend("feature.txt", "agent output\n"));
+    const { isolated, agents, source, workspaces } = await harness(
+      writingBackend("feature.txt", "agent output\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);
@@ -190,7 +214,9 @@ describe("isolated subagents", () => {
   });
 
   it("discards a child's work on request", async () => {
-    const { isolated, agents, source, workspaces } = await harness(writingBackend("scratch.txt", "throwaway\n"));
+    const { isolated, agents, source, workspaces } = await harness(
+      writingBackend("scratch.txt", "throwaway\n"),
+    );
 
     const snapshot = await isolated.spawn(request());
     await agents.wait([snapshot.id]);
@@ -201,13 +227,46 @@ describe("isolated subagents", () => {
     await assert.rejects(readFile(join(source, "scratch.txt"), "utf8"));
   });
 
+  it("protects a reload-attention workspace in the real startup sweep", async () => {
+    const { source, workspaces } = await harness(new StubBackend());
+    const workspace = await workspaces.create({ label: "orphan" });
+    const durableId = "550e8400-e29b-41d4-a716-446655440077";
+    await workspaces.assignOwner(workspace.id, durableId, "sa-77");
+    const facts: LifecycleEvent[] = [
+      {
+        version: 2,
+        type: "spawn_intent",
+        durableId,
+        displayId: "sa-77",
+        sequence: 77,
+        generation: 1,
+        backend: "pi",
+        title: "orphan",
+        backendConfig: {},
+        workspace: { cwd: workspace.path, workspaceId: workspace.id },
+        at: "2026-01-01T00:00:00.000Z",
+      },
+      { version: 2, type: "running", durableId, generation: 1, at: "2026-01-01T00:00:00.000Z" },
+    ];
+    const agents = new SubagentManager({ registry: new BackendRegistry([new StubBackend()]) });
+    await agents.attachLifecycleStore({ load: async () => facts, append: async () => {} });
+    const isolated = new IsolatedSubagents({ agents, workspaces, sourcePath: source });
+
+    const swept = await workspaces.sweep(isolated.activeOwners());
+
+    assert.equal(agents.get("sa-77")?.attention, true);
+    assert.equal(swept[0]?.disposition, "kept");
+    assert.equal((await workspaces.list())[0]?.phase, "active");
+  });
+
   it("protects a running child's workspace from the startup sweep", async () => {
     const { isolated, workspaces } = await harness(new StubBackend());
 
     const snapshot = await isolated.spawn(request({ prompt: "HANG: still working" }));
     const swept = await workspaces.sweep(isolated.activeOwners());
 
-    assert.deepEqual(isolated.activeOwners(), [snapshot.id]);
+    assert.equal(isolated.activeOwners().length, 1);
+    assert.notEqual(isolated.activeOwners()[0], snapshot.id, "display id is not custody authority");
     assert.equal(swept[0]?.disposition, "kept");
     assert.equal((await workspaces.list()).length, 1);
   });

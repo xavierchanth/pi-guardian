@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { RuntimeProcessHarness, initializeParams, pinnedPolicyParams } from "./process-harness.ts";
+import { resolveStoragePaths } from "../../packages/pi-tai/src/core/storage/paths.ts";
+import { initializeParams, pinnedPolicyParams, RuntimeProcessHarness } from "./process-harness.ts";
 
 async function isolatedRoot() {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-blackbox-"));
@@ -13,6 +14,33 @@ async function isolatedRoot() {
   await Promise.all([mkdir(cwd), mkdir(agentDir), mkdir(sessionDir)]);
   return { root, cwd, agentDir, sessionDir };
 }
+
+test("spawned Pi SDK worker stores its database only beneath its private XDG root", async () => {
+  const paths = await isolatedRoot();
+  const worker = new RuntimeProcessHarness({
+    env: { PI_OFFLINE: "1" },
+  });
+  for (const path of Object.values(resolveStoragePaths(worker.xdgEnv)))
+    assert.ok(path.startsWith(worker.xdgRoot), `${path} escaped the harness XDG root`);
+  await worker.command("init", "runtime.initialize", initializeParams(1));
+  assert.equal(
+    (
+      await worker.command("create", "session.create", {
+        cwd: paths.cwd,
+        agentDir: paths.agentDir,
+        sessionDir: paths.sessionDir,
+        ...pinnedPolicyParams,
+        faux: true,
+      })
+    ).ok,
+    true,
+  );
+  const database = join(worker.xdgRoot, "state", "pi-tai", "state.sqlite3");
+  await access(database);
+  assert.equal(resolveStoragePaths(worker.xdgEnv).database, database);
+  await worker.command("shutdown", "runtime.shutdown", {});
+  assert.deepEqual(await worker.waitForExit(), { code: 0, signal: null });
+});
 
 test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits without network models", async () => {
   const paths = await isolatedRoot();
@@ -34,28 +62,50 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
   });
   assert.equal(created.ok, true);
   const sessionFile = created.result.sessionFile as string;
-  assert.ok((await first.waitFor((frame) => frame.event === "session.ready")).data.capabilities.commands.includes("continue"));
-  assert.equal((await first.command("prompt-a", "session.prompt", {
-    turnId: "turn-a",
-    text: "first persisted turn",
-  })).ok, true);
+  assert.ok(
+    (
+      await first.waitFor((frame) => frame.event === "session.ready")
+    ).data.capabilities.commands.includes("continue"),
+  );
+  assert.equal(
+    (
+      await first.command("prompt-a", "session.prompt", {
+        turnId: "turn-a",
+        text: "first persisted turn",
+      })
+    ).ok,
+    true,
+  );
   await first.waitFor((frame) => frame.event === "session.idle" && frame.turnId === "turn-a");
   assert.equal((await first.command("shutdown-1", "runtime.shutdown", {})).ok, true);
   assert.deepEqual(await first.waitForExit(), { code: 0, signal: null });
 
   const second = new RuntimeProcessHarness({ env });
-  assert.equal((await second.command("init-2", "runtime.initialize", initializeParams(2))).ok, true);
-  assert.equal((await second.command("open", "session.open", {
-    sessionFile,
-    agentDir: paths.agentDir,
-    sessionDir: paths.sessionDir,
-    ...pinnedPolicyParams,
-    faux: true,
-  })).ok, true);
-  assert.equal((await second.command("prompt-b", "session.prompt", {
-    turnId: "turn-b",
-    text: "verify history",
-  })).ok, true);
+  assert.equal(
+    (await second.command("init-2", "runtime.initialize", initializeParams(2))).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await second.command("open", "session.open", {
+        sessionFile,
+        agentDir: paths.agentDir,
+        sessionDir: paths.sessionDir,
+        ...pinnedPolicyParams,
+        faux: true,
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await second.command("prompt-b", "session.prompt", {
+        turnId: "turn-b",
+        text: "verify history",
+      })
+    ).ok,
+    true,
+  );
   await second.waitFor((frame) => frame.event === "session.idle" && frame.turnId === "turn-b");
   const continuedText = second.frames
     .filter((frame) => frame.event === "assistant.text_delta" && frame.turnId === "turn-b")
@@ -63,20 +113,33 @@ test("spawned Pi SDK worker persists, reopens, streams, cancels, and exits witho
     .join("");
   assert.match(continuedText, /history-present/);
 
-  assert.equal((await second.command("slow", "session.prompt", {
-    turnId: "turn-slow",
-    text: "slow response",
-  })).ok, true);
-  assert.equal((await second.command("cancel", "session.cancel", { turnId: "turn-slow" })).result.accepted, true);
-  await second.waitFor((frame) => frame.event === "session.interrupted" && frame.turnId === "turn-slow");
+  assert.equal(
+    (
+      await second.command("slow", "session.prompt", {
+        turnId: "turn-slow",
+        text: "slow response",
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (await second.command("cancel", "session.cancel", { turnId: "turn-slow" })).result.accepted,
+    true,
+  );
+  await second.waitFor(
+    (frame) => frame.event === "session.interrupted" && frame.turnId === "turn-slow",
+  );
   await second.waitFor((frame) => frame.event === "session.idle" && frame.turnId === "turn-slow");
   assert.equal((await second.command("shutdown-2", "runtime.shutdown", {})).ok, true);
   assert.deepEqual(await second.waitForExit(), { code: 0, signal: null });
 
   assert.match(await readFile(sessionFile, "utf8"), /first persisted turn/);
-  assert.doesNotMatch(first.stderr + second.stderr, /first persisted turn|verify history|slow response/);
+  assert.doesNotMatch(
+    first.stderr + second.stderr,
+    /first persisted turn|verify history|slow response/,
+  );
   for (const frame of [...first.frames, ...second.frames]) {
-    assert.equal(frame.protocolVersion, 2);
+    assert.equal(frame.protocolVersion, 3);
   }
 });
 
@@ -100,7 +163,11 @@ test("SIGTERM interrupts an active Pi turn and leaves parseable session history"
   await worker.command("slow", "session.prompt", { turnId: "turn-signal", text: "slow response" });
   worker.child.kill("SIGTERM");
   assert.deepEqual(await worker.waitForExit(), { code: 0, signal: null });
-  assert.ok(worker.frames.some((frame) => frame.event === "session.interrupted" && frame.turnId === "turn-signal"));
+  assert.ok(
+    worker.frames.some(
+      (frame) => frame.event === "session.interrupted" && frame.turnId === "turn-signal",
+    ),
+  );
   const history = await readFile(created.result.sessionFile, "utf8");
   for (const line of history.trim().split("\n")) JSON.parse(line);
 });

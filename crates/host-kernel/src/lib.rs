@@ -327,7 +327,7 @@ async fn run_actor(
                 let _ = reply.send(result);
             }
             KernelCommand::List { reply } => {
-                let result = Ok(sessions.values().map(|session| snapshot(session)).collect());
+                let result = Ok(sessions.values().map(snapshot).collect());
                 let _ = reply.send(result);
             }
             KernelCommand::Attach {
@@ -357,7 +357,7 @@ async fn run_actor(
             KernelCommand::Snapshot { session_id, reply } => {
                 let result = sessions
                     .get(&session_id)
-                    .map(|session| snapshot(session))
+                    .map(snapshot)
                     .ok_or(HostKernelError::UnknownSession(session_id));
                 let _ = reply.send(result);
             }

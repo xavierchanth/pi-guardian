@@ -34,9 +34,7 @@ test("TypeScript consumes the shared Host protocol fixtures", () => {
   const event = parseHostEvent(
     fixture<HostEvent<{ delta: string }>>("event-text-delta.json"),
   ) as HostEvent<{ delta: string }>;
-  const error = parseHostProtocolError(
-    fixture<HostProtocolError>("error-version-mismatch.json"),
-  );
+  const error = parseHostProtocolError(fixture<HostProtocolError>("error-version-mismatch.json"));
 
   assert.equal(client.clientKind, "acp");
   assert.equal(host.protocolVersion, 1);
@@ -48,12 +46,15 @@ test("TypeScript consumes the shared Host protocol fixtures", () => {
 });
 
 test("TypeScript and Rust negotiation cases share highest-overlap semantics", () => {
-  const cases = fixture<Array<{
-    name: string;
-    client: ProtocolRange;
-    host: ProtocolRange;
-    selected: number | null;
-  }>>("negotiation-cases.json");
+  const cases =
+    fixture<
+      Array<{
+        name: string;
+        client: ProtocolRange;
+        host: ProtocolRange;
+        selected: number | null;
+      }>
+    >("negotiation-cases.json");
 
   for (const entry of cases) {
     if (entry.selected === null) {
@@ -63,35 +64,33 @@ test("TypeScript and Rust negotiation cases share highest-overlap semantics", ()
         entry.name,
       );
     } else {
-      assert.equal(
-        negotiateProtocol(entry.client, entry.host),
-        entry.selected,
-        entry.name,
-      );
+      assert.equal(negotiateProtocol(entry.client, entry.host), entry.selected, entry.name);
     }
   }
 });
 
 test("runtime decoders reject malformed or unsafe envelopes", () => {
   assert.throws(
-    () => parseHostEvent({
-      protocolVersion: 1,
-      sessionId: "session-1",
-      sequence: Number.MAX_SAFE_INTEGER + 1,
-      revision: 1,
-      runtimeGeneration: 1,
-      timestamp: "now",
-      type: "event",
-      payload: {},
-    }),
+    () =>
+      parseHostEvent({
+        protocolVersion: 1,
+        sessionId: "session-1",
+        sequence: Number.MAX_SAFE_INTEGER + 1,
+        revision: 1,
+        runtimeGeneration: 1,
+        timestamp: "now",
+        type: "event",
+        payload: {},
+      }),
     ProtocolDecodeError,
   );
   assert.throws(
-    () => parseClientHello({
-      protocol: { minVersion: 2, maxVersion: 1 },
-      implementation: { name: "bad", version: "1" },
-      clientKind: "unknown",
-    }),
+    () =>
+      parseClientHello({
+        protocol: { minVersion: 2, maxVersion: 1 },
+        implementation: { name: "bad", version: "1" },
+        clientKind: "unknown",
+      }),
     ProtocolDecodeError,
   );
 });

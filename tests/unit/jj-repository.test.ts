@@ -3,10 +3,14 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { changeId } from "../../packages/pi-tai/src/jj/domain.ts";
-import { jjSuccess, ScriptedJjExecutor } from "../../packages/pi-tai/src/jj/executor.ts";
-import { FileSharedSourceStore } from "../../packages/pi-tai/src/jj/persistence.ts";
-import { exactChange, JjRepositoryKernel, literalRootFileset } from "../../packages/pi-tai/src/jj/repository.ts";
+import { changeId } from "../../packages/pi-tai/src/core/jj/domain.ts";
+import { jjSuccess, ScriptedJjExecutor } from "../../packages/pi-tai/src/core/jj/executor.ts";
+import { FileSharedSourceStore } from "../../packages/pi-tai/src/core/jj/persistence.ts";
+import {
+  exactChange,
+  JjRepositoryKernel,
+  literalRootFileset,
+} from "../../packages/pi-tai/src/core/jj/repository.ts";
 
 const CURRENT = "a".repeat(32);
 const PARENT = "b".repeat(32);
@@ -49,11 +53,16 @@ test("repository kernel opens one opaque source and resolves every tracked ID ex
     assert.equal(inspection.privateCommitSelector, "description('wip:*')");
     const resolved = await kernel.resolveChange(source, changeId(CURRENT));
     assert.equal(resolved.changeId, CURRENT);
-    const trackedRequest = executor.requests.find((request) => request.args.includes(exactChange(changeId(CURRENT))));
+    const trackedRequest = executor.requests.find((request) =>
+      request.args.includes(exactChange(changeId(CURRENT))),
+    );
     assert.ok(trackedRequest);
     for (const request of executor.requests) {
       assert.equal(request.args.includes("config") && request.args.includes("set"), false);
-      assert.equal(request.args.some((arg) => /^-[^-]/.test(arg)), false);
+      assert.equal(
+        request.args.some((arg) => /^-[^-]/.test(arg)),
+        false,
+      );
     }
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -66,14 +75,18 @@ test("repository mutation mutex serializes callers for one repository", async ()
     const source = await kernel.openSource(root);
     const order: string[] = [];
     let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const first = kernel.withRepositoryMutation(source, async () => {
       order.push("first:start");
       await gate;
       order.push("first:end");
     });
     while (!order.length) await new Promise((resolve) => setTimeout(resolve, 1));
-    const second = kernel.withRepositoryMutation(source, async () => { order.push("second"); });
+    const second = kernel.withRepositoryMutation(source, async () => {
+      order.push("second");
+    });
     await new Promise((resolve) => setTimeout(resolve, 5));
     assert.deepEqual(order, ["first:start"]);
     release();

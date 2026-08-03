@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CLIENT_PREFERENCES, type NotificationsConfig } from "../../packages/pi-tai/src/config/schema.ts";
-import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/notifications/events.ts";
-import { terminalNotificationSequence } from "../../packages/pi-tai/src/notifications/native.ts";
-import { registerNotifications } from "../../packages/pi-tai/src/notifications/register.ts";
+import {
+  DEFAULT_CLIENT_PREFERENCES,
+  type NotificationsConfig,
+} from "../../packages/pi-tai/src/core/config/schema.ts";
+import { GUARDIAN_REVIEW_FAILED_EVENT } from "../../packages/pi-tai/src/core/guardian/events.ts";
+import { terminalNotificationSequence } from "../../packages/pi-tai/src/terminal/notifications/native.ts";
+import { registerNotifications } from "../../packages/pi-tai/src/terminal/notifications/register.ts";
 
 interface HarnessOptions {
   sessionName?: string;
@@ -42,8 +45,8 @@ function harness(
     config,
     (title, body) => sent.push({ title, body }),
     options.environment ?? {},
-    (_config, environment) => Boolean(environment?.CMUX_WORKSPACE_ID?.trim())
-      && (options.cmuxEnabled ?? true),
+    (_config, environment) =>
+      Boolean(environment?.CMUX_WORKSPACE_ID?.trim()) && (options.cmuxEnabled ?? true),
   );
   return { handlers, eventHandlers, sent };
 }
@@ -53,9 +56,8 @@ function settledContext(content?: unknown, cwd = "/work/example") {
     mode: "tui",
     cwd,
     sessionManager: {
-      buildContextEntries: () => content === undefined ? [] : [
-        { type: "message", message: { role: "assistant", content } },
-      ],
+      buildContextEntries: () =>
+        content === undefined ? [] : [{ type: "message", message: { role: "assistant", content } }],
     },
   };
 }
@@ -67,15 +69,22 @@ test("notifies in TUI when agent work settles", () => {
 });
 
 test("completion notifications identify the session and summarize the assistant response", () => {
-  const state = harness(DEFAULT_CLIENT_PREFERENCES.notifications, { sessionName: "Refactor runtime" });
-  state.handlers.get("agent_settled")?.({}, settledContext([
-    { type: "thinking", text: "hidden" },
-    { type: "text", text: "Implemented the change.\nAll checks pass." },
-  ]));
-  assert.deepEqual(state.sent, [{
-    title: "Pi-Tai · Refactor runtime",
-    body: "Implemented the change. All checks pass.",
-  }]);
+  const state = harness(DEFAULT_CLIENT_PREFERENCES.notifications, {
+    sessionName: "Refactor runtime",
+  });
+  state.handlers.get("agent_settled")?.(
+    {},
+    settledContext([
+      { type: "thinking", text: "hidden" },
+      { type: "text", text: "Implemented the change.\nAll checks pass." },
+    ]),
+  );
+  assert.deepEqual(state.sent, [
+    {
+      title: "Pi-Tai · Refactor runtime",
+      body: "Implemented the change. All checks pass.",
+    },
+  ]);
 });
 
 test("notifies when automatic review fails or times out with available detail", () => {

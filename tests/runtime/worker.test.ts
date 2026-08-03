@@ -15,17 +15,23 @@ class MemoryWritable extends EventEmitter {
     return true;
   }
   frames(): any[] {
-    return this.lines.flatMap((chunk) => chunk.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)));
+    return this.lines.flatMap((chunk) =>
+      chunk
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+    );
   }
 }
 
 const initialize = {
-  protocolVersion: 2,
+  protocolVersion: 3,
   kind: "command",
   id: "init",
   method: "runtime.initialize",
   params: {
-    protocol: { minVersion: 2, maxVersion: 2 },
+    protocol: { minVersion: 3, maxVersion: 3 },
     workerId: "worker-test",
     runtimeGeneration: 3,
   },
@@ -33,7 +39,6 @@ const initialize = {
 
 const pinnedPolicyParams = {
   sessionPolicy: {
-    sessionTitle: { effort: "minimal", maxWords: 6, fallback: "heuristic" },
     compaction: { enabled: true, thresholdPercent: 90 },
     modelProfiles: [
       { name: "sol-low", provider: "openai-codex", model: "gpt-5.6-sol", effort: "low" },
@@ -43,15 +48,19 @@ const pinnedPolicyParams = {
 };
 
 function command(id: string, method: string, params: unknown) {
-  return { protocolVersion: 2, kind: "command", id, method, params };
+  return { protocolVersion: 3, kind: "command", id, method, params };
 }
 
 test("JSONL reader uses LF framing and keeps Unicode separators inside JSON strings", async () => {
   const values: unknown[] = [];
   const malformed: string[] = [];
   const reader = new JsonlReader({
-    onValue(value) { values.push(value); },
-    onMalformed(reason) { malformed.push(reason); },
+    onValue(value) {
+      values.push(value);
+    },
+    onMalformed(reason) {
+      malformed.push(reason);
+    },
   });
   reader.push(`${JSON.stringify({ text: "one\u2028two" })}\r\n`);
   reader.push("not-json\n");
@@ -71,12 +80,10 @@ test("worker enforces initialization, unique IDs, and unsupported command respon
   await output.frames();
 
   const responses = output.frames().filter((frame) => frame.kind === "response");
-  assert.deepEqual(responses.map((frame) => frame.error?.code ?? "ok"), [
-    "initialization_required",
-    "ok",
-    "duplicate_command_id",
-    "unsupported_command",
-  ]);
+  assert.deepEqual(
+    responses.map((frame) => frame.error?.code ?? "ok"),
+    ["initialization_required", "ok", "duplicate_command_id", "unsupported_command"],
+  );
 });
 
 test("worker rejects session creation without pinned policy", async () => {
@@ -84,12 +91,14 @@ test("worker rejects session creation without pinned policy", async () => {
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    faux: true,
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      faux: true,
+    }),
+  );
   const response = output.frames().find((frame) => frame.id === "create");
   assert.equal(response.error?.code, "invalid_params");
 });
@@ -106,33 +115,36 @@ test("worker rejects a protocol v1 supervisor after the required-policy version 
       protocol: { minVersion: 1, maxVersion: 1 },
     },
   });
-  assert.equal(output.frames().find((frame) => frame.id === "old-init")?.error?.code, "protocol_version_mismatch");
+  assert.equal(
+    output.frames().find((frame) => frame.id === "old-init")?.error?.code,
+    "protocol_version_mismatch",
+  );
 });
 
-test("worker exposes typed capability mutation and workspace relocation", async () => {
+test("worker exposes typed workspace relocation", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-capability-"));
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    ...pinnedPolicyParams,
-    faux: true,
-  }));
-  await worker.handleValue(command("enable", "session.set_capability", {
-    capabilityId: "jj-workspaces",
-    enabled: true,
-  }));
-  await worker.handleValue(command("relocate", "session.relocate_workspace", {
-    backend: "jj",
-    name: "focused",
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      ...pinnedPolicyParams,
+      faux: true,
+    }),
+  );
+  await worker.handleValue(
+    command("relocate", "session.relocate_workspace", {
+      backend: "jj",
+      name: "focused",
+    }),
+  );
   const frames = output.frames();
-  assert.ok(frames.some((frame) => frame.id === "enable" && frame.result.sessionCapabilities[0].toolsExposed));
-  assert.ok(frames.some((frame) => frame.event === "session.capabilities_changed"));
-  assert.ok(frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")));
+  assert.ok(
+    frames.some((frame) => frame.id === "relocate" && frame.result.cwd.endsWith("focused")),
+  );
 });
 
 test("worker accepts a prompt without blocking cancellation and returns to idle", async () => {
@@ -140,13 +152,15 @@ test("worker accepts a prompt without blocking cancellation and returns to idle"
   const output = new MemoryWritable();
   const worker = new RuntimeWorker(new FakeRuntimePort(), new JsonlWriter(output), () => {});
   await worker.handleValue(initialize);
-  await worker.handleValue(command("create", "session.create", {
-    cwd: root,
-    agentDir: join(root, "agent"),
-    sessionDir: join(root, "sessions"),
-    ...pinnedPolicyParams,
-    faux: true,
-  }));
+  await worker.handleValue(
+    command("create", "session.create", {
+      cwd: root,
+      agentDir: join(root, "agent"),
+      sessionDir: join(root, "sessions"),
+      ...pinnedPolicyParams,
+      faux: true,
+    }),
+  );
   await worker.handleValue(command("prompt", "session.prompt", { turnId: "turn-1", text: "slow" }));
   assert.equal(worker.currentState(), "turn_active");
   await worker.handleValue(command("cancel", "session.cancel", { turnId: "turn-1" }));

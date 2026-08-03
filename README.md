@@ -96,6 +96,10 @@ Pi-Tai does not provide legacy permission modes. `/mode` and `/review-mode` are 
 
 Pi already provides reserve-token-based automatic compaction. Pi-Tai adds a model-independent percentage threshold: after an agent run fully settles, known context usage at or above 90% is compacted before later settled handlers run. If Pi's native policy already compacted the session, post-compaction usage is unknown and Pi-Tai does not compact again. Configure or disable this policy with `compaction` in `pi-tai.json`.
 
+### By-the-way queries
+
+`/btw <question>` asks a one-off, tool-free question using a bounded, coherent snapshot of the active session context. Bare `/btw` opens a “by the way” input dialog. The persisted result is visible in the transcript but its question and answer are excluded from subsequent model context.
+
 ### Native notifications and cmux presence
 
 In interactive terminal sessions, Pi-Tai uses Kitty OSC 99 or OSC 777 notifications plus an audible terminal bell. Notifications identify the session; completion notifications summarize the assistant's response, and Guardian failures name the affected tool and reason.
@@ -117,17 +121,10 @@ The direct Pi extension reads these files at session start:
 <project>/.pi/pi-tai.json
 ```
 
-Project configuration is loaded only for a trusted project. It may override unprivileged compaction and client-preference fields, but model-selecting `sessionTitle` and `modelProfiles` values are ignored with a warning. Host-managed sessions instead have the Host resolve and pin session policy at creation; their runtime worker does not reread these files. See [Pi-Tai settings](SETTINGS.md) for ownership, precedence, field constraints, and defaults.
+Project configuration is loaded only for a trusted project. It may override unprivileged compaction and client-preference fields, but model-selecting `modelProfiles` values are ignored with a warning. Host-managed sessions instead have the Host resolve and pin session policy at creation; their runtime worker does not reread these files. See [Pi-Tai settings](SETTINGS.md) for ownership, precedence, field constraints, and defaults.
 
 ```json
 {
-  "sessionTitle": {
-    "provider": "provider-id",
-    "model": "luna-model-id",
-    "effort": "minimal",
-    "maxWords": 6,
-    "fallback": "heuristic"
-  },
   "ansiTheme": {
     "darkTheme": "ansi-dark",
     "lightTheme": "ansi-light",
@@ -171,20 +168,16 @@ pi -ne -e . "Reply with exactly: pi-tai-loaded"
 ```text
 justfile                            local Pi-Tai terminal launcher
 packages/pi-tai/pi-tai.ts           Pi extension composition root
-packages/pi-tai/src/config/         trusted Pi-Tai configuration
-packages/pi-tai/src/compaction/     percentage-based automatic compaction
-packages/pi-tai/src/keybindings/    first-party keyboard mappings
-packages/pi-tai/src/concurrency/    Host-backed task, event, projection, usage, and migration state
-packages/pi-tai/src/subagents/      packaged instructions composed into a session's system prompt
-packages/pi-tai/src/agents/         subagent tools, harnesses, model aliases, and result delivery
-packages/pi-tai/src/isolation/      managed JJ workspace allocation, merge, and reclamation
-packages/pi-tai/src/jj/             enrolled repository and managed JJ workspace operations
+packages/pi-tai/core.ts             stable facade for reusable core services
+packages/pi-tai/src/core/           runtime behavior and domain services
+packages/pi-tai/src/core/subagents/ twelve public tools, backends, catalogs, lifecycle, and dashboard
+packages/pi-tai/src/core/tasks/     scoped task authority, dashboard rows, immutable revision import and receipts
+packages/pi-tai/src/core/isolation/ managed JJ workspace allocation, merge, and reclamation
+packages/pi-tai/src/core/jj/        enrolled repository and managed JJ workspace operations
+packages/pi-tai/src/terminal/       terminal-only themes, chrome, input, and notifications
 packages/pi-tai/skills/             specialized version-control, invariant, DPIC, and documentation guidance
 packages/pi-tai/prompts/            checkpoint and DPIC prompt commands
-packages/pi-tai/src/session-title/  independent title generation
-packages/pi-tai/src/guardian/       standalone action review and path boundaries
-packages/pi-tai/src/notifications/  native review/completion notifications
-packages/pi-tai/src/ansi-theme/     TUI-only terminal theme lifecycle
+packages/pi-tai/src/core/guardian/  standalone action review and path boundaries
 packages/pi-tai/themes/             packaged dark and light themes
 apps/host/                            macOS-first Tauri Host Agent proof
 packages/host-protocol/              TypeScript Host protocol contract
@@ -204,6 +197,3 @@ Start with the [documentation index](docs/README.md), then follow the [product](
 
 Pi-Tai is MIT licensed.
 
-## Context transfer
-
-`/context-export [notes…]` creates a summary-only local handoff and copies a `/context-import <ID>` command. Run that command in another session to persist the reference and request one concise restatement. Artifacts are private files under `<agentDir>/pi-tai/context-exports`; upstream `/export` and `/import` remain untouched.

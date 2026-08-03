@@ -3,11 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  PROTOCOL_VERSION,
-  client,
-  methods,
-} from "@agentclientprotocol/sdk/experimental/v2";
+import { PROTOCOL_VERSION, client, methods } from "@agentclientprotocol/sdk/experimental/v2";
 import { createPrototypeAcpAgent } from "../../bins/acp/src/app.ts";
 
 const root = process.cwd();
@@ -19,20 +15,16 @@ test("ACP v2 SDK and schema pin match reviewed fixture metadata", async () => {
     schemaPath: string;
     schemaSha256: string;
   };
-  const packageJson = JSON.parse(await readFile(
-    join(root, "node_modules/@agentclientprotocol/sdk/package.json"),
-    "utf8",
-  )) as { version: string };
+  const packageJson = JSON.parse(
+    await readFile(join(root, "node_modules/@agentclientprotocol/sdk/package.json"), "utf8"),
+  ) as { version: string };
   const lock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8")) as {
     packages: Record<string, { integrity?: string }>;
   };
   const schema = await readFile(join(root, pin.schemaPath));
 
   assert.equal(packageJson.version, pin.sdkVersion);
-  assert.equal(
-    lock.packages["node_modules/@agentclientprotocol/sdk"]?.integrity,
-    pin.sdkIntegrity,
-  );
+  assert.equal(lock.packages["node_modules/@agentclientprotocol/sdk"]?.integrity, pin.sdkIntegrity);
   assert.equal(createHash("sha256").update(schema).digest("hex"), pin.schemaSha256);
 });
 

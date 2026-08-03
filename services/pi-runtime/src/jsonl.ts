@@ -67,7 +67,11 @@ export class JsonlReader {
         continue;
       }
       if (this.handlers.isImmediate?.(value)) {
-        void Promise.resolve(this.handlers.onValue(value)).catch((error) => this.handlers.onMalformed(error instanceof Error ? error.message : "Immediate input handling failed."));
+        void Promise.resolve(this.handlers.onValue(value)).catch((error) =>
+          this.handlers.onMalformed(
+            error instanceof Error ? error.message : "Immediate input handling failed.",
+          ),
+        );
       } else {
         this.queue = this.queue.then(() => this.handlers.onValue(value));
       }
@@ -81,9 +85,15 @@ export class JsonlReader {
 
 export class JsonlWriter {
   private queue = Promise.resolve();
-  private readonly writable: Writable | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown };
+  private readonly writable:
+    | Writable
+    | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown };
 
-  constructor(writable: Writable | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown }) {
+  constructor(
+    writable:
+      | Writable
+      | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown },
+  ) {
     this.writable = writable;
   }
 
@@ -101,13 +111,16 @@ export class JsonlWriter {
 
   private write(frame: RuntimeResponse | RuntimeEvent): Promise<void> {
     const serialized = `${JSON.stringify(frame)}\n`;
-    this.queue = this.queue.then(() => new Promise<void>((resolve) => {
-      if (this.writable.write(serialized)) {
-        resolve();
-      } else {
-        this.writable.once("drain", resolve);
-      }
-    }));
+    this.queue = this.queue.then(
+      () =>
+        new Promise<void>((resolve) => {
+          if (this.writable.write(serialized)) {
+            resolve();
+          } else {
+            this.writable.once("drain", resolve);
+          }
+        }),
+    );
     return this.queue;
   }
 }

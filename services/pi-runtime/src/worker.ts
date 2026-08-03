@@ -19,7 +19,6 @@ import {
   type SessionOpenParams,
   type SessionPromptParams,
   type SessionRelocateWorkspaceParams,
-  type SessionSetCapabilityParams,
   type SessionSetModelParams,
   type SessionSetThinkingParams,
   type SessionTextParams,
@@ -71,34 +70,44 @@ export class RuntimeWorker {
     try {
       command = decodeRuntimeCommand(value);
     } catch (error) {
-      const protocolError = error instanceof RuntimeDecodeError
-        ? error.toProtocolError()
-        : failure("invalid_envelope", "Runtime command envelope is invalid.");
+      const protocolError =
+        error instanceof RuntimeDecodeError
+          ? error.toProtocolError()
+          : failure("invalid_envelope", "Runtime command envelope is invalid.");
       await this.writer.writeResponse(errorResponse(this.nextMalformedId(), protocolError));
       return;
     }
 
     if (this.commandIds.has(command.id)) {
-      await this.writer.writeResponse(errorResponse(command.id, failure(
-        "duplicate_command_id",
-        "Command ID was already used for this worker generation.",
-      )));
+      await this.writer.writeResponse(
+        errorResponse(
+          command.id,
+          failure(
+            "duplicate_command_id",
+            "Command ID was already used for this worker generation.",
+          ),
+        ),
+      );
       return;
     }
     this.commandIds.add(command.id);
 
     if (this.state === "starting" && command.method !== "runtime.initialize") {
-      await this.writer.writeResponse(errorResponse(command.id, failure(
-        "initialization_required",
-        "runtime.initialize must be the first command.",
-      )));
+      await this.writer.writeResponse(
+        errorResponse(
+          command.id,
+          failure("initialization_required", "runtime.initialize must be the first command."),
+        ),
+      );
       return;
     }
     if (!isRuntimeMethod(command.method)) {
-      await this.writer.writeResponse(errorResponse(command.id, failure(
-        "unsupported_command",
-        `Unsupported runtime command: ${command.method}`,
-      )));
+      await this.writer.writeResponse(
+        errorResponse(
+          command.id,
+          failure("unsupported_command", `Unsupported runtime command: ${command.method}`),
+        ),
+      );
       return;
     }
 
@@ -106,18 +115,27 @@ export class RuntimeWorker {
     try {
       params = decodeMethodParams(command.method, command.params);
     } catch (error) {
-      const protocolError = error instanceof RuntimeDecodeError
-        ? error.toProtocolError()
-        : failure("invalid_params", `Parameters for ${command.method} are invalid.`);
+      const protocolError =
+        error instanceof RuntimeDecodeError
+          ? error.toProtocolError()
+          : failure("invalid_params", `Parameters for ${command.method} are invalid.`);
       await this.writer.writeResponse(errorResponse(command.id, protocolError));
       return;
     }
 
-    if (command.method !== "runtime.initialize" && command.protocolVersion !== CURRENT_RUNTIME_PROTOCOL_VERSION) {
-      await this.writer.writeResponse(errorResponse(command.id, failure(
-        "protocol_version_mismatch",
-        `Expected runtime protocol ${CURRENT_RUNTIME_PROTOCOL_VERSION}.`,
-      )));
+    if (
+      command.method !== "runtime.initialize" &&
+      command.protocolVersion !== CURRENT_RUNTIME_PROTOCOL_VERSION
+    ) {
+      await this.writer.writeResponse(
+        errorResponse(
+          command.id,
+          failure(
+            "protocol_version_mismatch",
+            `Expected runtime protocol ${CURRENT_RUNTIME_PROTOCOL_VERSION}.`,
+          ),
+        ),
+      );
       return;
     }
 
@@ -131,15 +149,16 @@ export class RuntimeWorker {
         event: "command_failed",
         data: { method: command.method },
       });
-      await this.writer.writeResponse(errorResponse(command.id, failure("runtime_error", redact(message))));
+      await this.writer.writeResponse(
+        errorResponse(command.id, failure("runtime_error", redact(message))),
+      );
     }
   }
 
   async handleMalformed(reason: string): Promise<void> {
-    await this.writer.writeResponse(errorResponse(
-      this.nextMalformedId(),
-      failure("malformed_jsonl", reason),
-    ));
+    await this.writer.writeResponse(
+      errorResponse(this.nextMalformedId(), failure("malformed_jsonl", reason)),
+    );
   }
 
   async stop(): Promise<void> {
@@ -187,8 +206,6 @@ export class RuntimeWorker {
         return this.setModel(command, params as SessionSetModelParams);
       case "session.set_thinking":
         return this.setThinking(command, params as SessionSetThinkingParams);
-      case "session.set_capability":
-        return this.setCapability(command, params as SessionSetCapabilityParams);
       case "session.relocate_workspace":
         return this.relocateWorkspace(command, params as SessionRelocateWorkspaceParams);
       case "session.dispose":
@@ -198,16 +215,24 @@ export class RuntimeWorker {
     }
   }
 
-  private async initialize(command: RuntimeCommand, params: RuntimeInitializeParams): Promise<void> {
+  private async initialize(
+    command: RuntimeCommand,
+    params: RuntimeInitializeParams,
+  ): Promise<void> {
     if (this.state !== "starting") throw new Error("Runtime is already initialized.");
     if (
-      params.protocol.minVersion > CURRENT_RUNTIME_PROTOCOL_VERSION
-      || params.protocol.maxVersion < CURRENT_RUNTIME_PROTOCOL_VERSION
+      params.protocol.minVersion > CURRENT_RUNTIME_PROTOCOL_VERSION ||
+      params.protocol.maxVersion < CURRENT_RUNTIME_PROTOCOL_VERSION
     ) {
-      await this.writer.writeResponse(errorResponse(command.id, failure(
-        "protocol_version_mismatch",
-        `Runtime protocol ${CURRENT_RUNTIME_PROTOCOL_VERSION} is outside the requested range.`,
-      )));
+      await this.writer.writeResponse(
+        errorResponse(
+          command.id,
+          failure(
+            "protocol_version_mismatch",
+            `Runtime protocol ${CURRENT_RUNTIME_PROTOCOL_VERSION} is outside the requested range.`,
+          ),
+        ),
+      );
       return;
     }
     this.workerId = params.workerId;
@@ -245,7 +270,9 @@ export class RuntimeWorker {
     if (this.state !== "session_idle") throw new Error("Session is not idle.");
     const started = await this.port.startPrompt(params, command.id, (event) => this.emit(event));
     if (!started.accepted) {
-      await this.writer.writeResponse(errorResponse(command.id, failure("prompt_rejected", "Prompt preflight rejected.")));
+      await this.writer.writeResponse(
+        errorResponse(command.id, failure("prompt_rejected", "Prompt preflight rejected.")),
+      );
       return;
     }
     this.state = "turn_active";
@@ -311,8 +338,16 @@ export class RuntimeWorker {
     await this.writeSuccess(command, { accepted });
   }
 
-  private async hostServiceResponse(command: RuntimeCommand, params: HostServiceResponseParams): Promise<void> {
-    this.hostServices.resolve({ requestId: params.requestId, ok: params.ok, ...(params.result !== undefined && params.result !== null ? { result: params.result } : {}), ...(params.error ? { error: params.error } : {}) });
+  private async hostServiceResponse(
+    command: RuntimeCommand,
+    params: HostServiceResponseParams,
+  ): Promise<void> {
+    this.hostServices.resolve({
+      requestId: params.requestId,
+      ok: params.ok,
+      ...(params.result !== undefined && params.result !== null ? { result: params.result } : {}),
+      ...(params.error ? { error: params.error } : {}),
+    });
     await this.writeSuccess(command, {});
   }
 
@@ -321,17 +356,12 @@ export class RuntimeWorker {
     await this.writeSuccess(command, await this.port.setModel(params));
   }
 
-  private async setThinking(command: RuntimeCommand, params: SessionSetThinkingParams): Promise<void> {
-    this.requireSessionIdle();
-    await this.writeSuccess(command, await this.port.setThinking(params));
-  }
-
-  private async setCapability(
+  private async setThinking(
     command: RuntimeCommand,
-    params: SessionSetCapabilityParams,
+    params: SessionSetThinkingParams,
   ): Promise<void> {
     this.requireSessionIdle();
-    await this.writeSuccess(command, await this.port.setCapability(params, (event) => this.emit(event)));
+    await this.writeSuccess(command, await this.port.setThinking(params));
   }
 
   private async relocateWorkspace(

@@ -6,4 +6,6 @@ const corpus = await loadGuardianFallbackCorpus(source);
 const allowed = corpus.cases.filter((item) => item.expected.disposition === "allow").length;
 const blocked = corpus.cases.length - allowed;
 
-console.log(`Validated ${corpus.cases.length} Guardian fallback cases (${allowed} allow, ${blocked} block).`);
+console.log(
+  `Validated ${corpus.cases.length} Guardian fallback cases (${allowed} allow, ${blocked} block).`,
+);

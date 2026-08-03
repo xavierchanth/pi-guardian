@@ -59,7 +59,7 @@ Host commands include:
 Worker events include:
 
 - initialization/health/generation;
-- canonicalizable message/tool/work-context/usage events;
+- canonicalizable message/tool/usage events;
 - child/concurrency lifecycle events;
 - operation receipt/artifact references;
 - settled/interrupted/failed state;

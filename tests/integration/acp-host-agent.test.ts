@@ -100,12 +100,14 @@ test("official ACP v2 harness exercises the complete Host-backed baseline", asyn
     assert.equal(created.sessionId, port.session.sessionId);
 
     const listed = await agent.request(methods.agent.session.list, {});
-    assert.deepEqual(listed.sessions, [{
-      sessionId: port.session.sessionId,
-      cwd: port.session.cwd,
-      title: port.session.title,
-      updatedAt: port.session.updatedAt,
-    }]);
+    assert.deepEqual(listed.sessions, [
+      {
+        sessionId: port.session.sessionId,
+        cwd: port.session.cwd,
+        title: port.session.title,
+        updatedAt: port.session.updatedAt,
+      },
+    ]);
 
     await agent.request(methods.agent.session.prompt, {
       sessionId: created.sessionId,
@@ -128,9 +130,11 @@ test("official ACP v2 harness exercises the complete Host-backed baseline", asyn
       cwd: "/tmp/project",
       replayFrom: { type: "start" },
     });
-    assert.ok(updates.some((update) =>
-      update.sessionUpdate === "user_message" && update.messageId === "replayed-user"
-    ));
+    assert.ok(
+      updates.some(
+        (update) => update.sessionUpdate === "user_message" && update.messageId === "replayed-user",
+      ),
+    );
 
     await agent.request(methods.agent.session.close, { sessionId: created.sessionId });
   });

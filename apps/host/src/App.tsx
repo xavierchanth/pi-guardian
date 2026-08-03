@@ -92,9 +92,21 @@ export default function App() {
         </header>
 
         <section className="grid gap-3 py-6 sm:grid-cols-3">
-          <StatusCard label="Broker sessions" value={sessions.length.toString()} detail="Stable Host identities" />
-          <StatusCard label="Ready runtimes" value={readyRuntimes.toString()} detail="Supervised Pi workers" />
-          <StatusCard label="Foreground work" value={activeTurns.toString()} detail="Running or awaiting action" />
+          <StatusCard
+            label="Broker sessions"
+            value={sessions.length.toString()}
+            detail="Stable Host identities"
+          />
+          <StatusCard
+            label="Ready runtimes"
+            value={readyRuntimes.toString()}
+            detail="Supervised Pi workers"
+          />
+          <StatusCard
+            label="Foreground work"
+            value={activeTurns.toString()}
+            detail="Running or awaiting action"
+          />
         </section>
 
         {error ? (
@@ -167,14 +179,18 @@ function SessionRow({ session }: { session: SessionSnapshot }) {
           <h3 className="font-mono text-sm font-medium text-slate-200" title={session.sessionId}>
             {shortId(session.sessionId)}
           </h3>
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ring-1 ring-inset ${runtimeTone(session.runtime.state)}`}>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-medium capitalize ring-1 ring-inset ${runtimeTone(session.runtime.state)}`}
+          >
             {session.runtime.state}
           </span>
           <span className="rounded-full bg-sky-400/8 px-2 py-0.5 text-[11px] font-medium text-sky-200/80 ring-1 ring-inset ring-sky-400/15">
             {foregroundLabel(session)}
           </span>
         </div>
-        <p className="mt-2 truncate font-mono text-xs text-slate-500" title={cwd}>{cwd}</p>
+        <p className="mt-2 truncate font-mono text-xs text-slate-500" title={cwd}>
+          {cwd}
+        </p>
       </div>
       <dl className="grid grid-cols-3 gap-5 text-right text-xs sm:min-w-64">
         <Metric label="Revision" value={session.revision.toString()} />

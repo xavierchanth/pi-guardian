@@ -61,7 +61,6 @@ Session
 ├── foreground state
 ├── runtime health and generation
 ├── root context and child topology
-├── work context and task plan references
 ├── workspace/resource custody
 ├── interactions requiring action
 ├── command idempotency records

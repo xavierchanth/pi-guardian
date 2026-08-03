@@ -10,14 +10,17 @@ import {
   registerFirstPartyKeybindings,
   THINKING_CYCLE_KEYBINDING,
   THINKING_CYCLE_SHORTCUT,
-} from "../../packages/pi-tai/src/keybindings/register.ts";
+} from "../../packages/pi-tai/src/terminal/keybindings/register.ts";
 
 function temporaryAgentDir(): string {
   return mkdtempSync(join(tmpdir(), "pi-tai-keybindings-"));
 }
 
 function readKeybindings(agentDir: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(agentDir, "keybindings.json"), "utf8")) as Record<string, unknown>;
+  return JSON.parse(readFileSync(join(agentDir, "keybindings.json"), "utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
 test("first-party keybindings free Shift+Tab and bind native thinking cycling", () => {
@@ -32,10 +35,13 @@ test("first-party keybindings free Shift+Tab and bind native thinking cycling", 
 
 test("first-party keybindings preserve unrelated and additional user bindings", () => {
   const agentDir = temporaryAgentDir();
-  writeFileSync(join(agentDir, "keybindings.json"), JSON.stringify({
-    "app.model.select": "ctrl+m",
-    [THINKING_CYCLE_KEYBINDING]: ["ctrl+r", PROFILE_CYCLE_SHORTCUT, "CTRL+R"],
-  }));
+  writeFileSync(
+    join(agentDir, "keybindings.json"),
+    JSON.stringify({
+      "app.model.select": "ctrl+m",
+      [THINKING_CYCLE_KEYBINDING]: ["ctrl+r", PROFILE_CYCLE_SHORTCUT, "CTRL+R"],
+    }),
+  );
 
   const result = provisionFirstPartyKeybindings(agentDir);
 
@@ -72,13 +78,16 @@ test("registration surfaces provisioning failures through Pi UI", () => {
   registerFirstPartyKeybindings(pi, agentDir);
 
   const notifications: Array<{ message: string; level: string }> = [];
-  sessionStart?.({}, {
-    ui: {
-      notify(message: string, level: string) {
-        notifications.push({ message, level });
+  sessionStart?.(
+    {},
+    {
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
       },
     },
-  });
+  );
   assert.equal(notifications.length, 1);
   assert.match(notifications[0]?.message ?? "", /expected a JSON object/);
   assert.equal(notifications[0]?.level, "warning");

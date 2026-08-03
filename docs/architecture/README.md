@@ -1,5 +1,7 @@
 # System architecture
 
+Storage implementation status: [Durable storage](STORAGE.md).
+
 ## End-state model
 
 Pi-Tai separates reusable behavior, machine authority, execution, and presentation.

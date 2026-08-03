@@ -1,0 +1,326 @@
+import { chmodSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { basename, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import type { DurableRecordStore, DurableRecordSummary, RecordCounts } from "../durable/port.ts";
+import type { LifecycleRecord } from "../subagents/lifecycle.ts";
+import { ensurePrivateDirectory, type StoragePaths } from "./paths.ts";
+
+export const SCHEMA_VERSION = 7;
+export const SCHEMA_SQL_V1 = `
+CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE pi_session(session_id TEXT PRIMARY KEY, session_file TEXT, parent_session_id TEXT REFERENCES pi_session(session_id), origin TEXT NOT NULL CHECK(origin IN ('startup','new','resume','fork','unknown')), cwd TEXT NOT NULL, first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
+CREATE TABLE workspace(id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, repo_root TEXT NOT NULL, phase TEXT NOT NULL CHECK(phase IN ('active','merged','discarded','incident')), attachment TEXT NOT NULL CHECK(attachment IN ('pending','present','detached')), base_change_ids TEXT NOT NULL, root_change_id TEXT NOT NULL, owner_id TEXT, owner_display_id TEXT, root_session_id TEXT NOT NULL REFERENCES pi_session(session_id), parent_workspace_id TEXT REFERENCES workspace(id), quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, incident_stage TEXT, incident_reason TEXT, merge_json TEXT, UNIQUE(repo_root,name), CHECK((phase='incident')=(incident_stage IS NOT NULL)));
+CREATE TABLE subagent(durable_id TEXT PRIMARY KEY, owner_session_id TEXT NOT NULL REFERENCES pi_session(session_id), anchor_token TEXT NOT NULL UNIQUE, anchor_entry_id TEXT, display_seq INTEGER NOT NULL CHECK(display_seq>0), display_id TEXT NOT NULL, backend TEXT NOT NULL CHECK(backend IN ('pi','claude','codex')), capability TEXT, title TEXT NOT NULL CHECK(length(title)<=512), cwd TEXT NOT NULL, workspace_id TEXT REFERENCES workspace(id), audience TEXT NOT NULL DEFAULT 'user' CHECK(audience IN ('user','parent','both')), disposition TEXT NOT NULL CHECK(disposition IN ('intent','spawning','running','done','failed','cancelled','interrupted')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived_at TEXT, archived_by TEXT CHECK(archived_by IN ('user','auto_done')), imported_from TEXT CHECK(imported_from IN ('pi_entries_v1','pi_entries_v2','artifact_scan')), UNIQUE(owner_session_id,display_seq), CHECK((archived_at IS NULL)=(archived_by IS NULL)));
+CREATE TABLE subagent_run(run_id TEXT PRIMARY KEY, durable_id TEXT NOT NULL REFERENCES subagent(durable_id) ON DELETE CASCADE, generation INTEGER NOT NULL CHECK(generation>=1), terminal_ordinal INTEGER NOT NULL CHECK(terminal_ordinal>=0), disposition TEXT NOT NULL CHECK(disposition IN ('intent','running','done','failed','interrupted','interrupted_by_reload','orphaned','abandoned')), error_text TEXT CHECK(error_text IS NULL OR length(error_text)<=4096), started_at TEXT NOT NULL, settled_at TEXT, UNIQUE(durable_id,generation,terminal_ordinal), CHECK((settled_at IS NULL)=(disposition IN ('intent','running'))));
+CREATE TABLE artifact(artifact_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('report','charter','image','rendition')), owner_session_id TEXT NOT NULL REFERENCES pi_session(session_id), rel_path TEXT NOT NULL CHECK(rel_path NOT GLOB '*..*' AND rel_path NOT LIKE '/%'), original_bytes INTEGER NOT NULL CHECK(original_bytes>=0), stored_bytes INTEGER NOT NULL CHECK(stored_bytes>=0), digest TEXT NOT NULL CHECK(digest GLOB 'sha256:*'), stored_digest TEXT NOT NULL CHECK(stored_digest GLOB 'sha256:*'), truncated INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0,1)), state TEXT NOT NULL CHECK(state IN ('present','evicted','corrupt','unreadable')), created_at TEXT NOT NULL, UNIQUE(owner_session_id,rel_path), CHECK(truncated=0 OR kind='report'), CHECK(truncated=1 OR digest=stored_digest));
+CREATE TABLE lock(name TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, process_identity TEXT NOT NULL, acquired_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE TABLE quarantine(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, source TEXT NOT NULL CHECK(source IN ('pi_entry','workspaces_json','artifact_scan','transition','schema','legacy_copy')), reason TEXT NOT NULL, evidence TEXT NOT NULL CHECK(length(evidence)<=8192));
+CREATE INDEX idx_subagent_owner ON subagent(owner_session_id,archived_at);
+CREATE INDEX idx_subagent_anchor ON subagent(anchor_token);
+CREATE INDEX idx_run_durable ON subagent_run(durable_id,generation,terminal_ordinal);
+CREATE INDEX idx_workspace_root ON workspace(root_session_id,phase);
+`;
+
+export const SCHEMA_SQL_V2 = `
+CREATE TABLE repository(repo_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,roots_truncated INTEGER NOT NULL DEFAULT 0 CHECK(roots_truncated IN(0,1)),store_key TEXT,last_known_root TEXT NOT NULL,identity_proven INTEGER NOT NULL DEFAULT 1 CHECK(identity_proven IN(0,1)),first_seen_at TEXT NOT NULL,last_verified_at TEXT NOT NULL);
+INSERT INTO repository VALUES('repo_unresolved','{"v":1,"roots":[]}',0,NULL,'',0,'1970-01-01T00:00:00.000Z','1970-01-01T00:00:00.000Z');
+CREATE TABLE custody_operation(op_id TEXT PRIMARY KEY,workspace_id TEXT,repo_id TEXT REFERENCES repository(repo_id),kind TEXT NOT NULL CHECK(kind IN('create','assign_owner','merge','finalize_merge','forget','abandon','adopt','rebind_repo','reconcile','import','resolve_incident')),state TEXT NOT NULL CHECK(state IN('intent','jj_applied','committed','failed','unknown')),requested_by TEXT NOT NULL CHECK(requested_by IN('user','model_tool','system_spawn','system_settle','system_reconcile','system_migration','scaffold_reclaim')),pid INTEGER NOT NULL,process_identity TEXT NOT NULL,jj_op_before TEXT,jj_op_after TEXT,target_change_id TEXT,change_ids TEXT,started_at TEXT NOT NULL,heartbeat_at TEXT NOT NULL,settled_at TEXT,evidence TEXT CHECK(evidence IS NULL OR length(evidence)<=8192),CHECK((settled_at IS NULL)=(state IN('intent','jj_applied'))));
+CREATE TABLE custody_event(op_id TEXT NOT NULL REFERENCES custody_operation(op_id) ON DELETE CASCADE,seq INTEGER NOT NULL,workspace_id TEXT,from_disposition TEXT,to_disposition TEXT NOT NULL,cause TEXT NOT NULL CHECK(cause IN('create','attach_proved','forget','merge_proved','merge_conflicts_retained','abandon_receipted','evidence_missing','ambiguity','incident_resolved','import','adopt','repo_rebound','heads_refreshed')),at TEXT NOT NULL,PRIMARY KEY(op_id,seq));
+CREATE TABLE abandon_receipt(receipt_id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,op_id TEXT NOT NULL REFERENCES custody_operation(op_id),requested_by TEXT NOT NULL CHECK(requested_by IN('user','model_tool','scaffold_reclaim')),change_ids TEXT NOT NULL,jj_op_before TEXT NOT NULL,jj_op_after TEXT NOT NULL,verified_absent INTEGER NOT NULL CHECK(verified_absent IN(0,1)),at TEXT NOT NULL,UNIQUE(workspace_id,op_id));
+CREATE TABLE allowed_custody_transition(from_disposition TEXT NOT NULL,to_disposition TEXT NOT NULL,cause TEXT NOT NULL,PRIMARY KEY(from_disposition,to_disposition,cause));
+INSERT INTO allowed_custody_transition VALUES
+('merged','merged','heads_refreshed'),('abandoned','abandoned','heads_refreshed'),('missing','missing','heads_refreshed'),('incident','incident','heads_refreshed'),('attached','attached','heads_refreshed'),('attached','detached','forget'),('attached','detached','evidence_missing'),('attached','merged','merge_proved'),('attached','attached','merge_conflicts_retained'),('attached','abandoned','abandon_receipted'),('attached','missing','evidence_missing'),('attached','incident','ambiguity'),('detached','attached','attach_proved'),('detached','detached','heads_refreshed'),('detached','merged','merge_proved'),('detached','abandoned','abandon_receipted'),('detached','missing','evidence_missing'),('detached','incident','ambiguity'),('missing','attached','attach_proved'),('missing','detached','attach_proved'),('missing','merged','merge_proved'),('missing','abandoned','abandon_receipted'),('missing','incident','ambiguity'),('merged','incident','ambiguity'),('abandoned','incident','ambiguity'),('incident','attached','incident_resolved'),('incident','detached','incident_resolved'),('incident','merged','incident_resolved'),('incident','abandoned','incident_resolved'),('incident','missing','incident_resolved'),('incident','incident','ambiguity');
+CREATE TABLE workspace_v2(id TEXT PRIMARY KEY,name TEXT NOT NULL,path TEXT NOT NULL,repo_id TEXT NOT NULL REFERENCES repository(repo_id),repo_root TEXT NOT NULL,disposition TEXT NOT NULL CHECK(disposition IN('attached','detached','merged','abandoned','missing','incident')),attachment_evidence TEXT NOT NULL DEFAULT 'unknown' CHECK(attachment_evidence IN('present','absent','unknown')),directory_evidence TEXT NOT NULL DEFAULT 'unknown' CHECK(directory_evidence IN('present','absent','unknown')),evidence_at TEXT,base_change_ids TEXT NOT NULL,root_change_id TEXT,head_change_ids TEXT NOT NULL DEFAULT '[]',merged_into_change_id TEXT,merged_proof_op TEXT,conflict_retained INTEGER NOT NULL DEFAULT 0 CHECK(conflict_retained IN(0,1)),owner_id TEXT,owner_display_id TEXT,anchor_token TEXT CHECK(anchor_token IS NULL OR anchor_token GLOB 'atk_*'),root_session_id TEXT NOT NULL REFERENCES pi_session(session_id),parent_workspace_id TEXT REFERENCES workspace_v2(id),pending_op_id TEXT REFERENCES custody_operation(op_id),quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN(0,1)),attention INTEGER NOT NULL DEFAULT 0 CHECK(attention IN(0,1)),imported_from TEXT CHECK(imported_from IN('workspaces_json_v2','workspaces_json_v1','adopted_attachment')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,incident_stage TEXT,incident_reason TEXT,merge_json TEXT,UNIQUE(repo_id,name),CHECK((disposition='incident')=(incident_stage IS NOT NULL)),CHECK((disposition='incident')=(incident_reason IS NOT NULL)),CHECK(disposition<>'merged' OR (merged_into_change_id IS NOT NULL AND merged_proof_op IS NOT NULL)),CHECK(root_change_id IS NOT NULL OR pending_op_id IS NOT NULL));
+INSERT INTO workspace_v2(id,name,path,repo_id,repo_root,disposition,attachment_evidence,base_change_ids,root_change_id,head_change_ids,owner_id,owner_display_id,root_session_id,parent_workspace_id,quarantined,created_at,updated_at,incident_stage,incident_reason,merge_json) SELECT id,name,path,'repo_unresolved',repo_root,CASE WHEN quarantined=1 OR phase IN('incident','merged','discarded') THEN 'incident' WHEN attachment='present' THEN 'attached' ELSE 'detached' END,CASE attachment WHEN 'present' THEN 'present' WHEN 'detached' THEN 'absent' ELSE 'unknown' END,base_change_ids,root_change_id,json_array(root_change_id),owner_id,owner_display_id,root_session_id,parent_workspace_id,quarantined,created_at,updated_at,COALESCE(incident_stage,CASE WHEN phase IN('merged','discarded') OR quarantined=1 THEN 'schema_v2_migration' END),COALESCE(incident_reason,CASE phase WHEN 'merged' THEN 'legacy_merged_without_proof' WHEN 'discarded' THEN 'legacy_discarded_without_receipt' ELSE CASE WHEN quarantined=1 THEN 'legacy_quarantined_record' END END),merge_json FROM workspace;
+DROP TABLE workspace; ALTER TABLE workspace_v2 RENAME TO workspace;
+CREATE INDEX idx_workspace_repo ON workspace(repo_id,disposition); CREATE INDEX idx_workspace_root_disposition ON workspace(root_session_id,disposition); CREATE INDEX idx_workspace_owner ON workspace(owner_id) WHERE owner_id IS NOT NULL; CREATE INDEX idx_workspace_open ON workspace(disposition) WHERE disposition IN('attached','detached','incident','missing'); CREATE INDEX idx_custody_op_live ON custody_operation(state) WHERE state IN('intent','jj_applied','unknown');
+CREATE TRIGGER trg_workspace_transition BEFORE UPDATE OF disposition ON workspace BEGIN SELECT RAISE(ABORT,'illegal custody transition') WHERE NOT EXISTS(SELECT 1 FROM custody_event latest JOIN allowed_custody_transition t ON t.from_disposition=OLD.disposition AND t.to_disposition=NEW.disposition AND t.cause=latest.cause WHERE latest.workspace_id=NEW.id AND latest.rowid=(SELECT MAX(e.rowid) FROM custody_event e WHERE e.workspace_id=NEW.id)); END;
+CREATE TRIGGER trg_abandon_requires_receipt_update BEFORE UPDATE OF disposition ON workspace WHEN NEW.disposition='abandoned' AND NOT EXISTS(SELECT 1 FROM abandon_receipt r WHERE r.workspace_id=NEW.id AND r.verified_absent=1 AND r.change_ids=NEW.head_change_ids) BEGIN SELECT RAISE(ABORT,'abandoned requires a verified abandon receipt'); END;
+CREATE TRIGGER trg_abandon_requires_receipt_insert BEFORE INSERT ON workspace WHEN NEW.disposition='abandoned' AND NOT EXISTS(SELECT 1 FROM abandon_receipt r WHERE r.workspace_id=NEW.id AND r.verified_absent=1 AND r.change_ids=NEW.head_change_ids) BEGIN SELECT RAISE(ABORT,'abandoned requires a verified abandon receipt'); END;
+CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (SELECT requested_by FROM custody_operation WHERE op_id=NEW.op_id) IN('system_reconcile','system_migration','system_spawn','system_settle') BEGIN SELECT RAISE(ABORT,'reconciliation may never abandon'); END;
+CREATE TRIGGER trg_no_workspace_delete BEFORE DELETE ON workspace BEGIN SELECT RAISE(ABORT,'custody rows are never deleted in S1'); END;
+`;
+export const SCHEMA_SQL_V3 = `
+CREATE TRIGGER trg_abandoned_heads_require_receipt BEFORE UPDATE OF head_change_ids ON workspace WHEN OLD.disposition='abandoned' AND NEW.head_change_ids<>OLD.head_change_ids AND NOT EXISTS(SELECT 1 FROM abandon_receipt r WHERE r.workspace_id=NEW.id AND r.verified_absent=1 AND r.change_ids=NEW.head_change_ids) BEGIN SELECT RAISE(ABORT,'abandoned head refresh requires a verified abandon receipt'); END;
+`;
+export const SCHEMA_SQL_V4 = `
+INSERT OR IGNORE INTO allowed_custody_transition VALUES
+('merged','attached','attach_proved'),('abandoned','attached','attach_proved'),
+('merged','detached','evidence_missing'),('abandoned','detached','evidence_missing'),('missing','detached','evidence_missing'),
+('merged','detached','forget'),('abandoned','detached','forget'),('missing','detached','forget'),
+('merged','missing','evidence_missing'),('abandoned','missing','evidence_missing'),
+('missing','merged','merge_proved'),('abandoned','merged','merge_proved'),
+('merged','abandoned','abandon_receipted'),
+('detached','attached','merge_conflicts_retained'),('missing','attached','merge_conflicts_retained'),('merged','attached','merge_conflicts_retained'),('abandoned','attached','merge_conflicts_retained'),
+('attached','attached','repo_rebound'),('detached','attached','repo_rebound'),('missing','attached','repo_rebound'),('merged','attached','repo_rebound'),('abandoned','attached','repo_rebound'),('incident','attached','repo_rebound');
+`;
+export const SCHEMA_SQL_V5 = `
+CREATE TABLE migration_ledger(source TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('completed','unresolved')),receipt_path TEXT,completed_at TEXT NOT NULL,evidence TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(source,digest));
+INSERT OR IGNORE INTO migration_ledger(source,digest,state,completed_at,evidence)
+ SELECT 'workspaces_json',json_extract(evidence,'$.sha256'),CASE reason WHEN 'migration_completed' THEN 'completed' ELSE 'unresolved' END,at,evidence
+ FROM quarantine WHERE source='workspaces_json' AND reason IN('migration_completed','migration_unresolved') AND json_valid(evidence) AND json_extract(evidence,'$.sha256') IS NOT NULL;
+CREATE TABLE operation_lease(scope TEXT PRIMARY KEY,owner TEXT NOT NULL,token TEXT NOT NULL,pid INTEGER NOT NULL,pid_start TEXT NOT NULL,heartbeat_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+`;
+export const SCHEMA_SQL_V6 = `
+CREATE TABLE custody_operation_v6(op_id TEXT PRIMARY KEY,workspace_id TEXT,repo_id TEXT REFERENCES repository(repo_id),kind TEXT NOT NULL CHECK(kind IN('create','assign_owner','assign_parent','merge','finalize_merge','forget','abandon','adopt','rebind_repo','reconcile','import','resolve_incident')),state TEXT NOT NULL CHECK(state IN('intent','jj_applied','committed','failed','unknown')),requested_by TEXT NOT NULL CHECK(requested_by IN('user','model_tool','system_spawn','system_settle','system_reconcile','system_migration','scaffold_reclaim')),pid INTEGER NOT NULL,process_identity TEXT NOT NULL,jj_op_before TEXT,jj_op_after TEXT,target_change_id TEXT,change_ids TEXT,started_at TEXT NOT NULL,heartbeat_at TEXT NOT NULL,settled_at TEXT,evidence TEXT CHECK(evidence IS NULL OR length(evidence)<=8192),CHECK((settled_at IS NULL)=(state IN('intent','jj_applied'))));
+INSERT INTO custody_operation_v6 SELECT * FROM custody_operation;
+DROP TRIGGER trg_no_reconcile_abandon;
+DROP TABLE custody_operation;
+ALTER TABLE custody_operation_v6 RENAME TO custody_operation;
+CREATE INDEX idx_custody_op_live ON custody_operation(state) WHERE state IN('intent','jj_applied','unknown');
+CREATE TRIGGER trg_no_reconcile_abandon BEFORE INSERT ON abandon_receipt WHEN (SELECT requested_by FROM custody_operation WHERE op_id=NEW.op_id) IN('system_reconcile','system_migration','system_spawn','system_settle') BEGIN SELECT RAISE(ABORT,'reconciliation may never abandon'); END;
+`;
+export const SCHEMA_SQL_V7 = `
+CREATE TABLE task_display_sequence(repo_id TEXT PRIMARY KEY REFERENCES repository(repo_id),next_value INTEGER NOT NULL CHECK(next_value>0));
+CREATE TABLE task(task_id TEXT PRIMARY KEY,repo_id TEXT NOT NULL REFERENCES repository(repo_id),display_seq INTEGER NOT NULL CHECK(display_seq>0),display_id TEXT NOT NULL,title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 512),state TEXT NOT NULL CHECK(state IN('open','ready','doing','blocked','done','dropped')),current_revision INTEGER NOT NULL CHECK(current_revision>0),current_digest TEXT NOT NULL CHECK(length(current_digest)=64 AND current_digest NOT GLOB '*[^0-9a-f]*'),provenance_session_id TEXT REFERENCES pi_session(session_id),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(repo_id,display_seq),UNIQUE(repo_id,display_id));
+CREATE TABLE task_revision(task_id TEXT NOT NULL REFERENCES task(task_id),revision INTEGER NOT NULL CHECK(revision>0),digest TEXT NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),bytes INTEGER NOT NULL CHECK(bytes>=0),relative_path TEXT NOT NULL CHECK(relative_path NOT LIKE '/%' AND relative_path NOT GLOB '*..*' AND relative_path LIKE 'tasks/bodies/%/%/%.md'),created_at TEXT NOT NULL,PRIMARY KEY(task_id,revision),UNIQUE(relative_path));
+CREATE TABLE task_receipt(receipt_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),kind TEXT NOT NULL CHECK(kind IN('created','revised','transitioned','recovered')),actor TEXT NOT NULL CHECK(actor='human'),from_revision INTEGER,to_revision INTEGER,from_state TEXT,to_state TEXT,digest TEXT,created_at TEXT NOT NULL);
+CREATE TABLE allowed_task_transition(actor TEXT NOT NULL CHECK(actor IN('human','agent')),from_state TEXT NOT NULL,to_state TEXT NOT NULL,PRIMARY KEY(actor,from_state,to_state));
+INSERT INTO allowed_task_transition VALUES
+('human','open','ready'),('human','open','doing'),('human','open','dropped'),('human','ready','doing'),('human','ready','blocked'),('human','ready','dropped'),('human','doing','blocked'),('human','doing','done'),('human','doing','dropped'),('human','blocked','ready'),('human','blocked','doing'),('human','blocked','dropped'),('human','done','ready'),('human','dropped','ready'),
+('agent','ready','doing'),('agent','ready','blocked'),('agent','doing','blocked'),('agent','doing','done'),('agent','blocked','ready'),('agent','blocked','doing');
+CREATE TRIGGER trg_task_revision_immutable BEFORE UPDATE ON task_revision BEGIN SELECT RAISE(ABORT,'task revisions are immutable'); END;
+CREATE TRIGGER trg_task_revision_no_delete BEFORE DELETE ON task_revision BEGIN SELECT RAISE(ABORT,'task revisions are immutable'); END;
+CREATE TRIGGER trg_task_current_revision_forward BEFORE UPDATE OF current_revision,current_digest ON task WHEN NEW.current_revision<>OLD.current_revision AND (NEW.current_revision<>OLD.current_revision+1 OR NOT EXISTS(SELECT 1 FROM task_revision r WHERE r.task_id=NEW.task_id AND r.revision=NEW.current_revision AND r.digest=NEW.current_digest)) BEGIN SELECT RAISE(ABORT,'invalid task revision pointer'); END;
+CREATE INDEX idx_task_agent_visible ON task(repo_id,display_seq) WHERE state<>'open';
+ALTER TABLE task_receipt ADD COLUMN operation_id TEXT;
+ALTER TABLE task_receipt ADD COLUMN before_digest TEXT;
+ALTER TABLE task_receipt ADD COLUMN after_digest TEXT;
+ALTER TABLE task_receipt ADD COLUMN repo_id TEXT;
+ALTER TABLE task_receipt ADD COLUMN principal TEXT;
+CREATE UNIQUE INDEX idx_task_receipt_operation ON task_receipt(operation_id);
+CREATE TABLE task_operation(operation_id TEXT PRIMARY KEY,repo_id TEXT NOT NULL REFERENCES repository(repo_id),principal TEXT NOT NULL,task_id TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('created','revised','transitioned')),status TEXT NOT NULL CHECK(status IN('intent','committed','failed')),target_revision INTEGER NOT NULL CHECK(target_revision>0),target_digest TEXT NOT NULL CHECK(length(target_digest)=64 AND target_digest NOT GLOB '*[^0-9a-f]*'),payload TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL);
+CREATE INDEX idx_task_operation_intent ON task_operation(repo_id,status) WHERE status='intent';
+CREATE TRIGGER trg_task_pointer_any_update BEFORE UPDATE OF current_revision,current_digest ON task BEGIN SELECT RAISE(ABORT,'task pointer has no exact revision') WHERE NOT EXISTS(SELECT 1 FROM task_revision r WHERE r.task_id=NEW.task_id AND r.revision=NEW.current_revision AND r.digest=NEW.current_digest); END;
+CREATE TRIGGER trg_task_receipt_exact BEFORE INSERT ON task_receipt BEGIN
+ SELECT RAISE(ABORT,'receipt operation mismatch') WHERE NEW.operation_id IS NULL OR NOT EXISTS(SELECT 1 FROM task_operation o WHERE o.operation_id=NEW.operation_id AND o.task_id=NEW.task_id AND o.repo_id=NEW.repo_id AND o.principal=NEW.principal AND o.status='intent' AND o.target_revision=NEW.to_revision AND o.target_digest=NEW.after_digest);
+ SELECT RAISE(ABORT,'receipt after mismatch') WHERE NOT EXISTS(SELECT 1 FROM task t WHERE t.task_id=NEW.task_id AND t.repo_id=NEW.repo_id AND t.current_revision=NEW.to_revision AND t.current_digest=NEW.after_digest AND t.state=NEW.to_state);
+END;
+ALTER TABLE task ADD COLUMN archived_at TEXT;
+CREATE TABLE task_note(note_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),repo_id TEXT NOT NULL REFERENCES repository(repo_id),actor TEXT NOT NULL CHECK(actor IN('human','agent')),principal TEXT NOT NULL,body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 16384),created_at TEXT NOT NULL);
+CREATE TABLE task_audit(audit_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),repo_id TEXT NOT NULL REFERENCES repository(repo_id),actor TEXT NOT NULL CHECK(actor IN('human','agent')),principal TEXT NOT NULL,operation TEXT NOT NULL CHECK(operation IN('transition','set_title','archive','restore')),from_state TEXT,to_state TEXT,from_title TEXT,to_title TEXT,created_at TEXT NOT NULL);
+CREATE TABLE task_delivery(delivery_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES task(task_id),repo_id TEXT NOT NULL REFERENCES repository(repo_id),principal TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind='read'),revision INTEGER NOT NULL,delivered_at TEXT NOT NULL);
+CREATE TRIGGER trg_task_receipt_append_update BEFORE UPDATE ON task_receipt BEGIN SELECT RAISE(ABORT,'task receipts are append-only'); END;
+CREATE TRIGGER trg_task_receipt_append_delete BEFORE DELETE ON task_receipt BEGIN SELECT RAISE(ABORT,'task receipts are append-only'); END;
+CREATE TRIGGER trg_task_operation_status BEFORE UPDATE ON task_operation WHEN NEW.status<>OLD.status AND NOT (OLD.status='intent' AND NEW.status IN('committed','failed')) BEGIN SELECT RAISE(ABORT,'illegal task operation transition'); END;
+CREATE TRIGGER trg_task_operation_immutable BEFORE UPDATE ON task_operation WHEN NEW.operation_id<>OLD.operation_id OR NEW.repo_id<>OLD.repo_id OR NEW.principal<>OLD.principal OR NEW.task_id<>OLD.task_id OR NEW.kind<>OLD.kind OR NEW.target_revision<>OLD.target_revision OR NEW.target_digest<>OLD.target_digest OR NEW.created_at<>OLD.created_at BEGIN SELECT RAISE(ABORT,'task operation identity is immutable'); END;
+CREATE TRIGGER trg_task_operation_no_delete BEFORE DELETE ON task_operation BEGIN SELECT RAISE(ABORT,'task operations are durable'); END;
+CREATE TRIGGER trg_task_note_append_update BEFORE UPDATE ON task_note BEGIN SELECT RAISE(ABORT,'task notes are append-only'); END;
+CREATE TRIGGER trg_task_note_append_delete BEFORE DELETE ON task_note BEGIN SELECT RAISE(ABORT,'task notes are append-only'); END;
+CREATE TRIGGER trg_task_audit_append_update BEFORE UPDATE ON task_audit BEGIN SELECT RAISE(ABORT,'task audit is append-only'); END;
+CREATE TRIGGER trg_task_audit_append_delete BEFORE DELETE ON task_audit BEGIN SELECT RAISE(ABORT,'task audit is append-only'); END;
+CREATE TRIGGER trg_task_delivery_append_update BEFORE UPDATE ON task_delivery BEGIN SELECT RAISE(ABORT,'task delivery is append-only'); END;
+CREATE TRIGGER trg_task_delivery_append_delete BEFORE DELETE ON task_delivery BEGIN SELECT RAISE(ABORT,'task delivery is append-only'); END;
+CREATE TRIGGER trg_task_agent_scope_note BEFORE INSERT ON task_note WHEN NEW.actor='agent' AND NOT EXISTS(SELECT 1 FROM task t WHERE t.task_id=NEW.task_id AND t.repo_id=NEW.repo_id AND t.state IN('ready','doing','blocked') AND t.archived_at IS NULL) BEGIN SELECT RAISE(ABORT,'task unavailable'); END;
+CREATE TRIGGER trg_task_agent_scope_audit BEFORE INSERT ON task_audit WHEN NEW.actor='agent' AND NOT EXISTS(SELECT 1 FROM task t WHERE t.task_id=NEW.task_id AND t.repo_id=NEW.repo_id AND t.state IN('ready','doing','blocked') AND t.archived_at IS NULL) BEGIN SELECT RAISE(ABORT,'task unavailable'); END;
+CREATE TRIGGER trg_task_legal_transition BEFORE UPDATE OF state ON task WHEN NEW.state<>OLD.state AND NOT EXISTS(SELECT 1 FROM task_audit a JOIN allowed_task_transition x ON x.actor=a.actor AND x.from_state=OLD.state AND x.to_state=NEW.state WHERE a.task_id=OLD.task_id AND a.operation='transition' AND a.from_state=OLD.state AND a.to_state=NEW.state AND a.rowid=(SELECT MAX(rowid) FROM task_audit WHERE task_id=OLD.task_id)) BEGIN SELECT RAISE(ABORT,'illegal task transition'); END;
+CREATE TRIGGER trg_task_title_guard BEFORE UPDATE OF title ON task WHEN NEW.title<>OLD.title AND NOT EXISTS(SELECT 1 FROM task_audit a WHERE a.task_id=OLD.task_id AND a.operation='set_title' AND a.from_title=OLD.title AND a.to_title=NEW.title AND a.rowid=(SELECT MAX(rowid) FROM task_audit WHERE task_id=OLD.task_id)) BEGIN SELECT RAISE(ABORT,'task title requires audit'); END;
+CREATE TRIGGER trg_task_archive_guard BEFORE UPDATE OF archived_at ON task WHEN NEW.archived_at IS NOT OLD.archived_at AND NOT (OLD.archived_at IS NULL AND OLD.state IN('done','dropped') AND NEW.archived_at IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM task_audit a WHERE a.task_id=OLD.task_id AND a.operation=CASE WHEN NEW.archived_at IS NULL THEN 'restore' ELSE 'archive' END AND a.rowid=(SELECT MAX(rowid) FROM task_audit WHERE task_id=OLD.task_id AND operation IN('archive','restore'))) BEGIN SELECT RAISE(ABORT,'task archive requires audit'); END;
+CREATE TRIGGER trg_task_terminal_archive AFTER UPDATE OF state ON task WHEN NEW.state IN('done','dropped') AND NEW.archived_at IS NULL BEGIN UPDATE task SET archived_at=NEW.updated_at WHERE task_id=NEW.task_id; END;
+CREATE INDEX idx_task_agent_scope ON task(repo_id,display_seq) WHERE archived_at IS NULL AND state IN('ready','doing','blocked');
+`;
+export const MIGRATIONS = [
+  { version: 1, sql: SCHEMA_SQL_V1 },
+  { version: 2, sql: SCHEMA_SQL_V2 },
+  { version: 3, sql: SCHEMA_SQL_V3 },
+  { version: 4, sql: SCHEMA_SQL_V4 },
+  { version: 5, sql: SCHEMA_SQL_V5 },
+  { version: 6, sql: SCHEMA_SQL_V6 },
+  { version: 7, sql: SCHEMA_SQL_V7 },
+] as const;
+/** Complete current schema, retained for schema-golden callers. */
+export const SCHEMA_SQL = MIGRATIONS.map((migration) => migration.sql).join("");
+
+export interface OpenSqliteOptions {
+  paths: StoragePaths;
+  now?: () => Date;
+  memory?: boolean;
+}
+
+function privatize(paths: StoragePaths): void {
+  for (const path of [paths.database, `${paths.database}-wal`, `${paths.database}-shm`])
+    if (existsSync(path)) chmodSync(path, 0o600);
+}
+
+function quarantineDatabase(paths: StoragePaths, stamp: string): void {
+  ensurePrivateDirectory(paths.quarantine);
+  const evidence = join(paths.quarantine, `state-${stamp}.corrupt`);
+  mkdirSync(evidence, { mode: 0o700 });
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const source = `${paths.database}${suffix}`;
+    if (existsSync(source)) renameSync(source, join(evidence, `state.sqlite${suffix}`));
+  }
+}
+
+export function openDurableDatabase(options: OpenSqliteOptions): DatabaseSync {
+  const now = options.now ?? (() => new Date());
+  ensurePrivateDirectory(options.paths.state);
+  let db: DatabaseSync | undefined;
+  const target = options.memory ? ":memory:" : options.paths.database;
+  try {
+    db = new DatabaseSync(target);
+    if (!options.memory) privatize(options.paths);
+    const check = db.prepare("PRAGMA quick_check").get() as { quick_check: string };
+    if (check.quick_check !== "ok") throw new Error(`quick_check: ${check.quick_check}`);
+  } catch (error) {
+    try {
+      db?.close();
+    } catch {}
+    if (options.memory || !existsSync(target)) throw error;
+    quarantineDatabase(options.paths, now().toISOString().replaceAll(":", "-"));
+    db = new DatabaseSync(target);
+    privatize(options.paths);
+  }
+  db.exec("PRAGMA busy_timeout=15000");
+  const initial = Number(
+    (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+  );
+  if (initial > SCHEMA_VERSION) {
+    db.close();
+    throw new Error(`Database schema ${initial} is newer than supported schema ${SCHEMA_VERSION}`);
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    // A competing cold opener may have completed while this connection waited for the lock.
+    let version = Number(
+      (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
+    );
+    if (version > SCHEMA_VERSION)
+      throw new Error(
+        `Database schema ${version} is newer than supported schema ${SCHEMA_VERSION}`,
+      );
+    if (version > 0) {
+      const migration = db
+        .prepare("SELECT COALESCE(MAX(version),0) AS version FROM schema_migrations")
+        .get() as { version: number };
+      // PRAGMA user_version may have been read before a competing WAL writer's
+      // schema commit became visible on this connection. The append-only ledger
+      // is authoritative when it is exactly ahead and supported.
+      if (Number(migration.version) <= SCHEMA_VERSION)
+        version = Math.max(version, Number(migration.version));
+      else throw new Error(`Migration ledger ${migration.version} is newer than supported schema`);
+    }
+    for (const migration of MIGRATIONS)
+      if (migration.version > version) {
+        db.exec(migration.sql);
+        db.prepare("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)").run(
+          migration.version,
+          now().toISOString(),
+        );
+      }
+    db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+    const violations = db.prepare("PRAGMA foreign_key_check").all();
+    if (violations.length)
+      throw new Error(`Foreign key check failed (${violations.length} violations)`);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    db.close();
+    throw error;
+  }
+  const mode = db.prepare("PRAGMA journal_mode = WAL").get() as { journal_mode: string };
+  db.exec("PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF");
+  if (!options.memory && mode.journal_mode.toLowerCase() !== "wal")
+    db.exec("PRAGMA busy_timeout=15000");
+  if (!options.memory) privatize(options.paths);
+  return db;
+}
+
+function privatizeConnection(db: DatabaseSync): void {
+  const row = db
+    .prepare("PRAGMA database_list")
+    .all()
+    .find((item) => (item as { name: string }).name === "main") as { file: string } | undefined;
+  if (!row?.file) return;
+  for (const path of [row.file, `${row.file}-wal`, `${row.file}-shm`])
+    if (existsSync(path)) chmodSync(path, 0o600);
+}
+
+export class SqliteDurableRecordStore implements DurableRecordStore {
+  private readonly db: DatabaseSync;
+  private readonly rootSessionId: string;
+  constructor(db: DatabaseSync, rootSessionId: string) {
+    this.db = db;
+    this.rootSessionId = rootSessionId;
+  }
+  ingest(records: Iterable<LifecycleRecord>): void {
+    for (const record of records) this.note(record);
+  }
+  note(summary: DurableRecordSummary, authoritative = false): void {
+    const root = summary.rootSessionId ?? this.rootSessionId;
+    const now = summary.updatedAt;
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO pi_session(session_id,origin,cwd,first_seen_at,last_seen_at) VALUES(?,?,?,?,?)",
+      )
+      .run(root, "unknown", "", now, now);
+    const seq = summary.sequence;
+    this.db
+      .prepare(`INSERT INTO subagent(durable_id,owner_session_id,anchor_token,display_seq,display_id,backend,title,cwd,disposition,created_at,updated_at,archived_at,archived_by)
+      VALUES(?,?,?,?,?,'pi','imported','',?,?,?,?,?) ON CONFLICT(durable_id) DO UPDATE SET disposition=excluded.disposition,updated_at=excluded.updated_at,archived_at=excluded.archived_at,archived_by=excluded.archived_by
+      WHERE ${authoritative ? "subagent.updated_at <= excluded.updated_at" : "subagent.updated_at < excluded.updated_at"}`)
+      .run(
+        summary.durableId,
+        root,
+        `atk_${summary.durableId}`,
+        seq,
+        summary.displayId,
+        summary.disposition,
+        now,
+        now,
+        summary.archivedAt ?? null,
+        summary.archivedBy ?? null,
+      );
+    privatizeConnection(this.db);
+  }
+  get(id: string): DurableRecordSummary | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT durable_id,display_seq,display_id,owner_session_id,disposition,archived_at,archived_by,updated_at FROM subagent WHERE durable_id=?",
+      )
+      .get(id) as Record<string, string | null> | undefined;
+    return row
+      ? {
+          durableId: row.durable_id!,
+          displayId: row.display_id!,
+          sequence: Number(row.display_seq),
+          rootSessionId: row.owner_session_id!,
+          disposition: row.disposition as DurableRecordSummary["disposition"],
+          updatedAt: row.updated_at!,
+          ...(row.archived_at
+            ? { archivedAt: row.archived_at, archivedBy: row.archived_by as "user" | "auto_done" }
+            : {}),
+        }
+      : undefined;
+  }
+  isInherited(id: string): boolean {
+    const row = this.get(id);
+    return !!row?.rootSessionId && row.rootSessionId !== this.rootSessionId;
+  }
+  counts(): RecordCounts {
+    const rows = this.db.prepare("SELECT owner_session_id,archived_at FROM subagent").all() as {
+      owner_session_id: string;
+      archived_at: string | null;
+    }[];
+    let unarchived = 0,
+      archived = 0,
+      inherited = 0;
+    for (const row of rows)
+      row.owner_session_id !== this.rootSessionId
+        ? inherited++
+        : row.archived_at
+          ? archived++
+          : unarchived++;
+    return { unarchived, archived, inherited, total: rows.length };
+  }
+}
+
+export function backupDatabase(db: DatabaseSync, paths: StoragePaths, name: string): string {
+  ensurePrivateDirectory(paths.backups);
+  const destination = join(paths.backups, basename(name));
+  db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+  chmodSync(destination, 0o600);
+  return destination;
+}

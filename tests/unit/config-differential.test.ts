@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadPiTaiConfig } from "../../packages/pi-tai/src/config/load.ts";
+import { loadPiTaiConfig } from "../../packages/pi-tai/src/core/config/load.ts";
 
 const corpusRoot = join(import.meta.dirname, "../../fixtures/config");
 
@@ -31,13 +31,19 @@ for (const name of readdirSync(corpusRoot).sort()) {
       const loaded = loadPiTaiConfig({ agentDir, cwd, projectTrusted: metadata.projectTrusted });
       const actual = {
         config: loaded.config,
-        provenance: Object.fromEntries(Object.entries(loaded.provenance).map(([path, origin]) => [
-          path,
-          origin.path ? { ...origin, path: origin.layer === "project" ? "project.json" : "global.json" } : origin,
-        ])),
-        warnings: loaded.warnings.map((warning) => warning
-          .replaceAll(loaded.globalPath, "global.json")
-          .replaceAll(loaded.projectPath, "project.json")),
+        provenance: Object.fromEntries(
+          Object.entries(loaded.provenance).map(([path, origin]) => [
+            path,
+            origin.path
+              ? { ...origin, path: origin.layer === "project" ? "project.json" : "global.json" }
+              : origin,
+          ]),
+        ),
+        warnings: loaded.warnings.map((warning) =>
+          warning
+            .replaceAll(loaded.globalPath, "global.json")
+            .replaceAll(loaded.projectPath, "project.json"),
+        ),
       };
       assert.deepEqual(actual, JSON.parse(readFileSync(join(fixture, "expected.json"), "utf8")));
     } finally {

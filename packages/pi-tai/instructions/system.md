@@ -4,6 +4,7 @@
 ## Presenting Information
 - Use lists and matrix tables to surface information when it is otherwise difficult to remain concise.
 - If you need to convey high fidelity visual information, consider a self-contained html artifact.
+- Do not reiterate subagent output the user can already see; add only your own judgment, decisions, or next actions.
 ## Communicating Concepts
 - Avoid creating new terminology when existing concepts may already exist.
 - Check the codebase before proposing new terms for the user to review.

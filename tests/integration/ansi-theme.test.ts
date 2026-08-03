@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/config/schema.ts";
-import { queryTerminalBackground } from "../../packages/pi-tai/src/ansi-theme/query.ts";
-import { registerAnsiTheme } from "../../packages/pi-tai/src/ansi-theme/register.ts";
+import { DEFAULT_CLIENT_PREFERENCES } from "../../packages/pi-tai/src/core/config/schema.ts";
+import { queryTerminalBackground } from "../../packages/pi-tai/src/terminal/ansi-theme/query.ts";
+import { registerAnsiTheme } from "../../packages/pi-tai/src/terminal/ansi-theme/register.ts";
 
 type Handler = (event: unknown, ctx: any) => unknown;
 
@@ -29,12 +29,15 @@ test("uses the active TUI query and removes its abort listener", async () => {
   const color = new Promise<{ r: number; g: number; b: number }>((resolve) => {
     resolveColor = resolve;
   });
-  const pending = queryTerminalBackground({
-    queryTerminalBackgroundColor(received) {
-      options = received;
-      return color;
+  const pending = queryTerminalBackground(
+    {
+      queryTerminalBackgroundColor(received) {
+        options = received;
+        return color;
+      },
     },
-  }, controller.signal);
+    controller.signal,
+  );
 
   assert.equal(getEventListeners(controller.signal, "abort").length, 1);
   resolveColor({ r: -4, g: 15.6, b: 999 });
@@ -46,9 +49,12 @@ test("uses the active TUI query and removes its abort listener", async () => {
 
 test("removes its abort listener when aborted", async () => {
   const controller = new AbortController();
-  const pending = queryTerminalBackground({
-    queryTerminalBackgroundColor: () => new Promise(() => {}),
-  }, controller.signal);
+  const pending = queryTerminalBackground(
+    {
+      queryTerminalBackgroundColor: () => new Promise(() => {}),
+    },
+    controller.signal,
+  );
 
   assert.equal(getEventListeners(controller.signal, "abort").length, 1);
   controller.abort();
@@ -162,11 +168,7 @@ function fakeContext(mode: string, themes: string[] = []) {
   };
 }
 
-async function emit(
-  handlers: Map<string, Handler[]>,
-  event: string,
-  ctx: any,
-): Promise<void> {
+async function emit(handlers: Map<string, Handler[]>, event: string, ctx: any): Promise<void> {
   for (const handler of handlers.get(event) ?? []) await handler({}, ctx);
 }
 

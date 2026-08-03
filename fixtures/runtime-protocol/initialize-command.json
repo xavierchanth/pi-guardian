@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "kind": "command",
   "id": "command-1",
   "method": "runtime.initialize",

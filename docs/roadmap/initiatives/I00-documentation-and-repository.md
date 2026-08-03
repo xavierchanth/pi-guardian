@@ -9,7 +9,7 @@ The canonical documentation tree, repository classification, package boundaries,
 
 ## Current gap
 
-The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Remaining work is repository engineering: classify proof-era Host layers, enforce package contents, add formatting and linting, and run the deterministic gate in CI.
+The indexed documentation tree is established, obsolete competing plans have been retired, and Real-JJ fixtures use isolated deterministic configuration. Biome enforces practical first-party TypeScript and JavaScript repository-wide. Rust formatting, clippy with warnings denied, and workspace tests are enforced by the local repository gate and CI. CI also runs package and isolated smoke checks, and the complete current component inventory is classified in [Repository shape](../../architecture/REPOSITORY.md). I00 remains in progress because broker/session-service ownership, persisted-versus-wire event coupling, proof-era Host layer merges, and the `packages/pi-tai` extraction remain bounded decisions assigned to I01/I02/I04/I10.
 
 ## Scope
 
@@ -24,13 +24,13 @@ The indexed documentation tree is established, obsolete competing plans have bee
 
 These are independent of every cutover and can proceed concurrently with any other initiative.
 
-### Add a formatter and linter, then reformat `concurrency/` and `jj/`
+### Formatter and linter adoption
 
-No TypeScript formatter or linter is configured. Add one deterministic toolchain and apply it to the dense concurrency and JJ modules before enforcing it repository-wide. Keep this mechanical change separate from behavior changes so review remains meaningful.
+Delivered with pinned Biome across first-party TypeScript and JavaScript in `packages`, `services`, `bins`, `apps`, `tests`, `scripts`, `evals`, and `fixtures`. The gate checks both formatting and linting, with Biome warnings denied. Dependencies, generated protocol and Tauri sources, and build/coverage outputs are explicitly excluded; generated artifacts remain governed by their generators.
 
-### Add CI running `just check`
+### CI gate
 
-There is no `.github/` directory. `npm run check` already chains `protocol:check → typecheck → test → test:rust`. For a project whose premise is agent-generated changes gated by deterministic checks, having the gate and not running it automatically is a conspicuous hole.
+Delivered in `.github/workflows/ci.yml`: explicit Rust formatting and clippy gates, the full repository gate (including Rust tests), package dry-run, and isolated extension smoke run with repository-pinned Node and Rust versions. npm's cache is keyed by the lockfile; generated and build output is not cached or tracked.
 
 ## Exit criteria
 
@@ -40,6 +40,6 @@ There is no `.github/` directory. `npm run check` already chains `protocol:check
 - Root README points to product, architecture, concurrency, and roadmap indexes.
 - Package dry-run contains only intended user/contributor documentation.
 - No obsolete or competing documentation ships as an active authority.
-- A formatter and linter are configured and enforced; `concurrency/` and `jj/` are reformatted.
-- CI runs `just check` on every change.
+- Formatters and linters are configured and enforced across practical first-party TypeScript and JavaScript, and the complete Rust workspace is rustfmt-clean and clippy-clean with warnings denied.
+- CI runs the equivalent of `just check` on every change, with explicit Rust formatting and clippy steps.
 - No active document describes behavior that does not exist in code.

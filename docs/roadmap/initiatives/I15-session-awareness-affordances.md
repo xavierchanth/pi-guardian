@@ -1,7 +1,9 @@
 # I15 — Session presence: notifications and cmux sidebar
 
-**Status:** In progress  
-**Depends on:** I13 checkpoint 3. Started after I13 checkpoint 4.
+**Status:** Complete  
+**Depends on:** —
+
+Live cmux acceptance is complete based on the user's confirmation that the integration is all right.
 
 ## Outcome
 
@@ -75,17 +77,10 @@ Ordinary Node tests and non-cmux processes never attempt to type-strip TypeScrip
 `node_modules`. The isolated Pi smoke test exercises the real package loader with cmux environment
 present.
 
-## Remaining acceptance
+## Live acceptance
 
-Run one interactive session in a real cmux workspace. Before testing, confirm that
-`command -v cmux` succeeds and `CMUX_WORKSPACE_ID` is non-empty. Then confirm that:
-
-1. status, progress, token totals, and final logs appear in the intended sidebar surface;
-2. a completed run raises exactly one cmux alert;
-3. `cmux.enabled: false` suppresses sidebar and cmux alerts while restoring native completion;
-4. upstream `PI_CMUX_*` overrides behave as documented by `pi-cmux`.
-
-No code change is expected unless live cmux behavior contradicts the packaged integration.
+The user tested the cmux integration live and confirmed that it is all right. No more specific live
+observations are claimed.
 
 ## Exit criteria
 

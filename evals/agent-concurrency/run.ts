@@ -45,29 +45,54 @@ async function main(): Promise<void> {
   await mkdir(reportDir, { recursive: true });
   await writeFile(join(reportDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(reportDir, "summary.md"), renderSummary(report.execution, summary, results));
-  console.log(`${summary.passed} passed, ${summary.failed} failed, ${summary.validated} validated; report: ${reportDir}`);
+  console.log(
+    `${summary.passed} passed, ${summary.failed} failed, ${summary.validated} validated; report: ${reportDir}`,
+  );
   if (summary.failed) process.exitCode = 1;
 }
 
-async function executeCase(spec: ConcurrencyEvalCase, distribution: string, live: boolean): Promise<CaseResult> {
+async function executeCase(
+  spec: ConcurrencyEvalCase,
+  distribution: string,
+  live: boolean,
+): Promise<CaseResult> {
   const started = performance.now();
   let fixture: RealJjFixture | undefined;
   try {
     if (spec.mode === "real-jj") {
       fixture = await RealJjFixture.create(`pi-tai-eval-${spec.id}-`);
       const snapshot = await fixture.snapshot();
-      if (snapshot.workspaces.length !== 1) throw new Error("Empty Real-JJ fixture did not have exactly one workspace.");
+      if (snapshot.workspaces.length !== 1)
+        throw new Error("Empty Real-JJ fixture did not have exactly one workspace.");
     }
     if (!live) {
-      return { caseId: spec.id, mode: spec.mode, status: "validated", durationMs: elapsed(started), checks: [] };
+      return {
+        caseId: spec.id,
+        mode: spec.mode,
+        status: "validated",
+        durationMs: elapsed(started),
+        checks: [],
+      };
     }
     const cwd = fixture?.repoPath ?? distribution;
     const invocation = await invokePi(cwd, distribution, spec.prompt);
     const trace = `${invocation.stdout}\n${invocation.stderr}`;
     const checks = [
-      ...spec.expectedTools.map((tool) => ({ kind: "expected_tool", value: tool, passed: trace.includes(tool) })),
-      ...spec.forbiddenTools.map((tool) => ({ kind: "forbidden_tool", value: tool, passed: !trace.includes(tool) })),
-      ...spec.expectedReportFields.map((field) => ({ kind: "report_field", value: field, passed: trace.toLowerCase().includes(field.toLowerCase()) })),
+      ...spec.expectedTools.map((tool) => ({
+        kind: "expected_tool",
+        value: tool,
+        passed: trace.includes(tool),
+      })),
+      ...spec.forbiddenTools.map((tool) => ({
+        kind: "forbidden_tool",
+        value: tool,
+        passed: !trace.includes(tool),
+      })),
+      ...spec.expectedReportFields.map((field) => ({
+        kind: "report_field",
+        value: field,
+        passed: trace.toLowerCase().includes(field.toLowerCase()),
+      })),
       { kind: "process_exit", value: "0", passed: invocation.code === 0 && !invocation.timedOut },
     ];
     return {
@@ -76,7 +101,9 @@ async function executeCase(spec: ConcurrencyEvalCase, distribution: string, live
       status: checks.every((check) => check.passed) ? "passed" : "failed",
       durationMs: elapsed(started),
       checks,
-      ...(invocation.code === 0 ? {} : { error: invocation.timedOut ? "Pi timed out." : `Pi exited ${invocation.code}.` }),
+      ...(invocation.code === 0
+        ? {}
+        : { error: invocation.timedOut ? "Pi timed out." : `Pi exited ${invocation.code}.` }),
     };
   } catch (error) {
     return {
@@ -85,7 +112,7 @@ async function executeCase(spec: ConcurrencyEvalCase, distribution: string, live
       status: "failed",
       durationMs: elapsed(started),
       checks: [],
-      error: error instanceof Error ? error.stack ?? error.message : String(error),
+      error: error instanceof Error ? (error.stack ?? error.message) : String(error),
     };
   } finally {
     await fixture?.dispose();
@@ -113,8 +140,12 @@ function invokePi(
       child.kill("SIGTERM");
       setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
     }, timeoutMs);
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
     child.once("error", (error) => {
       stderr += `${error.stack ?? error.message}\n`;
       finish(1);
@@ -134,11 +165,18 @@ function renderSummary(
   summary: { passed: number; failed: number; validated: number; total: number },
   results: CaseResult[],
 ): string {
-  const rows = results.map((item) => `| ${item.status.toUpperCase()} | ${item.caseId} | ${item.durationMs.toFixed(0)} ms |`).join("\n");
+  const rows = results
+    .map(
+      (item) =>
+        `| ${item.status.toUpperCase()} | ${item.caseId} | ${item.durationMs.toFixed(0)} ms |`,
+    )
+    .join("\n");
   return `# Agent concurrency benchmark\n\nExecution: ${execution}. Live-model results are advisory and non-gating.\n\n${summary.passed} passed, ${summary.failed} failed, ${summary.validated} validated, ${summary.total} total.\n\n| Status | Case | Duration |\n|---|---|---:|\n${rows}\n`;
 }
 
-function elapsed(started: number): number { return Math.max(0, performance.now() - started); }
+function elapsed(started: number): number {
+  return Math.max(0, performance.now() - started);
+}
 
 main().catch((error) => {
   console.error(error);

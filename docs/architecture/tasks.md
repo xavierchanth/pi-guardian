@@ -1,0 +1,9 @@
+# Tasks authority and dashboard
+
+MG-3 adds repository-scoped Host task authority by introducing schema v7; it does not introduce a schema version beyond v7. SQLite owns task metadata, state, attribution, append-only notes/audits, operation receipts, and immutable revision pointers. Private read-only Markdown files beneath `tasks/bodies/<repo>/<task>/<revision>.md` own revision bytes; their recorded SHA-256 digest is verified whenever imported.
+
+The shared `/tasks`, `/subagents`, and `/workspaces` shell now accepts a real Tasks adapter. Current and archived tabs query repository rows, preserve identity-based selection, and remain bounded by the common terminal row budget. Ratified task keys are `n` (private Markdown editor creation), `r` (ready), `d` (done where the state machine permits it), `Enter` (editor), `i` (metadata), `p` (fixed-revision import), `e` (archive/restore), `s` (related subagent), and `a` (actions). Creation is human-only through `n`; the agent surface remains the three ratified task tools. Subagent jump/action-menu presentation is deferred beyond MG-3 and is reported truthfully rather than mutating authority.
+
+A fixed-revision import starts from the selected task row and prompts only for an immutable revision. It retrieves the stored SHA-256 digest internally, selects that exact tuple, verifies the private bytes and path, rechecks and inserts a delivery receipt in one immediate transaction, then calls production `sendMessage` as `nextTurn` with no triggered turn, and finally appends a non-body session trace receipt. It never resolves the current pointer or substitutes latest. A mismatch fails before delivery.
+
+New-task composition opens the private Markdown editor without inventing a title. A missing title falls back to the first non-empty body line (or `Untitled task` only when the body has no usable line), so the UI never silently stores `New task`.

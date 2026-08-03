@@ -8,9 +8,9 @@ An initiative is a bounded product or architecture outcome. It may contain many 
 
 ## Current focus
 
-[I13](initiatives/I13-host-configuration-authority.md) is the active initiative and the forcing function for I01. Checkpoints 1–7 are complete: Host-managed sessions now resolve, persist, replay, and require pinned policy. **Checkpoint 8 (revision-guarded policy mutation) is next.** Host-owned project trust and Guardian machine configuration remain separate security-sensitive checkpoints. I13 also reshapes the scope of I01, I02, I03, I04, and I10 — read it before planning against those. The start gates for I14, I15, and I16 are satisfied.
+I13 is retired and is not an active initiative or dependency gate. Its checkpoints 1–7 remain delivered architecture: Host-managed sessions resolve, persist, replay, and require pinned policy. Its undelivered checkpoints 8 (policy mutation), 12 (Guardian configuration), and 13 (Host-owned trust/agent narrowing) are explicitly dropped. I15 is accepted complete after the user's live cmux testing; I16 `/btw` is complete.
 
-The concurrency model delivered across I06–I09 and I14 has since been replaced. Named agent roles, durable work orders, and the review, integration, and recovery tool families no longer exist; what remains is a nine-tool subagent surface in which a subagent is described by its objective and by whether it works in its own JJ workspace or directly in the user's working copy. Those initiatives are kept as a record of what was built and each carries a note saying so; [Subagents and workspaces](../concurrency/README.md) is authoritative for the current design.
+The concurrency model delivered across I06–I09 and I14 has since been replaced. Named agent roles, durable work orders, and the review, integration, and recovery tool families no longer exist; what remains is a twelve-tool subagent surface in which a subagent is described by its objective and by whether it works in its own JJ workspace or directly in the user's working copy. Those initiatives are kept as a record of what was built and each carries a note saying so; [Subagents and workspaces](../concurrency/README.md) is authoritative for the current design.
 
 ## Status legend
 
@@ -36,12 +36,13 @@ The concurrency model delivered across I06–I09 and I14 has since been replaced
 | I10 | [Desktop and ACP clients](initiatives/I10-desktop-acp.md) | In progress | I04 | Desktop manages the Host; Zed, T3 Code, and `pi-tai-client` consume the ACP surface |
 | I11 | [Remote and multi-Host access](initiatives/I11-remote-multihost.md) | Exploratory | I04, I10 | Authenticated remote clients with one home Host per session |
 | I12 | [Stateful machine capabilities](initiatives/I12-machine-capabilities.md) | Exploratory | I02, I03, I04 | Browser/computer/image/cmux capabilities governed and persisted uniformly |
-| I13 | [Host configuration authority](initiatives/I13-host-configuration-authority.md) | In progress | I02, I03 | Policy is resolved once, pinned into the session aggregate, provenanced, and privilege-enforced |
+| I13 | [Host configuration authority](initiatives/I13-host-configuration-authority.md) | Retired | — | Policy is resolved once, pinned into the session aggregate, provenanced, and privilege-enforced |
 | I14 | [The source workspace belongs to the user](initiatives/I14-user-owned-source-workspace.md) | Complete | I06, I08 | Source `@` is the user's; operations resolve `@`/`@-` when they execute; shared targets sit immediately before current `@` |
-| I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | In progress | I13 | Notifications identify session and outcome; cmux sidebar carries live session status |
-| I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Planned | I13 | A question answered with full session context that leaves no trace in it |
+| I15 | [Session presence: notifications and cmux sidebar](initiatives/I15-session-awareness-affordances.md) | Complete | — | Notifications identify session and outcome; cmux sidebar carries live session status |
+| I16 | [`/btw` sidebar query](initiatives/I16-sidebar-query.md) | Complete | — | A question answered from bounded coherent session context that leaves no trace in it |
 | I17 | [Researcher capability subagent](initiatives/I17-capability-subagents.md) | Complete | — | External research moves behind a specialized Codex subagent |
-| I18 | [Context transfer with `/context-export` and `/context-import`](initiatives/I18-context-transfer.md) | Complete | I00 | Explicit context commands carry a session's goal, decisions, state, and next step to a new session while upstream built-ins remain untouched |
+| I18 | [Context transfer](initiatives/I18-context-transfer.md) | Retired | — | Removed by explicit user decision after the post-subagent commands went unused; historical private artifacts are left in place |
+| I19 | [Configuration ownership and feature policy](initiatives/I19-configuration-ownership.md) | Planned | I01, I02, I03 | Terminal preferences and Host-owned session/machine policy have explicit, non-widening ownership |
 
 ## Dependency graph
 
@@ -60,12 +61,13 @@ graph TD
   I10[I10 Desktop and ACP]
   I11[I11 Remote/multi-Host]
   I12[I12 Stateful capabilities]
-  I13[I13 Host configuration authority]
-  I14[I14 User-owned source workspace]
-  I15[I15 Session presence]
-  I16[I16 /btw sidebar query]
-  I17[I17 Capability subagents]
-  I18[I18 Context transfer]
+  I13[I13 Host configuration authority — retired]
+  I14[I14 User-owned source workspace — complete]
+  I15[I15 Session presence — complete]
+  I16[I16 /btw sidebar query — complete]
+  I17[I17 Capability subagents — complete]
+  I18[I18 Context transfer — retired]
+  I19[I19 Configuration ownership]
 
   I00 --> I01
   I00 --> I02
@@ -73,13 +75,10 @@ graph TD
   I02 --> I03
   I02 --> I04
   I03 --> I04
-  I02 --> I13
-  I03 --> I13
-  I13 --> I01
-  I13 --> I04
-  I13 --> I15
-  I13 --> I16
   I00 --> I18
+  I01 --> I19
+  I02 --> I19
+  I03 --> I19
 
   I05 --> I06
   I05 --> I07
@@ -105,13 +104,14 @@ Concurrency/JJ and Host/core work can proceed in parallel. Their convergence poi
 | Lane | Sequence |
 |---|---|
 | Documentation/repository | I00 → I01 |
-| Host authority | I02 → I03 → I13 → I04 |
+| Host authority | I02 → I03 → I04 |
 | Concurrency/JJ | I05 → I06 → I07 → I08 → I09 → I14 |
 | Clients | I04 → I10 → I11 |
 | Machine capabilities | {I02, I03, I04} → I12 |
-| Session affordances | I13 → {I15, I16}; I18 runs independently |
+| Configuration ownership | {I01, I02, I03} → I19 |
+| Session affordances | I15 and I16 complete; I18 runs independently |
 
-I13 is the forcing function for I01: core extraction stalled because nothing required it, and configuration is the one place Pi's ownership is load-bearing rather than incidental.
+I13 is retained only as a record of delivered checkpoints 1–7 and is not a forcing function.
 
 ## Migration rules
 

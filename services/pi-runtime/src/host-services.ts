@@ -8,18 +8,31 @@ export interface HostServicePort {
 
 export class RuntimeHostServices implements HostServicePort {
   private readonly emit: (event: RuntimeEventInput) => void;
-  private readonly pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-  constructor(emit: (event: RuntimeEventInput) => void) { this.emit = emit; }
+  private readonly pending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+  constructor(emit: (event: RuntimeEventInput) => void) {
+    this.emit = emit;
+  }
 
   request<T = unknown>(method: string, params: unknown): Promise<T> {
-    if (!/^[a-z][a-z0-9_.-]{0,127}$/.test(method)) return Promise.reject(new Error(`Invalid Host service method: ${method}`));
+    if (!/^[a-z][a-z0-9_.-]{0,127}$/.test(method))
+      return Promise.reject(new Error(`Invalid Host service method: ${method}`));
     const requestId = `host-service-${randomUUID()}`;
-    const promise = new Promise<unknown>((resolve, reject) => this.pending.set(requestId, { resolve, reject }));
+    const promise = new Promise<unknown>((resolve, reject) =>
+      this.pending.set(requestId, { resolve, reject }),
+    );
     this.emit({ event: "host.service_request", data: { requestId, method, params } });
     return promise as Promise<T>;
   }
 
-  resolve(input: { requestId: string; ok: boolean; result?: unknown; error?: RuntimeProtocolError }): void {
+  resolve(input: {
+    requestId: string;
+    ok: boolean;
+    result?: unknown;
+    error?: RuntimeProtocolError;
+  }): void {
     const pending = this.pending.get(input.requestId);
     if (!pending) throw new Error(`Unknown Host service request: ${input.requestId}`);
     this.pending.delete(input.requestId);

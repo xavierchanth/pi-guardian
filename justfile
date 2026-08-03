@@ -24,13 +24,37 @@ alias pi := pi-tai
 setup:
     npm ci
 
-# Run TypeScript, Node, and Rust checks.
+# Apply the repository's deterministic TypeScript formatting.
+format:
+    npm run format
+
+# Check deterministic formatting without changing files.
+format-check:
+    npm run format:check
+
+# Run the repository TypeScript linter.
+lint:
+    npm run lint
+
+# Run formatting, linting, TypeScript, Node, and Rust checks.
 check:
     npm run check
 
-# Run the portable Rust workspace tests.
+# Check Rust formatting and lint all workspace targets with warnings denied, then run tests.
 rust-check:
-    cargo test --workspace
+    npm run rust:check
+
+# Apply deterministic Rust formatting across the workspace.
+rust-format:
+    cargo fmt --all
+
+# Check deterministic Rust formatting without changing files.
+rust-format-check:
+    cargo fmt --all -- --check
+
+# Lint all Rust workspace targets with warnings denied.
+rust-clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Regenerate Rust-first TypeScript runtime protocol DTOs.
 protocol-generate:

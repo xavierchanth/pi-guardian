@@ -7,7 +7,9 @@ import type { RuntimePort } from "./runtime-port.ts";
 import { RuntimeWorker } from "./worker.ts";
 
 export interface WorkerMainOptions {
-  output: Writable | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown };
+  output:
+    | Writable
+    | { write(chunk: string): boolean; once(event: "drain", listener: () => void): unknown };
   input?: NodeJS.ReadableStream;
   port?: RuntimePort;
   diagnostics?: ReturnType<typeof createDiagnosticSink>;
@@ -19,8 +21,11 @@ export async function runWorker(options: WorkerMainOptions): Promise<void> {
     console.log("stdout contamination probe");
   }
   const writer = new JsonlWriter(options.output);
-  const port = options.port
-    ?? (process.env.PI_TAI_RUNTIME_FAKE_PORT === "1" ? new FakeRuntimePort() : new PiSdkRuntimePort(diagnostics));
+  const port =
+    options.port ??
+    (process.env.PI_TAI_RUNTIME_FAKE_PORT === "1"
+      ? new FakeRuntimePort()
+      : new PiSdkRuntimePort(diagnostics));
   const worker = new RuntimeWorker(port, writer, diagnostics);
   const input = options.input ?? process.stdin;
   let stopping = false;
@@ -32,7 +37,13 @@ export async function runWorker(options: WorkerMainOptions): Promise<void> {
   });
   const reader = new JsonlReader({
     isImmediate(value) {
-      return Boolean(value && typeof value === "object" && !Array.isArray(value) && (value as any).kind === "command" && (value as any).method === "host.service_response");
+      return Boolean(
+        value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          (value as any).kind === "command" &&
+          (value as any).method === "host.service_response",
+      );
     },
     async onValue(value) {
       await worker.handleValue(value);

@@ -91,21 +91,10 @@ export type QueueData = {
 
 export type ResponseFrameKind = "response";
 
-export type RuntimeCapabilities = RuntimeCapabilities_Serialize | RuntimeCapabilities_Deserialize;
-
-export type RuntimeCapabilities_Deserialize = {
+export type RuntimeCapabilities = {
 	methods: string[],
 	tools: string[],
 	commands: string[],
-	sessionCapabilities: SessionCapabilityState_Deserialize[],
-	extensionErrors: string[],
-};
-
-export type RuntimeCapabilities_Serialize = {
-	methods: string[],
-	tools: string[],
-	commands: string[],
-	sessionCapabilities: SessionCapabilityState_Serialize[],
 	extensionErrors: string[],
 };
 
@@ -163,14 +152,14 @@ export type RuntimeInitializeResult_Deserialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities_Deserialize,
+	capabilities: RuntimeCapabilities,
 };
 
 export type RuntimeInitializeResult_Serialize = {
 	protocolVersion: number,
 	workerId: string,
 	runtimeGeneration: number,
-	capabilities: RuntimeCapabilities_Serialize,
+	capabilities: RuntimeCapabilities,
 };
 
 export type RuntimeProtocolError = RuntimeProtocolError_Serialize | RuntimeProtocolError_Deserialize;
@@ -213,24 +202,6 @@ export type SessionCancelParams = {
 	turnId: string,
 };
 
-export type SessionCapabilityState = SessionCapabilityState_Serialize | SessionCapabilityState_Deserialize;
-
-export type SessionCapabilityState_Deserialize = {
-	id: string,
-	available: boolean,
-	serviceEnabled: boolean,
-	toolsExposed: boolean,
-	reason: string | null,
-};
-
-export type SessionCapabilityState_Serialize = {
-	id: string,
-	available: boolean,
-	serviceEnabled: boolean,
-	toolsExposed: boolean,
-	reason?: string | null,
-};
-
 export type SessionCreateParams = SessionCreateParams_Serialize | SessionCreateParams_Deserialize;
 
 export type SessionCreateParams_Deserialize = {
@@ -239,7 +210,7 @@ export type SessionCreateParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Deserialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
@@ -250,7 +221,7 @@ export type SessionCreateParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Serialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
 };
@@ -269,7 +240,7 @@ export type SessionOpenParams_Deserialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Deserialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Deserialize,
 	faux?: boolean,
 };
@@ -280,21 +251,12 @@ export type SessionOpenParams_Serialize = {
 	runtimeGeneration?: number | null,
 	agentDir: string,
 	sessionDir: string,
-	sessionPolicy: SessionPolicy_Serialize,
+	sessionPolicy: SessionPolicy,
 	policyProvenance: ConfigProvenance_Serialize,
 	faux: boolean,
 };
 
-export type SessionPolicy = SessionPolicy_Serialize | SessionPolicy_Deserialize;
-
-export type SessionPolicy_Deserialize = {
-	sessionTitle: SessionTitleConfig_Deserialize,
-	compaction: CompactionConfig,
-	modelProfiles: ModelProfile[],
-};
-
-export type SessionPolicy_Serialize = {
-	sessionTitle: SessionTitleConfig_Serialize,
+export type SessionPolicy = {
 	compaction: CompactionConfig,
 	modelProfiles: ModelProfile[],
 };
@@ -309,11 +271,6 @@ export type SessionRelocateWorkspaceParams = {
 	name: string,
 };
 
-export type SessionSetCapabilityParams = {
-	capabilityId: string,
-	enabled: boolean,
-};
-
 export type SessionSetModelParams = {
 	provider: string,
 	model: string,
@@ -325,24 +282,6 @@ export type SessionSetThinkingParams = {
 
 export type SessionTextParams = {
 	text: string,
-};
-
-export type SessionTitleConfig = SessionTitleConfig_Serialize | SessionTitleConfig_Deserialize;
-
-export type SessionTitleConfig_Deserialize = {
-	provider?: string | null,
-	model?: string | null,
-	effort: TitleEffort,
-	maxWords: number,
-	fallback: string,
-};
-
-export type SessionTitleConfig_Serialize = {
-	provider?: string | null,
-	model?: string | null,
-	effort: TitleEffort,
-	maxWords: number,
-	fallback: string,
 };
 
 export type SessionTitleData = SessionTitleData_Serialize | SessionTitleData_Deserialize;
@@ -366,8 +305,6 @@ export type ThinkingInfo = {
 };
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export type TitleEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ToolLifecycleData = ToolLifecycleData_Serialize | ToolLifecycleData_Deserialize;
 

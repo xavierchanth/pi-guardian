@@ -30,22 +30,23 @@ test("root manifest is a discoverable Pi package", () => {
 
 test("source uses the current Pi distribution imports", () => {
   const files = walkSource(join(root, "packages"));
-  const legacy = files.filter((file) =>
-    readFileSync(file, "utf8").includes("@mariozechner/"),
-  );
+  const legacy = files.filter((file) => readFileSync(file, "utf8").includes("@mariozechner/"));
   assert.deepEqual(legacy, []);
 });
 
-test("context-transfer domain and storage remain Pi-independent", () => {
-  for (const file of ["domain.ts", "storage.ts"]) {
-    const source = readFileSync(join(root, "packages/pi-tai/src/context-transfer", file), "utf8");
-    assert.doesNotMatch(source, /@earendil-works\//, file);
-  }
+test("the legacy session capability controller is absent from the package", () => {
+  assert.equal(existsSync(join(root, "packages/pi-tai/src/capabilities")), false);
+  const source = walkSource(join(root, "packages/pi-tai"))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  assert.doesNotMatch(source, /SessionCapabilityController|sessionCapabilities|set_capability/);
+  assert.doesNotMatch(source, /registerCommand\(["']capabilities["']/);
 });
 
 test("Pi-Tai packages a global instruction layer and the DPIC workflow", () => {
   const instructions = readFileSync(join(root, "packages/pi-tai/instructions/system.md"), "utf8");
   assert.ok(instructions.trim().length > 0);
+  assert.match(instructions, /Do not reiterate subagent output the user can already see/);
   // Roles are retired: a subagent is described by its objective and isolation,
   // so there are no agent definition files to ship.
   assert.equal(existsSync(join(root, "packages/pi-tai/agents/worker.md")), false);
@@ -76,38 +77,65 @@ test("checkpoint prompt accepts additional instructions", () => {
   assert.match(prompt, /without weakening the safety requirements above/);
 });
 
-test("the subagent tool surface is the nine-tool set", () => {
-  const source = readFileSync(join(root, "packages/pi-tai/src/agents/register.ts"), "utf8");
-  const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)].map((match) => match[1]).sort();
+test("the production agent tool surface is the twelve-tool set", () => {
+  const source = readFileSync(join(root, "packages/pi-tai/src/core/subagents/register.ts"), "utf8");
+  const registered = [...source.matchAll(/name: "([a-z_]+)",\n\s+label:/g)]
+    .map((match) => match[1])
+    .sort();
   assert.deepEqual(registered, [
-    "subagent_cancel", "subagent_check", "subagent_list", "subagent_send", "subagent_spawn",
-    "subagent_wait", "workspace_discard", "workspace_merge", "workspace_status"
+    "list_tasks",
+    "read_task",
+    "subagent_cancel",
+    "subagent_check",
+    "subagent_list",
+    "subagent_send",
+    "subagent_spawn",
+    "subagent_wait",
+    "update_task",
+    "workspace_discard",
+    "workspace_merge",
+    "workspace_status",
   ]);
-  assert.equal(existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")), false,
-    "the retired 47-tool registrar is gone");
+  assert.equal(
+    existsSync(join(root, "packages/pi-tai/src/subagents/register.ts")),
+    false,
+    "the retired 47-tool registrar is gone",
+  );
 });
 
 test("the packaged capability catalog and instruction assets agree", () => {
-  const catalog = JSON.parse(readFileSync(
-    join(root, "packages/pi-tai/src/agents/capabilities.json"),
-    "utf8",
-  )) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
+  const catalog = JSON.parse(
+    readFileSync(join(root, "packages/pi-tai/src/core/subagents/capabilities.json"), "utf8"),
+  ) as { version?: number; capabilities?: Array<{ name?: string; instructions?: string }> };
   assert.equal(catalog.version, 1);
-  assert.deepEqual(catalog.capabilities?.map((entry) => entry.name), ["researcher"]);
+  assert.deepEqual(
+    catalog.capabilities?.map((entry) => entry.name),
+    ["researcher"],
+  );
   for (const capability of catalog.capabilities ?? []) {
     assert.ok(capability.instructions, `${capability.name} names an instruction asset`);
-    assert.ok(existsSync(join(root, "packages/pi-tai/src/agents/capabilities", capability.instructions!)));
+    assert.ok(
+      existsSync(
+        join(root, "packages/pi-tai/src/core/subagents/capabilities", capability.instructions!),
+      ),
+    );
   }
 });
 
 test("the packaged model catalog declares every supported alias", () => {
-  const catalog = JSON.parse(readFileSync(
-    join(root, "packages/pi-tai/src/agents/models.json"),
-    "utf8",
-  )) as { version?: number; aliases?: Array<{ name?: string }> };
+  const catalog = JSON.parse(
+    readFileSync(join(root, "packages/pi-tai/src/core/subagents/models.json"), "utf8"),
+  ) as { version?: number; aliases?: Array<{ name?: string }> };
   assert.equal(catalog.version, 1);
   assert.deepEqual(catalog.aliases?.map((entry) => entry.name).sort(), [
-    "fable", "glm", "kimi", "luna", "opus", "sol", "sonnet", "terra",
+    "fable",
+    "glm",
+    "kimi",
+    "luna",
+    "opus",
+    "sol",
+    "sonnet",
+    "terra",
   ]);
 });
 
@@ -182,7 +210,7 @@ test("desktop manager uses Tauri 2, Vite, React Compiler, and Tailwind", () => {
 
 test("package ships standalone Guardian and required support files", () => {
   assert.equal(manifest.dependencies?.["pi-approval-guardian"], undefined);
-  assert.ok(existsSync(join(root, "packages/pi-tai/src/guardian/reviewer.ts")));
+  assert.ok(existsSync(join(root, "packages/pi-tai/src/core/guardian/reviewer.ts")));
   assert.ok(manifest.files?.includes("justfile"));
   assert.ok(existsSync(join(root, "justfile")));
   assert.doesNotMatch(readFileSync(join(root, "README.md"), "utf8"), /TEMPORARY/);
@@ -198,7 +226,14 @@ test("package composes only the reporting-only pi-cmux modules", () => {
     .map((match) => match[1])
     .sort();
   assert.deepEqual(imports, ["cmux-notify.ts", "cmux-sidebar.ts", "i18n.ts"]);
-  for (const excluded of ["index", "cmux-review", "cmux-continue", "cmux-split", "cmux-open", "cmux-zoxide"]) {
+  for (const excluded of [
+    "index",
+    "cmux-review",
+    "cmux-continue",
+    "cmux-split",
+    "cmux-open",
+    "cmux-zoxide",
+  ]) {
     assert.doesNotMatch(source, new RegExp(`pi-cmux/extensions/${excluded}(?:\\.ts)?["']`));
   }
 });

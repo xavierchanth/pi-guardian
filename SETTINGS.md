@@ -15,25 +15,13 @@ Configuration has three ownership planes:
 
 | Plane | Fields | Authority |
 |---|---|---|
-| Session policy | `sessionTitle`, `compaction`, `modelProfiles` | Host-owned and pinned for Host-managed sessions |
+| Session policy | `compaction`, `modelProfiles` | Host-owned and pinned for Host-managed sessions |
 | Client preferences | `ansiTheme`, `notifications`, `cmux` | Local to each client |
 | Host machine configuration | Reserved for Guardian reviewer model and timeout | Not yet configurable |
 
-Model-selecting fields are privileged. Project configuration cannot set any `sessionTitle` field or `modelProfiles`; those values may come only from defaults or user configuration. Project configuration may set `compaction`, `ansiTheme`, `notifications`, and `cmux` after project trust is established.
+Model-selecting fields are privileged. Project configuration cannot set `modelProfiles`; those values may come only from defaults or user configuration. Project configuration may set `compaction`, `ansiTheme`, `notifications`, and `cmux` after project trust is established.
 
 ## Session policy
-
-### `sessionTitle`
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `provider` | non-empty string | unset | Provider used only for title generation. |
-| `model` | non-empty string | unset | Model used only for title generation. |
-| `effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` | `minimal` | Independent title-model reasoning effort. |
-| `maxWords` | integer 1–20 | `6` | Maximum normalized title length. |
-| `fallback` | `heuristic` | `heuristic` | Local fallback when provider/model is absent or fails. |
-
-Both `provider` and `model` must be present before Pi-Tai makes a title-model request. Pi-Tai never substitutes the active work model. Every field in this object is privileged and is ignored in project configuration.
 
 ### `compaction`
 
@@ -118,13 +106,15 @@ If cmux presentation does not appear, verify `command -v cmux`, `CMUX_WORKSPACE_
 
 ```json
 {
-  "sessionTitle": {
-    "provider": "provider-id",
-    "model": "luna-model-id",
-    "effort": "minimal",
-    "maxWords": 6,
-    "fallback": "heuristic"
+  "compaction": {
+    "enabled": true,
+    "thresholdPercent": 90
   },
+  "modelProfiles": [
+    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
+    { "name": "sol-medium", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "medium" },
+    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" }
+  ],
   "ansiTheme": {
     "darkTheme": "ansi-dark",
     "lightTheme": "ansi-light",
@@ -136,16 +126,7 @@ If cmux presentation does not appear, verify `command -v cmux`, `CMUX_WORKSPACE_
   },
   "cmux": {
     "enabled": true
-  },
-  "compaction": {
-    "enabled": true,
-    "thresholdPercent": 90
-  },
-  "modelProfiles": [
-    { "name": "sol-low", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "low" },
-    { "name": "sol-medium", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "medium" },
-    { "name": "sol-high", "provider": "openai-codex", "model": "gpt-5.6-sol", "effort": "high" }
-  ]
+  }
 }
 ```
 
@@ -157,6 +138,3 @@ Low- and medium-risk related work may proceed. High- and critical-risk actions n
 
 Built-in file tools enforce canonical workspace boundaries. External research is delegated through the `researcher` subagent capability; root sessions have no direct web tools.
 
-## Context transfer
-
-Context transfer v1 has no configuration. Use `/context-export [notes…]` and `/context-import <ID>`; artifacts are retained locally for 30 days, with at most 50 kept.
